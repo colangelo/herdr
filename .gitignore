@@ -15,3 +15,7 @@ __pycache__/
 /.pi/todos
 /.pi/issues
 /.pi/cache
+
+.env
+.env.local
+.env.*.local
