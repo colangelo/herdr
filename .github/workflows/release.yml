@@ -324,6 +324,41 @@ jobs:
             fi
           done
 
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      FORMULA_TEMPLATE: Y2xhc3MgSGVyZHIgPCBGb3JtdWxhCiAgZGVzYyAiVGVybWluYWwgd29ya3NwYWNlIG1hbmFnZXIgZm9yIEFJIGNvZGluZyBhZ2VudHMiCiAgaG9tZXBhZ2UgImh0dHBzOi8vZ2l0aHViLmNvbS9jb2xhbmdlbG8vaGVyZHIiCiAgdmVyc2lvbiAiVkVSU0lPTl9QTEFDRUhPTERFUiIKICBsaWNlbnNlICJBR1BMLTMuMC1vci1sYXRlciIKCiAgb25fbWFjb3MgZG8KICAgIGlmIEhhcmR3YXJlOjpDUFUuYXJtPwogICAgICB1cmwgImh0dHBzOi8vZ2l0aHViLmNvbS9jb2xhbmdlbG8vaGVyZHIvcmVsZWFzZXMvZG93bmxvYWQvdiN7dmVyc2lvbn0vaGVyZHItbWFjb3MtYWFyY2g2NCIKICAgICAgc2hhMjU2ICJEQVJXSU5fQVJNNjRfUExBQ0VIT0xERVIiCiAgICBlbHNlCiAgICAgIHVybCAiaHR0cHM6Ly9naXRodWIuY29tL2NvbGFuZ2Vsby9oZXJkci9yZWxlYXNlcy9kb3dubG9hZC92I3t2ZXJzaW9ufS9oZXJkci1tYWNvcy14ODZfNjQiCiAgICAgIHNoYTI1NiAiREFSV0lOX0FNRDY0X1BMQUNFSE9MREVSIgogICAgZW5kCiAgZW5kCgogIG9uX2xpbnV4IGRvCiAgICBpZiBIYXJkd2FyZTo6Q1BVLmFybT8KICAgICAgdXJsICJodHRwczovL2dpdGh1Yi5jb20vY29sYW5nZWxvL2hlcmRyL3JlbGVhc2VzL2Rvd25sb2FkL3Yje3ZlcnNpb259L2hlcmRyLWxpbnV4LWFhcmNoNjQiCiAgICAgIHNoYTI1NiAiTElOVVhfQVJNNjRfUExBQ0VIT0xERVIiCiAgICBlbHNlCiAgICAgIHVybCAiaHR0cHM6Ly9naXRodWIuY29tL2NvbGFuZ2Vsby9oZXJkci9yZWxlYXNlcy9kb3dubG9hZC92I3t2ZXJzaW9ufS9oZXJkci1saW51eC14ODZfNjQiCiAgICAgIHNoYTI1NiAiTElOVVhfQU1ENjRfUExBQ0VIT0xERVIiCiAgICBlbmQKICBlbmQKCiAgZGVmIGluc3RhbGwKICAgIGJpbmFyeSA9IERpclsiaGVyZHItKiJdLmZpcnN0IHx8ICJoZXJkciIKICAgIGJpbi5pbnN0YWxsIGJpbmFyeSA9PiAiaGVyZHIiCiAgZW5kCgogIHRlc3QgZG8KICAgIGFzc2VydF9tYXRjaCAiaGVyZHIgI3t2ZXJzaW9ufSIsIHNoZWxsX291dHB1dCgiI3tiaW59L2hlcmRyIC0tdmVyc2lvbiIpCiAgZW5kCmVuZAo=
+    steps:
+      - name: Calculate checksums
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BASE_URL="https://github.com/colangelo/herdr/releases/download/${GITHUB_REF_NAME}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          curl -fsSL "${BASE_URL}/herdr-macos-aarch64" | sha256sum | cut -d' ' -f1 > darwin-arm64.sha
+          curl -fsSL "${BASE_URL}/herdr-macos-x86_64"  | sha256sum | cut -d' ' -f1 > darwin-amd64.sha
+          curl -fsSL "${BASE_URL}/herdr-linux-aarch64" | sha256sum | cut -d' ' -f1 > linux-arm64.sha
+          curl -fsSL "${BASE_URL}/herdr-linux-x86_64"  | sha256sum | cut -d' ' -f1 > linux-amd64.sha
+
+      - name: Update homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone https://x-access-token:${GH_TOKEN}@github.com/colangelo/homebrew-tap.git
+          cd homebrew-tap
+          echo "$FORMULA_TEMPLATE" | base64 -d > Formula/herdr.rb
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" Formula/herdr.rb
+          sed -i "s/DARWIN_ARM64_PLACEHOLDER/$(cat ../darwin-arm64.sha)/" Formula/herdr.rb
+          sed -i "s/DARWIN_AMD64_PLACEHOLDER/$(cat ../darwin-amd64.sha)/" Formula/herdr.rb
+          sed -i "s/LINUX_ARM64_PLACEHOLDER/$(cat ../linux-arm64.sha)/" Formula/herdr.rb
+          sed -i "s/LINUX_AMD64_PLACEHOLDER/$(cat ../linux-amd64.sha)/" Formula/herdr.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/herdr.rb
+          git diff --staged --quiet || git commit -m "Update herdr to v${VERSION}"
+          git push
+
   update-latest-json:
     needs: release
     runs-on: ubuntu-latest
