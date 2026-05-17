@@ -17,3 +17,7 @@ __pycache__/
 /.pi/cache
 /result
 /result-*
+
+.env
+.env.local
+.env.*.local
