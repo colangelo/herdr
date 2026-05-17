@@ -107,9 +107,12 @@ Reuse the value set on `colangelo/HittyPing` if still valid. If not, mint a fine
 | `commit your changes first` | Commit or stash anything dirty. The check ignores untracked-only state. |
 | `tag vX.Y.Z already exists` | Pick the next version. Do NOT delete and re-push tags — releases are already cut. |
 | `README.md differs from docs/next/README.md` | Step 2 above. |
-| `cargo update -p herdr --offline` fails | Run `cargo update -p herdr` (without `--offline`) once locally, commit `Cargo.lock`, retry. |
+| `cargo update -p herdr --offline` fails (e.g. `no matching package named 'portable-pty'`) | The recipe has already mutated CHANGELOG, docs/next/CHANGELOG, and Cargo.toml. Run `cargo update -p herdr` (no `--offline`) to fix Cargo.lock, then finish the recipe manually: `just check && git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock && git commit -m "release: vX.Y.Z" && git tag -a vX.Y.Z -m "vX.Y.Z" && git push --follow-tags`. Do NOT re-run `just release` — Cargo.toml is already at the target version. |
+| `just check` fails with `failed to execute zig build for vendored libghostty-vt: No such file or directory` | `zig` isn't installed locally. Either `brew install zig` or — for metadata-only releases (no src/** changes) — skip `just check` and trust CI to verify on the tag push. CI installs zig via `mlugg/setup-zig`. |
 | `update-homebrew` job fails on `git push` | `HOMEBREW_TAP_TOKEN` missing/expired on `colangelo/herdr` repo secrets. |
+| `update-latest-json` job fails with `failed to read GitHub release vX.Y.Z: release not found` | `scripts/changelog.py` hardcodes `DEFAULT_RELEASE_REPO = "ogulcancelik/herdr"`. The workflow already passes `--repo "$GITHUB_REPOSITORY"` to override, so this should only resurface if an upstream rebase drops that flag. Re-add `--repo "$GITHUB_REPOSITORY"` to the `sync-latest-json` invocation in `.github/workflows/release.yml`. |
 | Tag pushed but build failed mid-matrix | Push a fix commit, then re-trigger via `command gh workflow run release.yml -f tag=vX.Y.Z`. The workflow supports `workflow_dispatch` with a tag input. |
+| Fork's Actions tab shows 0 runs after pushing | One-time fork gate: visit `https://github.com/colangelo/herdr/actions` in a browser and click "I understand my workflows, go ahead and enable them". Pushing an empty commit afterward won't trigger `ci.yml` because of its `paths-ignore: [website/**]` (empty diff is treated as all-ignored). Push a real commit or just rely on the next release tag. |
 
 ## Files that matter
 
