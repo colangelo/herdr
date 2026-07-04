@@ -169,3 +169,34 @@ release version:
 # Print default config
 default-config:
     cargo run --release --locked -- --default-config
+
+# Fork: release an -ac suffixed build on the upstream base version (usage: just release-ac 0.7.1-ac or 0.7.1-ac.2).
+# Cargo.toml keeps the base X.Y.Z (Version::parse requires it); binaries get the
+# -ac suffix via HERDR_BUILD_CHANNEL=ac in the release workflow.
+release-ac version:
+    @printf '%s\n' '{{version}}' | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-ac(\.[0-9]+)?$' || { \
+        echo "error: version must look like 0.7.1-ac or 0.7.1-ac.2"; \
+        exit 1; \
+    }
+    @if [ -n "$(git status --porcelain)" ]; then \
+        echo "error: commit your changes first"; \
+        exit 1; \
+    fi
+    @git fetch origin master --tags
+    @if git rev-parse "v{{version}}" >/dev/null 2>&1; then \
+        echo "error: tag v{{version}} already exists"; \
+        exit 1; \
+    fi
+    just release-docs-check
+    python3 scripts/changelog.py prepare --version {{version}}
+    cp CHANGELOG.md docs/next/CHANGELOG.md
+    @base="$(printf '%s' '{{version}}' | sed 's/-ac.*//')"; \
+    sed -i.bak "s/^version = \".*\"/version = \"$base\"/" Cargo.toml && rm -f Cargo.toml.bak; \
+    cargo update -p herdr --offline
+    just check
+    git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock
+    git diff --cached --quiet || git commit -m "release: v{{version}}"
+    git tag -a v{{version}} -m "v{{version}}"
+    git push origin HEAD:master
+    git push origin v{{version}}
+    @echo "v{{version}} released — CI builds -ac binaries and updates colangelo/homebrew-tap"
