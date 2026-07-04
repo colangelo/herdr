@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.7.1-ac] - 2026-07-04
+
 ### Added
 - Added `ui.sidebar_collapsed_mode = "hidden"` to make a collapsed sidebar use zero width while keeping the existing compact rail as the default. (#842)
 - Added `herdr completion <shell>` / `herdr completions <shell>` to generate shell completion scripts for bash, elvish, fish, PowerShell, and zsh. (#435)
