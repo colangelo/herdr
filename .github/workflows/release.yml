@@ -66,6 +66,7 @@ jobs:
     env:
       LIBGHOSTTY_VT_OPTIMIZE: ${{ matrix.libghostty_vt_optimize }}
       LIBGHOSTTY_VT_SIMD: ${{ matrix.libghostty_vt_simd }}
+      HERDR_BUILD_CHANNEL: ac
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -76,8 +77,9 @@ jobs:
         run: |
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
-            echo "error: tag $GITHUB_REF_NAME doesn't match Cargo.toml version $CARGO_VERSION"
+          TAG_BASE="${TAG_VERSION%%-ac*}"
+          if [ "$CARGO_VERSION" != "$TAG_BASE" ]; then
+            echo "error: tag $GITHUB_REF_NAME base $TAG_BASE doesn't match Cargo.toml version $CARGO_VERSION"
             exit 1
           fi
 
@@ -140,6 +142,13 @@ jobs:
 
       - name: Remove Zig caches
         run: rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+
+      # fork: v0.7.1-ac.2 style tags carry the .2 into the binary version via HERDR_BUILD_ID
+      - name: Set fork build id from tag
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-ac.*) echo "HERDR_BUILD_ID=${GITHUB_REF_NAME##*-ac.}" >> "$GITHUB_ENV" ;;
+          esac
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
@@ -364,59 +373,5 @@ jobs:
           git diff --staged --quiet || git commit -m "Update herdr to v${VERSION}"
           git push
 
-  update-latest-json:
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          ref: master
-          fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
-
-      - name: Update website latest manifest
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ANNOUNCEMENT_PATH="$RUNNER_TEMP/product-announcement.json"
-          ANNOUNCEMENT_ORIGINAL_PATH="$RUNNER_TEMP/product-announcement-original.json"
-          git show "${GITHUB_REF_NAME}:docs/next/product-announcement.json" > "$ANNOUNCEMENT_PATH"
-          cp "$ANNOUNCEMENT_PATH" "$ANNOUNCEMENT_ORIGINAL_PATH"
-          python3 scripts/changelog.py validate-product-announcement --path "$ANNOUNCEMENT_PATH"
-          RELEASE_PROTOCOL=$(git show "${GITHUB_REF_NAME}:src/protocol/wire.rs" | python3 -c 'import re, sys; match = re.search(r"pub const PROTOCOL_VERSION: u32 = (\d+);", sys.stdin.read()); sys.exit(1) if match is None else print(match.group(1))')
-
-          CURRENT_VERSION=$(python3 -c 'import json; print(json.load(open("website/latest.json")).get("version", ""))')
-          if [ "$CURRENT_VERSION" = "$VERSION" ]; then
-            echo "website/latest.json is already at v$VERSION"
-            exit 0
-          fi
-          python3 scripts/changelog.py sync-latest-json --version "$VERSION" --repo "$GITHUB_REPOSITORY" --output website/latest.json --announcement "$ANNOUNCEMENT_PATH" --protocol "$RELEASE_PROTOCOL"
-          if cmp -s "$ANNOUNCEMENT_ORIGINAL_PATH" docs/next/product-announcement.json; then
-            printf 'null\n' > docs/next/product-announcement.json
-          else
-            echo "::warning::docs/next/product-announcement.json changed after $GITHUB_REF_NAME; leaving it unchanged."
-          fi
-
-      - name: Commit website latest manifest
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add website/latest.json docs/next/product-announcement.json
-          git diff --cached --quiet || git commit -m "docs: update website manifest for v$VERSION"
-          git push origin master
-
-      - name: Trigger website deploy
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            echo "CLOUDFLARE_PAGES_DEPLOY_HOOK not set; relying on Cloudflare git auto-deploy"
-            exit 0
-          fi
-          curl -fsS -X POST "$DEPLOY_HOOK" > /dev/null
-          echo "Triggered Cloudflare Pages production deploy"
+  # fork: update-latest-json removed — herdr.dev latest.json/self-update is upstream
+  # product infra; this fork distributes via colangelo/homebrew-tap (update-homebrew).
