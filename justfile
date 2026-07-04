@@ -192,7 +192,7 @@ release-ac version:
     cp CHANGELOG.md docs/next/CHANGELOG.md
     @base="$(printf '%s' '{{version}}' | sed 's/-ac.*//')"; \
     sed -i.bak "s/^version = \".*\"/version = \"$base\"/" Cargo.toml && rm -f Cargo.toml.bak; \
-    cargo update -p herdr --offline
+    cargo update -p herdr --offline || cargo update -p herdr
     just check
     git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock
     git diff --cached --quiet || git commit -m "release: v{{version}}"
