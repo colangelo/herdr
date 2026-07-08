@@ -15,6 +15,46 @@ Version::parse` panics on suffixes. The `-ac` suffix reaches the binary via
 workflow, so `herdr --version` prints `X.Y.Z-ac` with zero Rust patches.
 Upstream's own preview builds use the same mechanism.
 
+## Beta channel (-ac-beta), for pre-release testing
+
+A rolling, opt-in beta that ships from `master` **without** a version tag or a
+stable release, distributed as a **separate** tap formula so it coexists with
+stable herdr. Use it to dogfood work (e.g. a freshly synced/featured `master`)
+before cutting the stable `X.Y.Z-ac`.
+
+Trigger (dispatches `.github/workflows/beta.yml`; default ref `master`):
+
+```bash
+just beta            # build + publish beta from master
+just beta my-branch  # or from another branch/commit
+gh run watch --repo colangelo/herdr
+```
+
+What it does: builds the **two macOS targets only** (fast; no Linux beta), then
+replaces the single rolling **`beta` GitHub prerelease** (tag `beta`, deleted +
+recreated each run) and rewrites `Formula/herdr-beta.rb` in
+colangelo/homebrew-tap. A `prep` job stamps **one** shared
+`HERDR_BUILD_ID=<UTC timestamp>`, so the binary's `herdr --version` and the
+formula `version` are both exactly `X.Y.Z-ac-beta.<timestamp>` (channel
+`HERDR_BUILD_CHANNEL=ac-beta`; Cargo.toml still plain `X.Y.Z`). The timestamp
+makes `brew upgrade` monotonic.
+
+Install / upgrade / verify:
+
+```bash
+brew install colangelo/tap/herdr-beta      # coexists with stable `herdr`
+brew update && brew upgrade herdr-beta
+herdr-beta --version                        # herdr X.Y.Z-ac-beta.<timestamp>
+```
+
+Notes:
+- Needs the same `HOMEBREW_TAP_TOKEN` secret on colangelo/herdr as stable.
+- No docs promotion, no tag, no `just check` gate — beta trusts the pushed
+  `master` (run `just check` before pushing). CI on `master` should be green
+  first.
+- Beta is macOS-only by design; the stable `-ac` release still ships all four
+  targets. Promote a soaked beta by cutting `just release-ac X.Y.Z-ac`.
+
 ## Pre-flight
 
 ```bash
