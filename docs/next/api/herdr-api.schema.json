@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 16,
+  "protocol": 17,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -1791,6 +1791,24 @@
           "required": [
             "root"
           ],
+          "type": "object"
+        },
+        "LayoutBalanceParams": {
+          "description": "Rebalance every split in a layout so all panes become equally sized. Targets\na layout by `tab_id` or `pane_id`; with neither, the active tab is used.",
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         },
         "LayoutExportParams": {
@@ -4703,6 +4721,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/LayoutSetSplitRatioParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "layout.balance",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/LayoutBalanceParams"
             }
           },
           "required": [
@@ -8483,6 +8517,22 @@
                 },
                 "type": {
                   "const": "layout_split_ratio_set",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "layout"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "layout": {
+                  "$ref": "#/schemas/success_response/$defs/LayoutDescription"
+                },
+                "type": {
+                  "const": "layout_balanced",
                   "type": "string"
                 }
               },

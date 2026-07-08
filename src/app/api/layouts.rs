@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use ratatui::layout::Direction;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, LayoutApplyParams, LayoutDescription, LayoutExportParams,
-    LayoutNode, LayoutPane, LayoutSetSplitRatioParams, ResponseResult, SplitDirection,
+    EventData, EventEnvelope, EventKind, LayoutApplyParams, LayoutBalanceParams, LayoutDescription,
+    LayoutExportParams, LayoutNode, LayoutPane, LayoutSetSplitRatioParams, ResponseResult,
+    SplitDirection,
 };
 use crate::app::{App, Mode};
 use crate::layout::{Node, PaneId};
@@ -246,6 +247,34 @@ impl App {
         };
         self.emit_layout_updated_event(ws_idx, tab_idx);
         encode_success(id, ResponseResult::LayoutSplitRatioSet { layout })
+    }
+
+    pub(super) fn handle_layout_balance(
+        &mut self,
+        id: String,
+        params: LayoutBalanceParams,
+    ) -> String {
+        let Some((ws_idx, tab_idx)) = self.resolve_layout_export_target(&LayoutExportParams {
+            tab_id: params.tab_id,
+            pane_id: params.pane_id,
+        }) else {
+            return encode_error(id, "layout_not_found", "layout target not found");
+        };
+
+        let changed = self
+            .state
+            .workspaces
+            .get_mut(ws_idx)
+            .and_then(|ws| ws.tabs.get_mut(tab_idx))
+            .is_some_and(|tab| tab.layout.balance());
+        if changed {
+            self.schedule_session_save();
+        }
+
+        let Some(layout) = self.layout_description(ws_idx, tab_idx) else {
+            return encode_error(id, "layout_not_found", "layout unavailable");
+        };
+        encode_success(id, ResponseResult::LayoutBalanced { layout })
     }
 
     fn resolve_layout_export_target(&self, params: &LayoutExportParams) -> Option<(usize, usize)> {
@@ -710,6 +739,27 @@ mod tests {
 
         let error: ErrorResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(error.error.code, "split_not_found");
+    }
+
+    #[test]
+    fn layout_balance_equalizes_split_ratios() {
+        let mut app = app_with_workspace();
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        // Skew the split, then balance it back to even.
+        app.state.workspaces[0].tabs[0]
+            .layout
+            .set_ratio_at(&[], 0.8);
+
+        let response = app.handle_layout_balance("req".into(), LayoutBalanceParams::default());
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::LayoutBalanced { layout } = success.result else {
+            panic!("expected layout balanced response");
+        };
+        let LayoutNode::Split { ratio, .. } = layout.root else {
+            panic!("expected split layout root");
+        };
+        assert!((ratio - 0.5).abs() < f32::EPSILON);
     }
 
     #[tokio::test]
