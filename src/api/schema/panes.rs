@@ -164,6 +164,16 @@ pub struct LayoutSetSplitRatioParams {
     pub ratio: f32,
 }
 
+/// Rebalance every split in a layout so all panes become equally sized. Targets
+/// a layout by `tab_id` or `pane_id`; with neither, the active tab is used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+pub struct LayoutBalanceParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LayoutDescription {
     pub workspace_id: String,
