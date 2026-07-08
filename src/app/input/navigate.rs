@@ -398,6 +398,10 @@ impl App {
                 self.resize_pane_direction_via_api(NavDirection::Right);
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::BalancePanes => {
+                self.balance_panes_via_api();
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::ToggleSidebar => {
                 self.state.sidebar_collapsed = !self.state.sidebar_collapsed;
                 leave_navigate_mode(&mut self.state);
@@ -639,6 +643,16 @@ impl App {
                 pane_id: None,
                 path,
                 ratio,
+            },
+        );
+    }
+
+    pub(crate) fn balance_panes_via_api(&mut self) {
+        self.runtime_layout_balance(
+            "tui.layout.balance",
+            crate::api::schema::LayoutBalanceParams {
+                tab_id: None,
+                pane_id: None,
             },
         );
     }
@@ -1445,6 +1459,7 @@ pub(crate) enum NavigateAction {
     ResizePaneDown,
     ResizePaneUp,
     ResizePaneRight,
+    BalancePanes,
     ToggleSidebar,
     CyclePaneNext,
     CyclePanePrevious,
@@ -1595,6 +1610,7 @@ fn non_indexed_action_for_key(
         (&kb.resize_pane_down, NavigateAction::ResizePaneDown),
         (&kb.resize_pane_up, NavigateAction::ResizePaneUp),
         (&kb.resize_pane_right, NavigateAction::ResizePaneRight),
+        (&kb.balance_panes, NavigateAction::BalancePanes),
         (&kb.toggle_sidebar, NavigateAction::ToggleSidebar),
         (&kb.reload_config, NavigateAction::ReloadConfig),
         (
@@ -1848,6 +1864,18 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::ResizePaneRight => {
             state.resize_pane(NavDirection::Right);
+            leave_navigate_mode(state);
+        }
+        NavigateAction::BalancePanes => {
+            if let Some(ws_idx) = state.active {
+                if let Some(tab) = state
+                    .workspaces
+                    .get_mut(ws_idx)
+                    .and_then(crate::workspace::Workspace::active_tab_mut)
+                {
+                    tab.layout.balance();
+                }
+            }
             leave_navigate_mode(state);
         }
         NavigateAction::ToggleSidebar => {
@@ -3825,6 +3853,22 @@ navigate_pane_down = "ctrl+j"
         );
 
         assert!(state.workspaces[0].zoomed);
+        assert_eq!(state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn balance_panes_action_equalizes_split_and_exits_navigate_mode() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.workspaces[0].test_split(Direction::Horizontal);
+        // Skew the split, then balance it back to even.
+        state.workspaces[0].layout.set_ratio_at(&[], 0.8);
+
+        execute_navigate_action(&mut state, NavigateAction::BalancePanes);
+
+        let crate::layout::Node::Split { ratio, .. } = state.workspaces[0].layout.root() else {
+            panic!("expected split root");
+        };
+        assert!((*ratio - 0.5).abs() < f32::EPSILON);
         assert_eq!(state.mode, Mode::Terminal);
     }
 

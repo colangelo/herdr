@@ -1,7 +1,7 @@
 use crate::api::schema::{
-    EmptyParams, LayoutSetSplitRatioParams, Method, PaneFocusDirectionParams, PaneInputSetParams,
-    PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
-    PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
+    EmptyParams, LayoutBalanceParams, LayoutSetSplitRatioParams, Method, PaneFocusDirectionParams,
+    PaneInputSetParams, PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams,
+    PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
     WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
     WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams,
     WorktreeRemoveParams,
@@ -170,6 +170,14 @@ impl App {
         params: LayoutSetSplitRatioParams,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::LayoutSetSplitRatio(params))
+    }
+
+    pub(crate) fn runtime_layout_balance(
+        &mut self,
+        id: &'static str,
+        params: LayoutBalanceParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::LayoutBalance(params))
     }
 
     pub(crate) fn runtime_worktree_create_deferred(
