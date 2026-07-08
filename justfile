@@ -219,3 +219,11 @@ release-ac version:
     git push origin HEAD:master
     git push origin v{{version}}
     @echo "v{{version}} released — CI builds -ac binaries and updates colangelo/homebrew-tap"
+
+# Fork: trigger a rolling -ac-beta build from a branch (default master).
+# Runs .github/workflows/beta.yml: builds macOS binaries, replaces the rolling
+# `beta` prerelease, and updates the colangelo/homebrew-tap herdr-beta formula.
+# Install/upgrade the result with `brew install colangelo/tap/herdr-beta`.
+beta ref="master":
+    command gh workflow run beta.yml --repo colangelo/herdr --ref {{ref}} -f ref={{ref}}
+    @echo "beta build dispatched from {{ref}} — watch: gh run watch --repo colangelo/herdr"
