@@ -276,6 +276,19 @@ impl TileLayout {
         set_ratio_at(&mut self.root, path, ratio.clamp(0.1, 0.9))
     }
 
+    /// Rebalance every split so all panes end up equally sized, preserving the
+    /// tree shape and each split's orientation (tmux `even-*` semantics for a
+    /// BSP tree). Each split's first-child ratio becomes the fraction of leaves
+    /// under its first child, which yields equal-area leaves. Ratios are clamped
+    /// to `[0.1, 0.9]`, so a same-direction chain of more than ten panes cannot
+    /// reach a perfect `1/N` on its innermost splits. Returns whether any ratio
+    /// changed.
+    pub fn balance(&mut self) -> bool {
+        let before = split_ratios(&self.root);
+        balance_node(&mut self.root);
+        split_ratios(&self.root) != before
+    }
+
     /// Adjust the nearest split in the given direction for the focused pane.
     /// `delta` is positive to grow, negative to shrink.
     pub fn resize_focused(&mut self, nav: NavDirection, delta: f32, area: Rect) {
@@ -668,6 +681,22 @@ fn set_ratio_at(node: &mut Node, path: &[bool], new_ratio: f32) -> bool {
     }
 }
 
+fn balance_node(node: &mut Node) {
+    if let Node::Split {
+        ratio,
+        first,
+        second,
+        ..
+    } = node
+    {
+        let first_leaves = count_panes(first) as f32;
+        let total_leaves = first_leaves + count_panes(second) as f32;
+        *ratio = (first_leaves / total_leaves).clamp(0.1, 0.9);
+        balance_node(first);
+        balance_node(second);
+    }
+}
+
 fn get_ratio_at(node: &Node, path: &[bool]) -> Option<f32> {
     if let Node::Split {
         ratio,
@@ -809,6 +838,51 @@ mod tests {
         assert_eq!(pane_rects(&layout), before_rects);
         assert_eq!(split_snapshot(&layout), before_splits);
         assert_eq!(layout.focused(), before_focus);
+    }
+
+    #[test]
+    fn balance_sets_ratios_from_leaf_counts_and_equalizes_pane_areas() {
+        let mut layout = sample_layout();
+        let before_focus = layout.focused();
+
+        assert!(layout.balance());
+
+        // Shape and orientations are preserved; only ratios change.
+        let splits = split_snapshot(&layout);
+        assert_eq!(splits.len(), 3);
+        assert_eq!(splits[0].0, Direction::Horizontal);
+        assert_eq!(splits[1].0, Direction::Vertical);
+        assert_eq!(splits[2].0, Direction::Horizontal);
+        // root: pane(1) is 1 of 4 leaves -> 0.25; nested V: pane(2) is 1 of 3 ->
+        // 1/3; inner H: pane(3) vs pane(4) -> 0.5.
+        assert!((splits[0].1 - 0.25).abs() < f32::EPSILON);
+        assert!((splits[1].1 - 1.0 / 3.0).abs() < f32::EPSILON);
+        assert!((splits[2].1 - 0.5).abs() < f32::EPSILON);
+
+        // Count-weighted ratios yield equal-area leaves.
+        let area = Rect::new(0, 0, 100, 40);
+        let areas: Vec<u32> = layout
+            .panes(area)
+            .into_iter()
+            .map(|info| info.rect.width as u32 * info.rect.height as u32)
+            .collect();
+        assert_eq!(areas.len(), 4);
+        let target = area.width as u32 * area.height as u32 / 4;
+        for a in areas {
+            // Allow small rounding slack from integer cell rounding.
+            assert!(a.abs_diff(target) <= 40, "pane area {a} vs target {target}");
+        }
+
+        // Focus is untouched.
+        assert_eq!(layout.focused(), before_focus);
+        // Balancing an already-balanced layout reports no change.
+        assert!(!layout.balance());
+    }
+
+    #[test]
+    fn balance_single_pane_is_noop() {
+        let (mut layout, _root) = TileLayout::new();
+        assert!(!layout.balance());
     }
 
     #[test]
