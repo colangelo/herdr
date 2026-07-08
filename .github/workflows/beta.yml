@@ -189,6 +189,18 @@ jobs:
               bin.install binary => "herdr-beta"
             end
 
+            def caveats
+              <<~EOS
+                herdr runs a persistent background server. To upgrade without killing
+                your running panes, migrate the server onto the new binary after upgrading:
+
+                  brew upgrade herdr-beta
+                  herdr-beta server live-handoff --import-exe "#{opt_bin}/herdr-beta"
+
+                (self-update is disabled for Homebrew installs; use brew upgrade.)
+              EOS
+            end
+
             test do
               assert_match "herdr #{version}", shell_output("#{bin}/herdr-beta --version")
             end
