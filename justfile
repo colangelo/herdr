@@ -227,3 +227,13 @@ release-ac version:
 beta ref="master":
     command gh workflow run beta.yml --repo colangelo/herdr --ref {{ref}} -f ref={{ref}}
     @echo "beta build dispatched from {{ref}} — watch: gh run watch --repo colangelo/herdr"
+
+# Upgrade a Homebrew-installed herdr and live-hand-off the running server onto the
+# new binary so panes survive — replicates `herdr update --handoff` for brew installs
+# (self-update is disabled for brew, but `server live-handoff` is source-agnostic).
+# Usage: just brew-upgrade            # stable formula/binary `herdr`
+#        just brew-upgrade herdr-beta # beta formula/binary `herdr-beta`
+brew-upgrade formula="herdr":
+    brew upgrade {{formula}}
+    {{formula}} server live-handoff --import-exe "$(brew --prefix)/bin/{{formula}}"
+    @echo "{{formula}} upgraded; running server handed off onto the new binary, panes preserved"
