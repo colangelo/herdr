@@ -145,6 +145,7 @@ pub(super) fn render_navigate_overlay(app: &AppState, frame: &mut Frame, area: R
     let close_pane = prefix_rhs_label(&kb.close_pane);
     let zoom = prefix_rhs_label(&kb.zoom);
     let resize = prefix_rhs_label(&kb.resize_mode);
+    let balance = prefix_rhs_label(&kb.balance_panes);
     let help = prefix_rhs_label(&kb.help);
     let settings = prefix_rhs_label(&kb.settings);
     let goto = prefix_rhs_label(&kb.goto);
@@ -177,6 +178,8 @@ pub(super) fn render_navigate_overlay(app: &AppState, frame: &mut Frame, area: R
         Span::styled(" zoom  ", dim),
         Span::styled(resize, key),
         Span::styled(" resize  ", dim),
+        Span::styled(balance, key),
+        Span::styled(" balance  ", dim),
         Span::styled(help, key),
         Span::styled(" keybinds  ", dim),
         Span::styled(settings, key),

@@ -450,6 +450,8 @@ pub struct KeysConfig {
     pub resize_pane_up: BindingConfig,
     /// Resize the focused pane toward the right. Unset by default.
     pub resize_pane_right: BindingConfig,
+    /// Balance all panes in the current tab to equal sizes. Default: "prefix+="
+    pub balance_panes: BindingConfig,
     /// Toggle sidebar collapse. Default: "prefix+b"
     pub toggle_sidebar: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
@@ -1065,6 +1067,7 @@ impl Default for KeysConfig {
             resize_pane_down: BindingConfig::empty(),
             resize_pane_up: BindingConfig::empty(),
             resize_pane_right: BindingConfig::empty(),
+            balance_panes: BindingConfig::one("prefix+="),
             toggle_sidebar: BindingConfig::one("prefix+b"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
