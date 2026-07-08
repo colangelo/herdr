@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
+
+### Changed
+- Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.
+
 ## [0.7.4] - 2026-07-15
 
 ### Added
