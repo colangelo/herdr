@@ -1,6 +1,6 @@
 ---
 name: herdr-release
-description: Cut an -ac suffixed release of the herdr fork — promotes staged docs, runs just release-ac, publishes binaries to GitHub Releases and the colangelo/homebrew-tap formula. Use when the user wants to release, ship, publish, tag, or cut a new version of herdr.
+description: Cut an -ac suffixed release of the herdr fork — promotes staged docs, runs just release-ac, publishes binaries to GitHub Releases and the colangelo/homebrew-tap formula. Also covers the rolling -ac-beta channel and upgrading/migrating a running install between binaries/channels via live handoff (stable<->beta, brew upgrades) without killing panes. Use when the user wants to release, ship, publish, tag, cut a new version, or upgrade/switch/migrate a herdr install between stable and beta.
 ---
 
 # Releasing herdr (fork, -ac channel)
@@ -54,6 +54,78 @@ Notes:
   first.
 - Beta is macOS-only by design; the stable `-ac` release still ships all four
   targets. Promote a soaked beta by cutting `just release-ac X.Y.Z-ac`.
+
+## Upgrading & migrating between channels (live handoff)
+
+herdr runs a persistent background server that owns each pane's PTY **master
+fd**. A *live handoff* fork/execs a target binary as a new server and passes
+those fds to it over a Unix socket (`SCM_RIGHTS`), with a two-phase commit, so
+**running shells/agents survive** the swap. Direct (curl, `~/.local/bin`)
+installs get this via `herdr update --handoff`; **self-update is disabled for
+brew/mise/nix installs** (path-shape gate in `src/update.rs`), so those upgrade
+via the package manager and then trigger the handoff themselves. `herdr` and
+`herdr-beta` are separate binaries but share the **same default session/socket**
+(`config_dir/herdr.sock`), so migrating one onto the other takes over the same
+session in place.
+
+### Is a handoff possible? (check before relying on it)
+
+- **Server up + supports handoff** (Unix/macOS only; false on Windows):
+  ```bash
+  herdr status server --json | jq '.capabilities.live_handoff'   # want: true
+  ```
+- **Target binary exists + executable:** `command -v herdr-beta` (or `herdr`).
+- **Same session:** both use the default session, or pass the same
+  `--session <name>` to each. Different sessions = different sockets = no shared
+  server to hand off.
+- **`HANDOFF_VERSION` parity** between the two builds — the importer rejects a
+  mismatch (`manifest.version != HANDOFF_VERSION`, `src/server/handoff.rs`).
+  Maintainer check across versions:
+  `git show <tag>:src/server/handoff.rs | grep HANDOFF_VERSION` (both 0.7.1-ac
+  and 0.7.3 are `1`).
+- **≤ 64 panes** with live PTYs (`MAX_FDS_PER_HANDOFF`); more aborts the handoff
+  safely.
+- **Protocol may differ** (e.g. 15→17) as long as you do **not** pass
+  `--expected-protocol` (that guard, when set, requires an exact match).
+- **Safety net:** the handoff is a two-phase commit — any failure *before*
+  commit rolls back and the old server keeps running with panes intact. So it is
+  safe to just attempt it; if it is not possible it errors and nothing is lost.
+
+### Same-channel upgrade (pick up a newer build, keep panes)
+
+```bash
+just brew-upgrade              # brew: brew upgrade herdr + live handoff onto it
+just brew-upgrade herdr-beta   # brew: same for the beta formula/binary
+herdr update --handoff         # direct (curl) install only
+```
+
+### Stable -> beta
+
+```bash
+herdr server live-handoff --import-exe "$(command -v herdr-beta)"
+herdr-beta                     # reattach with the beta client
+```
+
+### Beta -> stable
+
+```bash
+herdr-beta server live-handoff --import-exe "$(command -v herdr)"
+herdr                          # reattach with the stable client
+```
+
+### Caveats
+
+- **Reattach with the matching client.** After handoff the server runs the new
+  binary's protocol; a client at a different protocol refuses to attach (e.g.
+  after stable→beta, the old `herdr` (protocol 15) can't attach to the 0.7.3
+  (17) server — use `herdr-beta`).
+- **Run the handoff from a plain terminal, not inside a herdr pane.** Clients
+  briefly disconnect/reconnect during the swap; there is no inside-herdr guard,
+  so it works from within too, just visually confusing.
+- **Downgrade (beta→stable) is the less-tested direction** (new binary's session
+  state read by an older binary). The handoff itself (PTYs) is fine and the
+  rollback protects you, but a later cold restart on stable reading
+  beta-written `session.json` can hit format drift; prefer forward moves.
 
 ## Pre-flight
 
