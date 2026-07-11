@@ -17,6 +17,7 @@
 - Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.
 - Bumped the client/server protocol version to 18 for the `layout.balance` and `layout.set_preset` socket API methods.
 - Sidebar workspace jump numbers (`ui.show_workspace_numbers`) and the collapsed sidebar's workspace rows now follow the visible row order, matching what `prefix+1..9` switches to when worktree grouping or priority sort reorders the list.
+- The sidebar spaces and agents lists now auto-scroll to reveal the newly focused workspace or agent on any focus change (keybindings, picker, navigate mode, mouse, socket API): nearest-edge reveal without recentering, and manual scrolling is left alone while focus is unchanged.
 
 ### Fixed
 - Configs containing the retired Herdr-written `ui.agent_panel_scope` setting no longer report it as an unknown key after upgrades. (#2292)
