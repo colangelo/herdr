@@ -13,6 +13,7 @@ use super::text::truncate_end;
 use super::widgets::panel_contrast_fg;
 use crate::app::state::Palette;
 use crate::app::{AppState, Mode};
+use crate::config::PaneBorderActiveStyleConfig;
 use crate::layout::PaneInfo;
 use crate::popup_size::resolve_popup_geometry;
 use crate::terminal::{TerminalRuntime, TerminalRuntimeRegistry};
@@ -511,18 +512,18 @@ fn render_pane_borders(
         let focused = pane_infos
             .iter()
             .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
-        let symbol = line_cell_symbol(line);
+        let glyph_style = if focused {
+            app.pane_border_active_style
+        } else {
+            PaneBorderActiveStyleConfig::Light
+        };
+        let symbol = line_cell_symbol(line, glyph_style);
         if symbol.is_empty() {
             continue;
         }
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
-        let color = if focused {
-            app.pane_border_active_color.unwrap_or(app.palette.accent)
-        } else {
-            app.palette.overlay0
-        };
-        cell.set_style(Style::default().fg(color));
+        cell.set_style(Style::default().fg(app.pane_border_color(focused)));
     }
 
     render_pane_border_titles(app, ws, pane_infos, frame);
@@ -684,12 +685,7 @@ fn render_pane_border_titles(
         if start_x >= end_x {
             continue;
         }
-        let color = if info.is_focused {
-            app.palette.accent
-        } else {
-            app.palette.overlay0
-        };
-        let mut style = Style::default().fg(color);
+        let mut style = Style::default().fg(app.pane_title_color(info.is_focused));
         if info.is_focused {
             style = style.add_modifier(Modifier::BOLD);
         }
@@ -703,24 +699,31 @@ fn render_pane_border_titles(
     }
 }
 
-fn line_cell_symbol(line: LineCell) -> &'static str {
-    match (line.up, line.down, line.left, line.right) {
-        (true, true, true, true) => "┼",
-        (true, true, true, false) => "┤",
-        (true, true, false, true) => "├",
-        (true, false, true, true) => "┴",
-        (false, true, true, true) => "┬",
-        (true, true, false, false) | (true, false, false, false) | (false, true, false, false) => {
-            "│"
-        }
-        (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => {
-            "─"
-        }
-        (false, true, false, true) => "┌",
-        (false, true, true, false) => "┐",
-        (true, false, false, true) => "└",
-        (true, false, true, false) => "┘",
-        _ => "",
+fn line_cell_symbol(line: LineCell, style: PaneBorderActiveStyleConfig) -> &'static str {
+    // cross, tee-left, tee-right, tee-up, tee-down, vertical, horizontal,
+    // corner-tl, corner-tr, corner-bl, corner-br
+    const LIGHT: [&str; 11] = ["┼", "┤", "├", "┴", "┬", "│", "─", "┌", "┐", "└", "┘"];
+    const HEAVY: [&str; 11] = ["╋", "┫", "┣", "┻", "┳", "┃", "━", "┏", "┓", "┗", "┛"];
+    const DOUBLE: [&str; 11] = ["╬", "╣", "╠", "╩", "╦", "║", "═", "╔", "╗", "╚", "╝"];
+
+    let index = match (line.up, line.down, line.left, line.right) {
+        (true, true, true, true) => 0,
+        (true, true, true, false) => 1,
+        (true, true, false, true) => 2,
+        (true, false, true, true) => 3,
+        (false, true, true, true) => 4,
+        (true, true, false, false) | (true, false, false, false) | (false, true, false, false) => 5,
+        (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => 6,
+        (false, true, false, true) => 7,
+        (false, true, true, false) => 8,
+        (true, false, false, true) => 9,
+        (true, false, true, false) => 10,
+        _ => return "",
+    };
+    match style {
+        PaneBorderActiveStyleConfig::Light => LIGHT[index],
+        PaneBorderActiveStyleConfig::Heavy => HEAVY[index],
+        PaneBorderActiveStyleConfig::Double => DOUBLE[index],
     }
 }
 
@@ -1039,6 +1042,90 @@ mod tests {
             Some(" abc… ")
         );
         assert_eq!(pane_border_title("abcdef", 4, false), None);
+    }
+
+    #[test]
+    fn line_cell_symbol_maps_every_shape_per_style() {
+        let shapes: [(LineCell, [&str; 3]); 11] = [
+            (cell(true, true, true, true), ["┼", "╋", "╬"]),
+            (cell(true, true, true, false), ["┤", "┫", "╣"]),
+            (cell(true, true, false, true), ["├", "┣", "╠"]),
+            (cell(true, false, true, true), ["┴", "┻", "╩"]),
+            (cell(false, true, true, true), ["┬", "┳", "╦"]),
+            (cell(true, true, false, false), ["│", "┃", "║"]),
+            (cell(false, false, true, true), ["─", "━", "═"]),
+            (cell(false, true, false, true), ["┌", "┏", "╔"]),
+            (cell(false, true, true, false), ["┐", "┓", "╗"]),
+            (cell(true, false, false, true), ["└", "┗", "╚"]),
+            (cell(true, false, true, false), ["┘", "┛", "╝"]),
+        ];
+        for (line, [light, heavy, double]) in shapes {
+            assert_eq!(
+                line_cell_symbol(line, PaneBorderActiveStyleConfig::Light),
+                light
+            );
+            assert_eq!(
+                line_cell_symbol(line, PaneBorderActiveStyleConfig::Heavy),
+                heavy
+            );
+            assert_eq!(
+                line_cell_symbol(line, PaneBorderActiveStyleConfig::Double),
+                double
+            );
+        }
+        // dangling stubs render as plain lines; empty cells render nothing
+        assert_eq!(
+            line_cell_symbol(
+                cell(true, false, false, false),
+                PaneBorderActiveStyleConfig::Heavy
+            ),
+            "┃"
+        );
+        for style in [
+            PaneBorderActiveStyleConfig::Light,
+            PaneBorderActiveStyleConfig::Heavy,
+            PaneBorderActiveStyleConfig::Double,
+        ] {
+            assert_eq!(
+                line_cell_symbol(cell(false, false, false, false), style),
+                ""
+            );
+        }
+    }
+
+    fn cell(up: bool, down: bool, left: bool, right: bool) -> LineCell {
+        LineCell {
+            up,
+            down,
+            left,
+            right,
+        }
+    }
+
+    #[test]
+    fn pane_border_and_title_colors_resolve_with_fallbacks() {
+        let mut app = AppState::test_new();
+
+        // all unset: theme defaults, title follows border
+        assert_eq!(app.pane_border_color(true), app.palette.accent);
+        assert_eq!(app.pane_border_color(false), app.palette.overlay0);
+        assert_eq!(app.pane_title_color(true), app.palette.accent);
+        assert_eq!(app.pane_title_color(false), app.palette.overlay0);
+
+        // border colors set: titles follow them
+        app.pane_border_active_color = Some(Color::Rgb(215, 135, 0));
+        app.pane_border_inactive_color = Some(Color::Rgb(74, 74, 74));
+        assert_eq!(app.pane_border_color(true), Color::Rgb(215, 135, 0));
+        assert_eq!(app.pane_border_color(false), Color::Rgb(74, 74, 74));
+        assert_eq!(app.pane_title_color(true), Color::Rgb(215, 135, 0));
+        assert_eq!(app.pane_title_color(false), Color::Rgb(74, 74, 74));
+
+        // explicit title colors decouple from the border
+        app.pane_title_active_color = Some(Color::Rgb(255, 215, 0));
+        app.pane_title_inactive_color = Some(Color::Rgb(122, 122, 122));
+        assert_eq!(app.pane_title_color(true), Color::Rgb(255, 215, 0));
+        assert_eq!(app.pane_title_color(false), Color::Rgb(122, 122, 122));
+        assert_eq!(app.pane_border_color(true), Color::Rgb(215, 135, 0));
     }
 
     #[test]
