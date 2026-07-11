@@ -264,24 +264,41 @@ pub struct IndexedKeybind {
 
 impl IndexedKeybind {
     pub fn matched_index(&self, key: TerminalKey) -> Option<usize> {
-        let key_number = match key.code {
-            KeyCode::Char(c @ '1'..='9') => c,
+        let (key_symbol, legacy_shifted_number) = match key.code {
+            KeyCode::Char(c @ ('1'..='9' | 'a'..='z')) => (c, false),
             KeyCode::Char(c) => {
                 let number = shifted_number_symbol(c)?;
                 if !indexed_shifted_number_matches(key, self.trigger.combo(), number) {
                     return None;
                 }
-                number
+                (number, true)
             }
             _ => return None,
         };
-        let legacy_shifted_number =
-            matches!(key.code, KeyCode::Char(c) if shifted_number_symbol(c) == Some(key_number));
         if terminal_key_matches_combo(key, self.trigger.combo()) || legacy_shifted_number {
-            Some((key_number as usize) - ('1' as usize))
+            index_for_jump_symbol(key_symbol)
         } else {
             None
         }
+    }
+}
+
+/// Jump symbol for an indexed entry: rows 1-9 use digits, rows 10-35 continue
+/// with letters a-z. Beyond that there is no symbol. Single source of truth
+/// for indexed keybind matching and the sidebar jump labels.
+pub fn jump_symbol(index: usize) -> Option<char> {
+    match index {
+        0..=8 => char::from_digit(index as u32 + 1, 10),
+        9..=34 => char::from_u32('a' as u32 + (index as u32 - 9)),
+        _ => None,
+    }
+}
+
+fn index_for_jump_symbol(symbol: char) -> Option<usize> {
+    match symbol {
+        '1'..='9' => Some(symbol as usize - '1' as usize),
+        'a'..='z' => Some(9 + symbol as usize - 'a' as usize),
+        _ => None,
     }
 }
 
@@ -907,9 +924,12 @@ fn push_indexed_binding(
     source: BindingSource,
     bindings: &mut Vec<IndexedKeybind>,
 ) {
-    if !matches!(binding.trigger.combo().0, KeyCode::Char('1'..='9')) {
+    if !matches!(
+        binding.trigger.combo().0,
+        KeyCode::Char('1'..='9' | 'a'..='z')
+    ) {
         let diag = format!(
-            "indexed keybinding must use 1..9: {field} = {:?}; disabling binding",
+            "indexed keybinding must use 1..9 or a..z: {field} = {:?}; disabling binding",
             binding.label
         );
         warn!(message = %diag, "config diagnostic");
@@ -1060,13 +1080,11 @@ fn parse_binding_string(raw: &str) -> Option<ParsedBinding> {
         (false, trimmed)
     };
 
-    if let Some(range_modifiers) = parse_range_modifiers(body) {
-        let bindings = (1..=9)
-            .map(|idx| {
-                let combo = (
-                    KeyCode::Char(char::from_digit(idx, 10).unwrap_or('1')),
-                    range_modifiers,
-                );
+    if let Some((range_chars, range_modifiers)) = parse_range_modifiers(body) {
+        let bindings = range_chars
+            .chars()
+            .map(|c| {
+                let combo = (KeyCode::Char(c), range_modifiers);
                 let key_label = format_key_combo(combo);
                 ResolvedBinding {
                     trigger: if trigger_prefix {
@@ -1170,21 +1188,41 @@ fn parse_modifier_token(token: &str) -> Option<KeyModifiers> {
     }
 }
 
-fn parse_range_modifiers(s: &str) -> Option<KeyModifiers> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RangeChars {
+    Digits,
+    Letters,
+}
+
+impl RangeChars {
+    fn chars(self) -> std::ops::RangeInclusive<char> {
+        match self {
+            Self::Digits => '1'..='9',
+            Self::Letters => 'a'..='z',
+        }
+    }
+}
+
+fn parse_range_modifiers(s: &str) -> Option<(RangeChars, KeyModifiers)> {
     let mut modifiers = KeyModifiers::empty();
-    let mut saw_range = false;
+    let mut range = None;
     for part in s.split('+') {
         let trimmed = part.trim();
-        if trimmed == "1..9" {
-            if saw_range {
+        let range_chars = match trimmed {
+            "1..9" => Some(RangeChars::Digits),
+            "a..z" => Some(RangeChars::Letters),
+            _ => None,
+        };
+        if let Some(range_chars) = range_chars {
+            if range.is_some() {
                 return None;
             }
-            saw_range = true;
+            range = Some(range_chars);
         } else {
             modifiers |= parse_modifier_token(trimmed)?;
         }
     }
-    saw_range.then_some(modifiers)
+    range.map(|range| (range, modifiers))
 }
 
 fn parse_modifier_combo(s: &str) -> Option<KeyModifiers> {
@@ -1983,6 +2021,40 @@ switch_workspace = "prefix+shift+1..9"
             BindingTrigger::Prefix((KeyCode::Char('1'), KeyModifiers::SHIFT))
         );
         assert_eq!(kb.switch_workspace[0].label, "prefix+shift+1");
+    }
+
+    #[test]
+    fn letter_range_extends_indexed_bindings_past_nine() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]
+"#,
+        )
+        .unwrap();
+        let kb = config.keybinds();
+        assert_eq!(kb.focus_agent.len(), 9 + 26);
+        assert_eq!(
+            kb.focus_agent[9].trigger,
+            BindingTrigger::Prefix((KeyCode::Char('a'), KeyModifiers::ALT))
+        );
+        assert_eq!(kb.focus_agent[9].label, "prefix+alt+a");
+
+        // Letter keys resolve to indices 9..34, continuing after digits 0..8.
+        let alt_key = |c| TerminalKey::new(KeyCode::Char(c), KeyModifiers::ALT);
+        assert_eq!(kb.focus_agent[9].matched_index(alt_key('a')), Some(9));
+        assert_eq!(kb.focus_agent[10].matched_index(alt_key('b')), Some(10));
+        assert_eq!(kb.focus_agent[34].matched_index(alt_key('z')), Some(34));
+        assert_eq!(kb.focus_agent[9].matched_index(alt_key('b')), None);
+    }
+
+    #[test]
+    fn jump_symbol_covers_digits_then_letters() {
+        assert_eq!(jump_symbol(0), Some('1'));
+        assert_eq!(jump_symbol(8), Some('9'));
+        assert_eq!(jump_symbol(9), Some('a'));
+        assert_eq!(jump_symbol(34), Some('z'));
+        assert_eq!(jump_symbol(35), None);
     }
 
     #[test]
