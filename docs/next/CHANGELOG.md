@@ -44,9 +44,11 @@
 - Copy mode now supports `B`, `E`, and `W` motions over whitespace-delimited big words. (#2270, thanks @jplew)
 - The plugin marketplace now discovers valid manifests at repository roots and subdirectories, groups multiple plugins under each repository, and publishes their versions and exact default-branch commits.
 - Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
+- Added tmux-style layout presets (`even_horizontal`, `even_vertical`, `tiled`) via the `layout.set_preset` socket API, a `next_layout` action to cycle them (`prefix+space` by default), and CLI verbs `herdr pane balance` and `herdr pane layout --set <even-h|even-v|tiled>`.
 
 ### Changed
 - Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.
+- Bumped the client/server protocol version to 18 for the `layout.balance` and `layout.set_preset` socket API methods.
 
 ### Changed
 - Windows support is now generally available through stable releases and uses the stable update channel by default. Existing preview installs stay on preview until explicitly switched.

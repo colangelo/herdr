@@ -105,7 +105,7 @@ Raw socket method names use dot notation:
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
-| Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio`, `layout.balance` |
+| Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio`, `layout.balance`, `layout.set_preset` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
@@ -305,6 +305,16 @@ active tab. The response is `type: "layout_balanced"` with the updated portable
 
 ```json
 {"id":"req_balance","method":"layout.balance","params":{"tab_id":"w1:t1"}}
+```
+
+`layout.set_preset` rebuilds a tab into a tmux-style preset: `even_horizontal`
+(one equal-width row), `even_vertical` (one equal-height column), or `tiled` (a
+near-square grid). Unlike `layout.balance`, this restructures the tree. Omit
+`tab_id` and `pane_id` to target the active tab. The response is
+`type: "layout_preset_applied"` with the updated portable `layout`.
+
+```json
+{"id":"req_preset","method":"layout.set_preset","params":{"tab_id":"w1:t1","preset":"tiled"}}
 ```
 
 Process-launching methods accept an `env` object. Herdr applies those key/value
