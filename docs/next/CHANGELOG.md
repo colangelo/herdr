@@ -11,6 +11,7 @@
 - Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line, with `ui.workspace_number_color` to set their color (same syntax as `accent`). Default off / theme color.
 - Added `ui.workspace_sort = "priority"` to live-sort the sidebar workspace list by attention priority (blocked, done, working, idle, unknown; most recent state change first within a tier). Worktree groups move as one unit. Default `"manual"` keeps the drag order; drag-reordering is disabled while `"priority"` is active.
 - Added pane border and title styling options: `ui.pane_border_active_color` and `ui.pane_border_inactive_color` set the focused/unfocused border colors (same syntax as `accent`; unset uses the theme), `ui.pane_border_active_style` sets the focused border weight (`light`, `heavy`, or `double`), and `ui.pane_title_active_color` / `ui.pane_title_inactive_color` set the border title colors (unset follows the matching border color).
+- Added `ui.sidebar_active_border` to draw border lines above and below the active space and agent in the sidebar, styled by `ui.pane_border_active_color` and `ui.pane_border_active_style`. Default off.
 
 ### Changed
 - Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.

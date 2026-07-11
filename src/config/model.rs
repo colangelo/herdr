@@ -910,6 +910,10 @@ pub struct UiConfig {
     /// Unset follows `pane_border_inactive_color`, then the theme's muted color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_title_inactive_color: Option<String>,
+    /// Draw horizontal border lines above and below the active space and agent
+    /// in the sidebar, using `pane_border_active_color` and
+    /// `pane_border_active_style`. Default: false.
+    pub sidebar_active_border: bool,
     /// Optional visual toast notifications for background workspace events.
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
@@ -1122,6 +1126,7 @@ impl Default for UiConfig {
             pane_border_active_style: PaneBorderActiveStyleConfig::Light,
             pane_title_active_color: None,
             pane_title_inactive_color: None,
+            sidebar_active_border: false,
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }
@@ -1371,6 +1376,7 @@ status_indicators = "symbols"
         assert_eq!(defaults.ui.pane_border_inactive_color, None);
         assert_eq!(defaults.ui.pane_title_active_color, None);
         assert_eq!(defaults.ui.pane_title_inactive_color, None);
+        assert!(!defaults.ui.sidebar_active_border);
 
         let toml = r##"
 [ui]
@@ -1379,6 +1385,7 @@ pane_border_active_color = "#d78700"
 pane_border_inactive_color = "#4a4a4a"
 pane_title_active_color = "#ffd700"
 pane_title_inactive_color = "#7a7a7a"
+sidebar_active_border = true
 "##;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(
@@ -1401,6 +1408,7 @@ pane_title_inactive_color = "#7a7a7a"
             config.ui.pane_title_inactive_color.as_deref(),
             Some("#7a7a7a")
         );
+        assert!(config.ui.sidebar_active_border);
 
         let toml = r#"
 [ui]
