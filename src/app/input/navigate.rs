@@ -2792,6 +2792,33 @@ last_pane = "prefix+tab"
     }
 
     #[test]
+    fn letter_range_indexed_bindings_dispatch_past_nine() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]
+"#,
+        )
+        .unwrap();
+        state.keybinds = config.keybinds();
+
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('a'), KeyModifiers::ALT),
+            BindingDispatch::Prefix,
+        );
+        assert_eq!(action, Some(NavigateAction::FocusAgent(9)));
+
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('c'), KeyModifiers::ALT),
+            BindingDispatch::Prefix,
+        );
+        assert_eq!(action, Some(NavigateAction::FocusAgent(11)));
+    }
+
+    #[test]
     fn literal_symbol_binding_takes_precedence_over_shifted_indexed_alias() {
         let mut state = state_with_workspaces(&["one", "two"]);
         let config: Config = toml::from_str(
