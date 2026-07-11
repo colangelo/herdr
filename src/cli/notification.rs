@@ -112,8 +112,9 @@ fn parse_toast_position(value: &str) -> Result<ToastHerdrPosition, NotificationS
         "top-right" => Ok(ToastHerdrPosition::TopRight),
         "bottom-left" => Ok(ToastHerdrPosition::BottomLeft),
         "bottom-right" => Ok(ToastHerdrPosition::BottomRight),
+        "center" => Ok(ToastHerdrPosition::Center),
         _ => Err(NotificationShowArgError::Message(format!(
-            "invalid position: {value} (expected top-left, top-right, bottom-left, or bottom-right)"
+            "invalid position: {value} (expected top-left, top-right, bottom-left, bottom-right, or center)"
         ))),
     }
 }
@@ -179,7 +180,7 @@ mod tests {
         assert_eq!(
             error,
             NotificationShowArgError::Message(
-                "invalid position: top-center (expected top-left, top-right, bottom-left, or bottom-right)"
+                "invalid position: top-center (expected top-left, top-right, bottom-left, bottom-right, or center)"
                     .into()
             )
         );

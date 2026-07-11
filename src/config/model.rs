@@ -74,6 +74,7 @@ pub enum ToastHerdrPosition {
     BottomLeft,
     #[default]
     BottomRight,
+    Center,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -229,6 +230,15 @@ pub struct ToastConfig {
 #[serde(default)]
 pub struct HerdrToastConfig {
     pub position: ToastHerdrPosition,
+    /// How long a needs-attention toast stays visible, in seconds. 0 keeps it
+    /// visible until clicked or replaced. Default: 8.
+    pub needs_attention_seconds: u64,
+    /// How long a finished toast stays visible, in seconds. 0 keeps it
+    /// visible until clicked or replaced. Default: 5.
+    pub finished_seconds: u64,
+    /// How long an update-installed toast stays visible, in seconds. 0 keeps
+    /// it visible until clicked or replaced. Default: 3.
+    pub update_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -1160,6 +1170,9 @@ impl Default for HerdrToastConfig {
     fn default() -> Self {
         Self {
             position: ToastHerdrPosition::BottomRight,
+            needs_attention_seconds: 8,
+            finished_seconds: 5,
+            update_seconds: 3,
         }
     }
 }
@@ -1824,11 +1837,30 @@ position = "top-center"
             config.ui.toast.herdr.position,
             ToastHerdrPosition::BottomRight
         );
+        assert_eq!(config.ui.toast.herdr.needs_attention_seconds, 8);
+        assert_eq!(config.ui.toast.herdr.finished_seconds, 5);
+        assert_eq!(config.ui.toast.herdr.update_seconds, 3);
         assert!(config.ui.toast.clipboard.enabled);
         assert_eq!(
             config.ui.toast.clipboard.position,
             ToastClipboardPosition::BottomCenter
         );
+    }
+
+    #[test]
+    fn toast_config_parses_center_position_and_durations() {
+        let toml = r#"
+[ui.toast.herdr]
+position = "center"
+needs_attention_seconds = 4
+finished_seconds = 4
+update_seconds = 0
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.toast.herdr.position, ToastHerdrPosition::Center);
+        assert_eq!(config.ui.toast.herdr.needs_attention_seconds, 4);
+        assert_eq!(config.ui.toast.herdr.finished_seconds, 4);
+        assert_eq!(config.ui.toast.herdr.update_seconds, 0);
     }
 
     #[test]

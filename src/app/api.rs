@@ -701,13 +701,15 @@ impl App {
         previous_toast: Option<crate::app::state::ToastNotification>,
     ) {
         if self.state.toast != previous_toast {
-            self.toast_deadline = self.state.toast.as_ref().map(|toast| {
-                let duration = match toast.kind {
-                    ToastKind::NeedsAttention => Duration::from_secs(8),
-                    ToastKind::Finished => Duration::from_secs(5),
-                    ToastKind::UpdateInstalled => Duration::from_secs(3),
+            let durations = self.state.toast_config.herdr;
+            self.toast_deadline = self.state.toast.as_ref().and_then(|toast| {
+                let seconds = match toast.kind {
+                    ToastKind::NeedsAttention => durations.needs_attention_seconds,
+                    ToastKind::Finished => durations.finished_seconds,
+                    ToastKind::UpdateInstalled => durations.update_seconds,
                 };
-                Instant::now() + duration
+                // 0 keeps the toast visible until clicked or replaced.
+                (seconds > 0).then(|| Instant::now() + Duration::from_secs(seconds))
             });
         }
     }

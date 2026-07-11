@@ -398,7 +398,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # delay_seconds = 1
 
 [ui.toast.herdr]
+# In-app toast position: top-left, top-right, bottom-left, bottom-right, or center.
 # position = "bottom-right"
+# How long each toast kind stays visible, in seconds. 0 keeps the toast
+# visible until clicked or replaced.
+# needs_attention_seconds = 8
+# finished_seconds = 5
+# update_seconds = 3
 
 [ui.toast.clipboard]
 # enabled = true
