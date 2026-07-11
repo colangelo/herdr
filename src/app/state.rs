@@ -1445,6 +1445,8 @@ pub struct AppState {
     pub sidebar_width_auto: bool,
     pub sidebar_collapsed: bool,
     pub sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig,
+    /// Ephemeral cursor for the "next layout" cycle action (not persisted).
+    pub layout_cycle_index: usize,
     /// Ratio of sidebar height allocated to the workspaces section.
     pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
@@ -1821,6 +1823,7 @@ impl AppState {
             sidebar_width_auto: false,
             sidebar_collapsed: false,
             sidebar_collapsed_mode: crate::config::SidebarCollapsedModeConfig::Compact,
+            layout_cycle_index: 0,
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),

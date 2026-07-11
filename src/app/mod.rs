@@ -604,6 +604,7 @@ impl App {
             sidebar_width_auto: false,
             sidebar_collapsed: false,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
+            layout_cycle_index: 0,
             sidebar_section_split,
             agent_panel_sort,
             sidebar_agents: config.ui.sidebar.agents.clone(),
