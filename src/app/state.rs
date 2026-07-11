@@ -1502,6 +1502,16 @@ pub struct AppState {
     pub workspace_number_color: Option<Color>,
     /// Override color for the focused (active) pane border; None uses the palette accent.
     pub pane_border_active_color: Option<Color>,
+    /// Override color for unfocused (inactive) pane borders; None uses the palette default.
+    pub pane_border_inactive_color: Option<Color>,
+    /// Box-drawing weight for the focused pane border.
+    pub pane_border_active_style: crate::config::PaneBorderActiveStyleConfig,
+    /// Override color for the focused pane's border title; None follows
+    /// `pane_border_active_color`, then the palette accent.
+    pub pane_title_active_color: Option<Color>,
+    /// Override color for unfocused panes' border titles; None follows
+    /// `pane_border_inactive_color`, then the palette default.
+    pub pane_title_inactive_color: Option<Color>,
     pub sound: SoundConfig,
     pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
@@ -1576,6 +1586,28 @@ impl AppState {
 
     pub fn agent_border_labels_enabled(&self) -> bool {
         self.show_agent_labels_on_pane_borders
+    }
+
+    /// Border line color for a pane; falls back to the theme accent (focused)
+    /// or the theme's muted border color (unfocused) when unset.
+    pub fn pane_border_color(&self, focused: bool) -> Color {
+        if focused {
+            self.pane_border_active_color.unwrap_or(self.palette.accent)
+        } else {
+            self.pane_border_inactive_color
+                .unwrap_or(self.palette.overlay0)
+        }
+    }
+
+    /// Border title color for a pane; falls back to the matching border color
+    /// (which itself falls back to the theme) when unset.
+    pub fn pane_title_color(&self, focused: bool) -> Color {
+        let explicit = if focused {
+            self.pane_title_active_color
+        } else {
+            self.pane_title_inactive_color
+        };
+        explicit.unwrap_or_else(|| self.pane_border_color(focused))
     }
 
     pub fn pane_history_persistence_enabled(&self) -> bool {
@@ -1870,6 +1902,10 @@ impl AppState {
             accent: Color::Cyan,
             workspace_number_color: None,
             pane_border_active_color: None,
+            pane_border_inactive_color: None,
+            pane_border_active_style: crate::config::PaneBorderActiveStyleConfig::Light,
+            pane_title_active_color: None,
+            pane_title_inactive_color: None,
             sound: SoundConfig {
                 enabled: false,
                 ..SoundConfig::default()

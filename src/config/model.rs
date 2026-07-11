@@ -116,6 +116,15 @@ pub enum WorkspaceSortConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum PaneBorderActiveStyleConfig {
+    #[default]
+    Light,
+    Heavy,
+    Double,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
     #[default]
     Auto,
@@ -841,6 +850,21 @@ pub struct UiConfig {
     /// Unset uses the theme accent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_border_active_color: Option<String>,
+    /// Override color for unfocused (inactive) pane borders. Same syntax as `accent`.
+    /// Unset uses the theme's muted border color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_border_inactive_color: Option<String>,
+    /// Box-drawing weight for the focused pane border: "light", "heavy", or
+    /// "double". Default: "light".
+    pub pane_border_active_style: PaneBorderActiveStyleConfig,
+    /// Override color for the focused pane's border title. Same syntax as `accent`.
+    /// Unset follows `pane_border_active_color`, then the theme accent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_title_active_color: Option<String>,
+    /// Override color for unfocused panes' border titles. Same syntax as `accent`.
+    /// Unset follows `pane_border_inactive_color`, then the theme's muted color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_title_inactive_color: Option<String>,
     /// Optional visual toast notifications for background workspace events.
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
@@ -1039,6 +1063,10 @@ impl Default for UiConfig {
             accent: "cyan".into(),
             workspace_number_color: None,
             pane_border_active_color: None,
+            pane_border_inactive_color: None,
+            pane_border_active_style: PaneBorderActiveStyleConfig::Light,
+            pane_title_active_color: None,
+            pane_title_inactive_color: None,
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }
@@ -1258,6 +1286,65 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
+    }
+
+    #[test]
+    fn pane_border_and_title_config_parses_and_defaults() {
+        let defaults = Config::default();
+        assert_eq!(
+            defaults.ui.pane_border_active_style,
+            PaneBorderActiveStyleConfig::Light
+        );
+        assert_eq!(defaults.ui.pane_border_active_color, None);
+        assert_eq!(defaults.ui.pane_border_inactive_color, None);
+        assert_eq!(defaults.ui.pane_title_active_color, None);
+        assert_eq!(defaults.ui.pane_title_inactive_color, None);
+
+        let toml = r##"
+[ui]
+pane_border_active_style = "heavy"
+pane_border_active_color = "#d78700"
+pane_border_inactive_color = "#4a4a4a"
+pane_title_active_color = "#ffd700"
+pane_title_inactive_color = "#7a7a7a"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.ui.pane_border_active_style,
+            PaneBorderActiveStyleConfig::Heavy
+        );
+        assert_eq!(
+            config.ui.pane_border_active_color.as_deref(),
+            Some("#d78700")
+        );
+        assert_eq!(
+            config.ui.pane_border_inactive_color.as_deref(),
+            Some("#4a4a4a")
+        );
+        assert_eq!(
+            config.ui.pane_title_active_color.as_deref(),
+            Some("#ffd700")
+        );
+        assert_eq!(
+            config.ui.pane_title_inactive_color.as_deref(),
+            Some("#7a7a7a")
+        );
+
+        let toml = r#"
+[ui]
+pane_border_active_style = "double"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.ui.pane_border_active_style,
+            PaneBorderActiveStyleConfig::Double
+        );
+
+        let toml = r#"
+[ui]
+pane_border_active_style = "thick"
+"#;
+        assert!(toml::from_str::<Config>(toml).is_err());
     }
 
     #[test]
