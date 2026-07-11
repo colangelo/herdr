@@ -634,6 +634,7 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             show_workspace_numbers: config.ui.show_workspace_numbers,
+            show_agent_numbers: config.ui.show_agent_numbers,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -651,6 +652,11 @@ impl App {
             workspace_number_color: config
                 .ui
                 .workspace_number_color
+                .as_deref()
+                .map(crate::config::parse_color),
+            agent_number_color: config
+                .ui
+                .agent_number_color
                 .as_deref()
                 .map(crate::config::parse_color),
             pane_border_active_color: config
@@ -1460,6 +1466,7 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.show_workspace_numbers = config.ui.show_workspace_numbers;
+                self.state.show_agent_numbers = config.ui.show_agent_numbers;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
@@ -1470,6 +1477,11 @@ impl App {
                 self.state.workspace_number_color = config
                     .ui
                     .workspace_number_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.agent_number_color = config
+                    .ui
+                    .agent_number_color
                     .as_deref()
                     .map(crate::config::parse_color);
                 self.state.pane_border_active_color = config
