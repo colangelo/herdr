@@ -46,10 +46,12 @@
 - Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
 - Added tmux-style layout presets (`even_horizontal`, `even_vertical`, `tiled`) via the `layout.set_preset` socket API, a `next_layout` action to cycle them (`prefix+space` by default), and CLI verbs `herdr pane balance` and `herdr pane layout --set <even-h|even-v|tiled>`.
 - Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line, with `ui.workspace_number_color` to set their color (same syntax as `accent`). Default off / theme color.
+- Added `ui.workspace_sort = "priority"` to live-sort the sidebar workspace list by attention priority (blocked, done, working, idle, unknown; most recent state change first within a tier). Worktree groups move as one unit. Default `"manual"` keeps the drag order; drag-reordering is disabled while `"priority"` is active.
 
 ### Changed
 - Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.
 - Bumped the client/server protocol version to 18 for the `layout.balance` and `layout.set_preset` socket API methods.
+- Sidebar workspace jump numbers (`ui.show_workspace_numbers`) and the collapsed sidebar's workspace rows now follow the visible row order, matching what `prefix+1..9` switches to when worktree grouping or priority sort reorders the list.
 
 ### Changed
 - Windows support is now generally available through stable releases and uses the stable update channel by default. Existing preview installs stay on preview until explicitly switched.
