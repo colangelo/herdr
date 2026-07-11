@@ -5,7 +5,7 @@
 ### Added
 - Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
 - Added tmux-style layout presets (`even_horizontal`, `even_vertical`, `tiled`) via the `layout.set_preset` socket API, a `next_layout` action to cycle them (`prefix+space` by default), and CLI verbs `herdr pane balance` and `herdr pane layout --set <even-h|even-v|tiled>`.
-- Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line. Default off.
+- Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line, with `ui.workspace_number_color` to set their color (same syntax as `accent`). Default off / theme color.
 
 ### Changed
 - Bumped the client/server protocol version to 18 for the `layout.balance` and `layout.set_preset` socket API methods.
