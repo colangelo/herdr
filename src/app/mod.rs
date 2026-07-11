@@ -700,6 +700,7 @@ impl App {
                 .pane_title_inactive_color
                 .as_deref()
                 .map(crate::config::parse_color),
+            sidebar_active_border: config.ui.sidebar_active_border,
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
@@ -1552,6 +1553,7 @@ impl App {
                     .pane_title_inactive_color
                     .as_deref()
                     .map(crate::config::parse_color);
+                self.state.sidebar_active_border = config.ui.sidebar_active_border;
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
                 }

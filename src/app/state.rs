@@ -1487,6 +1487,9 @@ pub struct AppState {
     /// Override color for unfocused panes' border titles; None follows
     /// `pane_border_inactive_color`, then the palette default.
     pub pane_title_inactive_color: Option<Color>,
+    /// Draw horizontal border lines above and below the active space and agent
+    /// in the sidebar, styled like the active pane border.
+    pub sidebar_active_border: bool,
     pub sound: SoundConfig,
     pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
@@ -1884,6 +1887,7 @@ impl AppState {
             pane_border_active_style: crate::config::PaneBorderActiveStyleConfig::Light,
             pane_title_active_color: None,
             pane_title_inactive_color: None,
+            sidebar_active_border: false,
             sound: SoundConfig {
                 enabled: false,
                 ..SoundConfig::default()
