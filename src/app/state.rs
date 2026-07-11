@@ -1417,10 +1417,16 @@ pub struct AppState {
     pub copy_mode: Option<CopyModeState>,
     pub workspace_scroll: usize,
     pub agent_panel_scroll: usize,
-    /// Last workspace/agent identity the sidebar auto-scrolled into view;
-    /// compute_view reveals the focused entry only when these change.
+    /// Last workspace/agent identity the sidebar follow saw; a change
+    /// re-engages the follow after manual scrolling disengaged it.
     pub sidebar_followed_workspace: Option<String>,
     pub sidebar_followed_agent: Option<(String, PaneId)>,
+    /// While true, compute_view keeps the active workspace / focused agent
+    /// entry visible even as the lists reorder (priority re-sorts, entries
+    /// added or removed). Manual scrolling disengages; the next focus change
+    /// re-engages. Mirrors `tab_scroll_follow_active`.
+    pub workspace_list_follow_active: bool,
+    pub agent_panel_follow_active: bool,
     pub tab_scroll: usize,
     pub tab_scroll_follow_active: bool,
     pub mobile_switcher_scroll: usize,
@@ -1835,6 +1841,8 @@ impl AppState {
             agent_panel_scroll: 0,
             sidebar_followed_workspace: None,
             sidebar_followed_agent: None,
+            workspace_list_follow_active: true,
+            agent_panel_follow_active: true,
             tab_scroll: 0,
             tab_scroll_follow_active: true,
             mobile_switcher_scroll: 0,
