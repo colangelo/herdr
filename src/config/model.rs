@@ -882,6 +882,9 @@ pub struct UiConfig {
     /// Show the workspace jump number (1-9, the `switch_workspace` target) on the
     /// sidebar branch line. Default: false.
     pub show_workspace_numbers: bool,
+    /// Show each agent's jump number (1-9, the `focus_agent` target) on the
+    /// agent panel status line. Default: false.
+    pub show_agent_numbers: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Retired setting that Herdr wrote before the workspace filter was removed.
@@ -901,6 +904,10 @@ pub struct UiConfig {
     /// Unset uses the theme's muted number color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_number_color: Option<String>,
+    /// Color for `show_agent_numbers` labels. Same syntax as `accent`.
+    /// Unset uses the theme's muted number color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_number_color: Option<String>,
     /// Override color for the focused (active) pane border. Same syntax as `accent`.
     /// Unset uses the theme accent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1124,6 +1131,7 @@ impl Default for UiConfig {
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             show_workspace_numbers: false,
+            show_agent_numbers: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
@@ -1131,6 +1139,7 @@ impl Default for UiConfig {
             workspace_sort: WorkspaceSortConfig::Manual,
             accent: "cyan".into(),
             workspace_number_color: None,
+            agent_number_color: None,
             pane_border_active_color: None,
             pane_border_inactive_color: None,
             pane_border_active_style: PaneBorderActiveStyleConfig::Light,
@@ -1467,6 +1476,22 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
+    }
+
+    #[test]
+    fn agent_numbers_config_defaults_and_parse() {
+        let default_config = Config::default();
+        assert!(!default_config.ui.show_agent_numbers);
+        assert!(default_config.ui.agent_number_color.is_none());
+
+        let toml = r##"
+[ui]
+show_agent_numbers = true
+agent_number_color = "#a54242"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.ui.show_agent_numbers);
+        assert_eq!(config.ui.agent_number_color.as_deref(), Some("#a54242"));
     }
 
     #[test]

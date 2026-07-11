@@ -1540,6 +1540,7 @@ pub struct AppState {
     pub hide_tab_bar_when_single_tab: bool,
     pub tab_bar_position: TabBarPositionConfig,
     pub show_workspace_numbers: bool,
+    pub show_agent_numbers: bool,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
@@ -1564,6 +1565,8 @@ pub struct AppState {
     pub accent: Color,
     /// Override color for `show_workspace_numbers` labels; None uses the palette default.
     pub workspace_number_color: Option<Color>,
+    /// Override color for `show_agent_numbers` labels; None uses the palette default.
+    pub agent_number_color: Option<Color>,
     /// Override color for the focused (active) pane border; None uses the palette accent.
     pub pane_border_active_color: Option<Color>,
     /// Override color for unfocused (inactive) pane borders; None uses the palette default.
@@ -1961,6 +1964,7 @@ impl AppState {
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             show_workspace_numbers: false,
+            show_agent_numbers: false,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
@@ -1974,6 +1978,7 @@ impl AppState {
             pane_scrollback_limit_bytes: crate::config::DEFAULT_SCROLLBACK_LIMIT_BYTES,
             accent: Color::Cyan,
             workspace_number_color: None,
+            agent_number_color: None,
             pane_border_active_color: None,
             pane_border_inactive_color: None,
             pane_border_active_style: crate::config::PaneBorderActiveStyleConfig::Light,

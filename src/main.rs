@@ -360,6 +360,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # sidebar branch line.
 # show_workspace_numbers = false
 
+# Show each agent's jump number (1-9, the focus_agent target) on the agent
+# panel status line.
+# show_agent_numbers = false
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
@@ -367,6 +371,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Color for show_workspace_numbers labels (same syntax as accent).
 # Unset uses the theme's muted number color.
 # workspace_number_color = "#89b4fa"
+
+# Color for show_agent_numbers labels (same syntax as accent).
+# Unset uses the theme's muted number color.
+# agent_number_color = "#89b4fa"
 
 # Color for the focused (active) pane border (same syntax as accent).
 # Unset uses the theme accent.
