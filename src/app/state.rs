@@ -1580,6 +1580,8 @@ pub struct AppState {
     pub pane_scrollback_limit_bytes: usize,
     #[allow(dead_code)] // kept for backward compat; palette.accent is the source of truth
     pub accent: Color,
+    /// Override color for `show_workspace_numbers` labels; None uses the palette default.
+    pub workspace_number_color: Option<Color>,
     pub sound: SoundConfig,
     pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
@@ -1964,6 +1966,7 @@ impl AppState {
             new_terminal_cwd: NewTerminalCwdConfig::Follow,
             pane_scrollback_limit_bytes: crate::config::DEFAULT_SCROLLBACK_LIMIT_BYTES,
             accent: Color::Cyan,
+            workspace_number_color: None,
             sound: SoundConfig {
                 enabled: false,
                 ..SoundConfig::default()
