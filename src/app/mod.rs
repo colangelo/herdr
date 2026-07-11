@@ -637,6 +637,11 @@ impl App {
             new_terminal_cwd: config.terminal.new_cwd.clone(),
             pane_scrollback_limit_bytes: config.advanced.scrollback_limit_bytes,
             accent: crate::config::parse_color(&config.ui.accent),
+            workspace_number_color: config
+                .ui
+                .workspace_number_color
+                .as_deref()
+                .map(crate::config::parse_color),
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
@@ -1428,6 +1433,11 @@ impl App {
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
+                self.state.workspace_number_color = config
+                    .ui
+                    .workspace_number_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
                 }
