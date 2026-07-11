@@ -1,5 +1,9 @@
 # herdr task runner
 
+# List available recipes (default)
+default:
+    @just --list
+
 # Run tests
 test:
     cargo nextest run --locked --status-level fail --final-status-level fail --failure-output final --success-output never
@@ -270,3 +274,18 @@ brew-upgrade formula="herdr":
     brew upgrade {{formula}}
     {{formula}} server live-handoff --import-exe "$(brew --prefix)/bin/{{formula}}"
     @echo "{{formula}} upgraded; running server handed off onto the new binary, panes preserved"
+
+# Hands the current (stable) server off to the herdr-beta binary via live handoff
+# (source-agnostic); they share one session socket, so it takes over in place.
+# Live-switch the running server to the BETA channel, panes preserved (reattach: herdr-beta)
+switch-beta:
+    @command -v herdr-beta >/dev/null || { echo "herdr-beta not installed — run: brew install colangelo/tap/herdr-beta"; exit 1; }
+    herdr server live-handoff --import-exe "$(command -v herdr-beta)"
+    @echo "server is now herdr-beta — reattach with: herdr-beta"
+
+# Hands the current (beta) server off to the herdr binary via live handoff.
+# Live-switch the running server to the STABLE channel, panes preserved (reattach: herdr)
+switch-stable:
+    @command -v herdr >/dev/null || { echo "herdr not installed — run: brew install colangelo/tap/herdr"; exit 1; }
+    herdr-beta server live-handoff --import-exe "$(command -v herdr)"
+    @echo "server is now herdr — reattach with: herdr"
