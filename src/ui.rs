@@ -212,6 +212,44 @@ fn desktop_tab_bar_and_terminal_area(
     }
 }
 
+/// Keep the sidebar lists following focus: when the active workspace or the
+/// focused agent pane changed since the last computed view, scroll the
+/// corresponding list just enough to reveal its entry (nearest edge, no
+/// recentering). Runs in compute_view so it sees settled state regardless of
+/// which path changed focus (keybinding, picker, mouse, or runtime API).
+fn follow_sidebar_focus(app: &mut AppState, sidebar_area: Rect) {
+    let active_ws_id = app
+        .active
+        .and_then(|idx| app.workspaces.get(idx))
+        .map(|ws| ws.id.clone());
+    if app.sidebar_followed_workspace != active_ws_id {
+        app.sidebar_followed_workspace = active_ws_id;
+        if let Some(ws_idx) = app.active {
+            app.ensure_workspace_visible_in_rect(sidebar_area, ws_idx);
+        }
+    }
+
+    let focused_agent = app.active.and_then(|ws_idx| {
+        let ws = app.workspaces.get(ws_idx)?;
+        let pane_id = ws.focused_pane_id()?;
+        Some((ws.id.clone(), ws_idx, pane_id))
+    });
+    let focused_identity = focused_agent
+        .as_ref()
+        .map(|(ws_id, _, pane_id)| (ws_id.clone(), *pane_id));
+    if app.sidebar_followed_agent != focused_identity {
+        app.sidebar_followed_agent = focused_identity;
+        if let Some((_, ws_idx, pane_id)) = focused_agent {
+            let entry_idx = agent_panel_entries(app)
+                .iter()
+                .position(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id);
+            if let Some(idx) = entry_idx {
+                app.ensure_agent_panel_entry_visible_in_rect(sidebar_area, idx);
+            }
+        }
+    }
+}
+
 fn compute_view_internal(
     app: &mut AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -248,6 +286,7 @@ fn compute_view_internal(
         let (_, detail_area) = expanded_sidebar_sections(sidebar_area, app.sidebar_section_split);
         let max_agent_scroll = agent_panel_scroll_metrics(app, detail_area).max_offset_from_bottom;
         app.agent_panel_scroll = app.agent_panel_scroll.min(max_agent_scroll);
+        follow_sidebar_focus(app, sidebar_area);
     } else {
         app.workspace_scroll = app
             .workspace_scroll
@@ -601,6 +640,98 @@ mod tests {
     use crate::{app::state::ViewLayout, layout::PaneInfo, workspace::Workspace};
     use ratatui::style::Color;
     use ratatui::{backend::TestBackend, Terminal};
+
+    fn sidebar_focus_test_app(count: usize) -> crate::app::state::AppState {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = (0..count)
+            .map(|i| Workspace::test_new(&format!("ws-{i}")))
+            .collect();
+        app.ensure_test_terminals();
+        for ws in &app.workspaces {
+            let pane_id = ws.tabs[0].root_pane;
+            let terminal_id = ws.tabs[0]
+                .panes
+                .get(&pane_id)
+                .expect("root pane")
+                .attached_terminal_id
+                .clone();
+            if let Some(terminal) = app.terminals.get_mut(&terminal_id) {
+                terminal.set_detected_state(
+                    Some(crate::detect::Agent::Pi),
+                    crate::detect::AgentState::Idle,
+                );
+            }
+        }
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        app
+    }
+
+    #[test]
+    fn compute_view_reveals_newly_active_workspace_in_sidebar() {
+        let mut app = sidebar_focus_test_app(30);
+        let area = Rect::new(0, 0, 80, 24);
+        compute_view(&mut app, area);
+        assert!(app
+            .view
+            .workspace_card_areas
+            .iter()
+            .any(|card| card.ws_idx == 0));
+        assert!(!app
+            .view
+            .workspace_card_areas
+            .iter()
+            .any(|card| card.ws_idx == 29));
+
+        app.active = Some(29);
+        app.selected = 29;
+        compute_view(&mut app, area);
+        assert!(app
+            .view
+            .workspace_card_areas
+            .iter()
+            .any(|card| card.ws_idx == 29));
+    }
+
+    #[test]
+    fn compute_view_leaves_sidebar_scroll_alone_when_focus_unchanged() {
+        let mut app = sidebar_focus_test_app(30);
+        let area = Rect::new(0, 0, 80, 24);
+        app.active = Some(29);
+        app.selected = 29;
+        compute_view(&mut app, area);
+        assert!(app.workspace_scroll > 0);
+        assert!(app.agent_panel_scroll > 0);
+
+        app.workspace_scroll = 0;
+        app.agent_panel_scroll = 0;
+        compute_view(&mut app, area);
+        assert_eq!(app.workspace_scroll, 0);
+        assert_eq!(app.agent_panel_scroll, 0);
+    }
+
+    #[test]
+    fn compute_view_reveals_newly_focused_agent_in_agent_panel() {
+        let mut app = sidebar_focus_test_app(30);
+        let area = Rect::new(0, 0, 80, 24);
+        compute_view(&mut app, area);
+        assert_eq!(app.agent_panel_scroll, 0);
+
+        app.active = Some(29);
+        app.selected = 29;
+        compute_view(&mut app, area);
+
+        let (_, detail_area) =
+            expanded_sidebar_sections(app.view.sidebar_rect, app.sidebar_section_split);
+        let metrics = agent_panel_scroll_metrics(&app, detail_area);
+        let idx = agent_panel_entries(&app)
+            .iter()
+            .position(|entry| entry.ws_idx == 29)
+            .expect("agent entry for focused workspace");
+        assert!(idx >= app.agent_panel_scroll);
+        assert!(idx < app.agent_panel_scroll + metrics.viewport_rows);
+    }
 
     #[test]
     fn copy_feedback_offset_only_increases_when_toast_rect_overlaps() {
