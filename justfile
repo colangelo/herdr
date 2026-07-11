@@ -255,6 +255,7 @@ beta ref="master":
 # Usage: just brew-upgrade            # stable formula/binary `herdr`
 #        just brew-upgrade herdr-beta # beta formula/binary `herdr-beta`
 brew-upgrade formula="herdr":
+    brew update
     brew upgrade {{formula}}
     {{formula}} server live-handoff --import-exe "$(brew --prefix)/bin/{{formula}}"
     @echo "{{formula}} upgraded; running server handed off onto the new binary, panes preserved"
