@@ -147,6 +147,8 @@ pub enum Method {
     LayoutSetSplitRatio(LayoutSetSplitRatioParams),
     #[serde(rename = "layout.balance")]
     LayoutBalance(LayoutBalanceParams),
+    #[serde(rename = "layout.set_preset")]
+    LayoutSetPreset(LayoutSetPresetParams),
     #[serde(rename = "pane.neighbor")]
     PaneNeighbor(PaneNeighborParams),
     #[serde(rename = "pane.edges")]

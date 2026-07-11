@@ -150,6 +150,9 @@ pub enum ResponseResult {
     LayoutBalanced {
         layout: LayoutDescription,
     },
+    LayoutPresetApplied {
+        layout: LayoutDescription,
+    },
     PaneNeighbor {
         neighbor: PaneNeighborResult,
     },
