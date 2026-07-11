@@ -867,6 +867,10 @@ pub struct UiConfig {
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
+    /// Color for `show_workspace_numbers` labels. Same syntax as `accent`.
+    /// Unset uses the theme's muted number color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_number_color: Option<String>,
     /// Optional visual toast notifications for background workspace events.
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
@@ -1072,6 +1076,7 @@ impl Default for UiConfig {
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
             accent: "cyan".into(),
+            workspace_number_color: None,
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }

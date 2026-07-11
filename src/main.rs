@@ -360,6 +360,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
+# Color for show_workspace_numbers labels (same syntax as accent).
+# Unset uses the theme's muted number color.
+# workspace_number_color = "#89b4fa"
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications
