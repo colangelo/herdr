@@ -415,6 +415,10 @@ impl App {
                 self.balance_panes_via_api();
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::NextLayout => {
+                self.cycle_layout_via_api();
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::ToggleSidebar => {
                 self.state.sidebar_collapsed = !self.state.sidebar_collapsed;
                 leave_navigate_mode(&mut self.state);
@@ -666,6 +670,26 @@ impl App {
             crate::api::schema::LayoutBalanceParams {
                 tab_id: None,
                 pane_id: None,
+            },
+        );
+    }
+
+    pub(crate) fn cycle_layout_via_api(&mut self) {
+        let preset = match next_layout_preset(&mut self.state) {
+            crate::layout::LayoutPreset::EvenHorizontal => {
+                crate::api::schema::LayoutPreset::EvenHorizontal
+            }
+            crate::layout::LayoutPreset::EvenVertical => {
+                crate::api::schema::LayoutPreset::EvenVertical
+            }
+            crate::layout::LayoutPreset::Tiled => crate::api::schema::LayoutPreset::Tiled,
+        };
+        self.runtime_layout_set_preset(
+            "tui.layout.set_preset",
+            crate::api::schema::LayoutSetPresetParams {
+                tab_id: None,
+                pane_id: None,
+                preset,
             },
         );
     }
@@ -1435,6 +1459,7 @@ pub(crate) enum NavigateAction {
     ResizePaneUp,
     ResizePaneRight,
     BalancePanes,
+    NextLayout,
     ToggleSidebar,
     CyclePaneNext,
     CyclePanePrevious,
@@ -1586,6 +1611,7 @@ fn non_indexed_action_for_key(
         (&kb.resize_pane_up, NavigateAction::ResizePaneUp),
         (&kb.resize_pane_right, NavigateAction::ResizePaneRight),
         (&kb.balance_panes, NavigateAction::BalancePanes),
+        (&kb.next_layout, NavigateAction::NextLayout),
         (&kb.toggle_sidebar, NavigateAction::ToggleSidebar),
         (&kb.reload_config, NavigateAction::ReloadConfig),
         (
@@ -1639,6 +1665,14 @@ fn navigate_mode_indexed_action_for_key(
     key: &TerminalKey,
 ) -> Option<NavigateAction> {
     indexed_navigation_action(state, key, BindingDispatch::Prefix)
+}
+
+/// Advance the TUI layout-cycle cursor and return the preset to apply next.
+fn next_layout_preset(state: &mut AppState) -> crate::layout::LayoutPreset {
+    let cycle = crate::layout::LayoutPreset::NEXT_CYCLE;
+    let preset = cycle[state.layout_cycle_index % cycle.len()];
+    state.layout_cycle_index = state.layout_cycle_index.wrapping_add(1);
+    preset
 }
 
 #[cfg(test)]
@@ -1849,6 +1883,19 @@ pub(super) fn execute_navigate_action_in_context(
                     .and_then(crate::workspace::Workspace::active_tab_mut)
                 {
                     tab.layout.balance();
+                }
+            }
+            leave_navigate_mode(state);
+        }
+        NavigateAction::NextLayout => {
+            let preset = next_layout_preset(state);
+            if let Some(ws_idx) = state.active {
+                if let Some(tab) = state
+                    .workspaces
+                    .get_mut(ws_idx)
+                    .and_then(crate::workspace::Workspace::active_tab_mut)
+                {
+                    tab.layout.apply_preset(preset);
                 }
             }
             leave_navigate_mode(state);
@@ -3746,6 +3793,29 @@ navigate_pane_down = "ctrl+j"
         };
         assert!((*ratio - 0.5).abs() < f32::EPSILON);
         assert_eq!(state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn next_layout_action_cycles_presets_and_exits_navigate_mode() {
+        let mut state = state_with_workspaces(&["test"]);
+        // Two panes, vertical split; first cycle preset is even-horizontal.
+        state.workspaces[0].test_split(Direction::Vertical);
+
+        execute_navigate_action(&mut state, NavigateAction::NextLayout);
+        let crate::layout::Node::Split { direction, .. } = state.workspaces[0].layout.root() else {
+            panic!("expected split root");
+        };
+        assert_eq!(*direction, Direction::Horizontal); // even-horizontal
+        assert_eq!(state.layout_cycle_index, 1);
+        assert_eq!(state.mode, Mode::Terminal);
+
+        // Next press advances to even-vertical.
+        execute_navigate_action(&mut state, NavigateAction::NextLayout);
+        let crate::layout::Node::Split { direction, .. } = state.workspaces[0].layout.root() else {
+            panic!("expected split root");
+        };
+        assert_eq!(*direction, Direction::Vertical); // even-vertical
+        assert_eq!(state.layout_cycle_index, 2);
     }
 
     #[test]
