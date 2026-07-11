@@ -69,6 +69,28 @@ pub enum NavDirection {
     Down,
 }
 
+/// A tmux-style layout preset that rebuilds the pane tree (see
+/// [`TileLayout::apply_preset`]). `NEXT_CYCLE` is the order a "next layout"
+/// action steps through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutPreset {
+    /// One equal-width row of panes.
+    EvenHorizontal,
+    /// One equal-height column of panes.
+    EvenVertical,
+    /// A near-square grid.
+    Tiled,
+}
+
+impl LayoutPreset {
+    /// The cycle order used by a "next layout" action.
+    pub const NEXT_CYCLE: [LayoutPreset; 3] = [
+        LayoutPreset::EvenHorizontal,
+        LayoutPreset::EvenVertical,
+        LayoutPreset::Tiled,
+    ];
+}
+
 /// A node in the BSP tree. Public for serialization.
 pub enum Node {
     Pane(PaneId),
@@ -221,6 +243,22 @@ impl TileLayout {
         let before = split_ratios(&self.root);
         balance_node(&mut self.root);
         split_ratios(&self.root) != before
+    }
+
+    /// Rebuild the tree into a tmux-style layout preset, preserving pane ids
+    /// (in their current left-to-right order) and the focused pane. Unlike
+    /// [`balance`](Self::balance), this restructures the tree: `EvenHorizontal`
+    /// becomes one equal-width row, `EvenVertical` one equal-height column, and
+    /// `Tiled` a near-square grid. No-op for a single pane. Returns whether a
+    /// preset was applied.
+    pub fn apply_preset(&mut self, preset: LayoutPreset) -> bool {
+        let ids = self.pane_ids();
+        if ids.len() < 2 {
+            return false;
+        }
+        self.root = build_preset(&ids, preset);
+        // Focus is unchanged: the same pane ids are present, just re-arranged.
+        true
     }
 
     /// Adjust the nearest split in the given direction for the focused pane.
@@ -627,6 +665,54 @@ fn balance_node(node: &mut Node) {
     }
 }
 
+fn build_preset(ids: &[PaneId], preset: LayoutPreset) -> Node {
+    match preset {
+        LayoutPreset::EvenHorizontal => build_even_chain(ids, Direction::Horizontal),
+        LayoutPreset::EvenVertical => build_even_chain(ids, Direction::Vertical),
+        LayoutPreset::Tiled => build_tiled(ids),
+    }
+}
+
+/// One equal-sized row/column: a right-leaning chain of `dir` splits whose
+/// ratios give every pane the same fraction.
+fn build_even_chain(ids: &[PaneId], dir: Direction) -> Node {
+    chain_nodes(ids.iter().map(|id| Node::Pane(*id)).collect(), dir)
+}
+
+/// A near-square grid: chunk panes into rows of `ceil(sqrt(n))` columns, make
+/// each row an equal-width horizontal chain, then stack the rows in an
+/// equal-height vertical chain.
+fn build_tiled(ids: &[PaneId]) -> Node {
+    if ids.len() <= 1 {
+        return Node::Pane(ids[0]);
+    }
+    let cols = (ids.len() as f64).sqrt().ceil() as usize;
+    let rows: Vec<Node> = ids
+        .chunks(cols.max(1))
+        .map(|row| build_even_chain(row, Direction::Horizontal))
+        .collect();
+    chain_nodes(rows, Direction::Vertical)
+}
+
+/// Fold pre-built nodes into a right-leaning `dir` chain whose split ratios
+/// give each node an equal share of the axis. Panics only on an empty input,
+/// which callers never pass.
+fn chain_nodes(mut nodes: Vec<Node>, dir: Direction) -> Node {
+    let mut acc = nodes.pop().expect("chain_nodes requires at least one node");
+    let mut count = 1usize;
+    while let Some(node) = nodes.pop() {
+        count += 1;
+        let ratio = (1.0 / count as f32).clamp(0.1, 0.9);
+        acc = Node::Split {
+            direction: dir,
+            ratio,
+            first: Box::new(node),
+            second: Box::new(acc),
+        };
+    }
+    acc
+}
+
 fn get_ratio_at(node: &Node, path: &[bool]) -> Option<f32> {
     if let Node::Split {
         ratio,
@@ -813,6 +899,61 @@ mod tests {
     fn balance_single_pane_is_noop() {
         let (mut layout, _root) = TileLayout::new();
         assert!(!layout.balance());
+    }
+
+    #[test]
+    fn preset_even_horizontal_makes_one_equal_width_row() {
+        let mut layout = sample_layout();
+        let before_focus = layout.focused();
+        assert!(layout.apply_preset(LayoutPreset::EvenHorizontal));
+
+        let area = Rect::new(0, 0, 100, 40);
+        let rects = pane_rects(&layout);
+        assert_eq!(rects.len(), 4);
+        for (_, r) in &rects {
+            assert_eq!(r.height, area.height); // full height => single row
+            assert!((r.width as i32 - 25).abs() <= 1, "width {} != ~25", r.width);
+        }
+        // Same pane set, order, and focus preserved.
+        assert_eq!(
+            rects.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![pane(1), pane(2), pane(3), pane(4)]
+        );
+        assert_eq!(layout.focused(), before_focus);
+    }
+
+    #[test]
+    fn preset_even_vertical_makes_one_equal_height_column() {
+        let mut layout = sample_layout();
+        assert!(layout.apply_preset(LayoutPreset::EvenVertical));
+        let area = Rect::new(0, 0, 100, 40);
+        for (_, r) in pane_rects(&layout) {
+            assert_eq!(r.width, area.width); // full width => single column
+            assert!(
+                (r.height as i32 - 10).abs() <= 1,
+                "height {} != ~10",
+                r.height
+            );
+        }
+    }
+
+    #[test]
+    fn preset_tiled_makes_a_grid() {
+        let mut layout = sample_layout(); // 4 panes -> 2x2
+        assert!(layout.apply_preset(LayoutPreset::Tiled));
+        let rects = pane_rects(&layout);
+        assert_eq!(rects.len(), 4);
+        // Every cell is ~half width and ~half height of the 100x40 area.
+        for (_, r) in &rects {
+            assert!((r.width as i32 - 50).abs() <= 1, "width {}", r.width);
+            assert!((r.height as i32 - 20).abs() <= 1, "height {}", r.height);
+        }
+    }
+
+    #[test]
+    fn preset_single_pane_is_noop() {
+        let (mut layout, _root) = TileLayout::new();
+        assert!(!layout.apply_preset(LayoutPreset::Tiled));
     }
 
     #[test]
