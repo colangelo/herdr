@@ -3771,7 +3771,8 @@
             "top-left",
             "top-right",
             "bottom-left",
-            "bottom-right"
+            "bottom-right",
+            "center"
           ],
           "type": "string"
         },

@@ -66,6 +66,7 @@ pub(crate) fn toast_notification_rect(
         ToastHerdrPosition::TopRight | ToastHerdrPosition::BottomRight => {
             area.x + area.width.saturating_sub(width)
         }
+        ToastHerdrPosition::Center => area.x + area.width.saturating_sub(width) / 2,
     };
     let warning_offset = u16::from(offset_for_warning);
     let y = match position {
@@ -75,6 +76,8 @@ pub(crate) fn toast_notification_rect(
         ToastHerdrPosition::BottomLeft | ToastHerdrPosition::BottomRight => {
             area.y + area.height.saturating_sub(height + warning_offset)
         }
+        // The centered toast floats mid-screen, unaffected by the warning row.
+        ToastHerdrPosition::Center => area.y + area.height.saturating_sub(height) / 2,
     };
     Rect::new(x, y, width, height)
 }
@@ -281,6 +284,19 @@ mod tests {
             toast_notification_rect(area, &toast, false, ToastHerdrPosition::BottomRight);
         assert_eq!(bottom_right.x + bottom_right.width, area.x + area.width);
         assert_eq!(bottom_right.y + bottom_right.height, area.y + area.height);
+    }
+
+    #[test]
+    fn toast_rect_center_floats_mid_screen_and_ignores_warning_offset() {
+        let area = Rect::new(10, 20, 100, 40);
+        let toast = toast();
+
+        let center = toast_notification_rect(area, &toast, false, ToastHerdrPosition::Center);
+        assert_eq!(center.x, area.x + (area.width - center.width) / 2);
+        assert_eq!(center.y, area.y + (area.height - center.height) / 2);
+
+        let with_warning = toast_notification_rect(area, &toast, true, ToastHerdrPosition::Center);
+        assert_eq!(with_warning, center);
     }
 
     #[test]
