@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
@@ -10,9 +10,26 @@ use super::text::display_width_u16;
 use super::widgets::panel_contrast_fg;
 use crate::{
     app::state::{CopyFeedback, Palette, ToastKind, ToastNotification},
-    config::{ToastClipboardPosition, ToastHerdrPosition},
+    config::{ToastClipboardPosition, ToastHerdrPosition, ToastHerdrSize},
     detect::AgentState,
 };
+
+/// Inner padding (columns, rows) added inside the toast box for each size.
+fn toast_size_padding(size: ToastHerdrSize) -> (u16, u16) {
+    match size {
+        ToastHerdrSize::Auto => (0, 0),
+        ToastHerdrSize::Medium | ToastHerdrSize::Large => (2, 1),
+    }
+}
+
+/// Minimum toast width for a size, relative to the anchor area.
+fn toast_size_min_width(size: ToastHerdrSize, anchor_width: u16) -> u16 {
+    match size {
+        ToastHerdrSize::Auto => 0,
+        ToastHerdrSize::Medium => anchor_width * 2 / 5,
+        ToastHerdrSize::Large => anchor_width * 3 / 5,
+    }
+}
 
 pub(crate) fn copy_feedback_rect(
     area: Rect,
@@ -51,33 +68,47 @@ pub(crate) fn copy_feedback_rect(
 
 pub(crate) fn toast_notification_rect(
     area: Rect,
+    content_area: Rect,
     toast: &ToastNotification,
     offset_for_warning: bool,
     position: ToastHerdrPosition,
+    size: ToastHerdrSize,
 ) -> Rect {
+    // Corner toasts anchor to the full frame; the centered toast anchors to
+    // the pane content area so it floats between the panes, not over the
+    // sidebar.
+    let anchor = if position == ToastHerdrPosition::Center && !content_area.is_empty() {
+        content_area
+    } else {
+        area
+    };
+    let (pad_cols, pad_rows) = toast_size_padding(size);
     let content_width = display_width_u16(&toast.title)
         .max(display_width_u16(&toast.context))
         .saturating_add(4);
-    let width = content_width.saturating_add(2).min(area.width);
-    let content_height = if toast.context.is_empty() { 1 } else { 2 };
-    let height = (content_height + 2).min(area.height);
+    let width = content_width
+        .saturating_add(2 + pad_cols * 2)
+        .max(toast_size_min_width(size, anchor.width))
+        .min(anchor.width);
+    let content_height: u16 = if toast.context.is_empty() { 1 } else { 2 };
+    let height = (content_height + 2 + pad_rows * 2).min(anchor.height);
     let x = match position {
-        ToastHerdrPosition::TopLeft | ToastHerdrPosition::BottomLeft => area.x,
+        ToastHerdrPosition::TopLeft | ToastHerdrPosition::BottomLeft => anchor.x,
         ToastHerdrPosition::TopRight | ToastHerdrPosition::BottomRight => {
-            area.x + area.width.saturating_sub(width)
+            anchor.x + anchor.width.saturating_sub(width)
         }
-        ToastHerdrPosition::Center => area.x + area.width.saturating_sub(width) / 2,
+        ToastHerdrPosition::Center => anchor.x + anchor.width.saturating_sub(width) / 2,
     };
     let warning_offset = u16::from(offset_for_warning);
     let y = match position {
         ToastHerdrPosition::TopLeft | ToastHerdrPosition::TopRight => {
-            area.y + warning_offset.min(area.height)
+            anchor.y + warning_offset.min(anchor.height)
         }
         ToastHerdrPosition::BottomLeft | ToastHerdrPosition::BottomRight => {
-            area.y + area.height.saturating_sub(height + warning_offset)
+            anchor.y + anchor.height.saturating_sub(height + warning_offset)
         }
-        // The centered toast floats mid-screen, unaffected by the warning row.
-        ToastHerdrPosition::Center => area.y + area.height.saturating_sub(height) / 2,
+        // The centered toast floats mid-area, unaffected by the warning row.
+        ToastHerdrPosition::Center => anchor.y + anchor.height.saturating_sub(height) / 2,
     };
     Rect::new(x, y, width, height)
 }
@@ -85,9 +116,11 @@ pub(crate) fn toast_notification_rect(
 pub(super) fn render_toast_notification(
     frame: &mut Frame,
     area: Rect,
+    content_area: Rect,
     toast: &ToastNotification,
     offset_for_warning: bool,
     position: ToastHerdrPosition,
+    size: ToastHerdrSize,
     p: &Palette,
 ) {
     let dot_color = match toast.kind {
@@ -95,11 +128,20 @@ pub(super) fn render_toast_notification(
         ToastKind::Finished => p.blue,
         ToastKind::UpdateInstalled => p.accent,
     };
-    let toast_area = toast_notification_rect(area, toast, offset_for_warning, position);
+    let toast_area = toast_notification_rect(
+        area,
+        content_area,
+        toast,
+        offset_for_warning,
+        position,
+        size,
+    );
 
     frame.render_widget(Clear, toast_area);
+    let (pad_cols, pad_rows) = toast_size_padding(size);
     let block = Block::default()
         .borders(Borders::ALL)
+        .padding(Padding::new(pad_cols, pad_cols, pad_rows, pad_rows))
         .border_style(Style::default().fg(p.overlay0))
         .style(Style::default().bg(p.panel_bg));
     let inner = block.inner(toast_area);
@@ -265,38 +307,143 @@ mod tests {
     #[test]
     fn toast_rect_uses_configured_corner() {
         let area = Rect::new(10, 20, 100, 40);
+        let content = Rect::new(40, 22, 70, 38);
         let toast = toast();
 
-        let top_left = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopLeft);
+        let top_left = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::TopLeft,
+            ToastHerdrSize::Auto,
+        );
         assert_eq!(top_left.x, area.x);
         assert_eq!(top_left.y, area.y);
 
-        let top_right = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopRight);
+        let top_right = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::TopRight,
+            ToastHerdrSize::Auto,
+        );
         assert_eq!(top_right.x + top_right.width, area.x + area.width);
         assert_eq!(top_right.y, area.y);
 
-        let bottom_left =
-            toast_notification_rect(area, &toast, false, ToastHerdrPosition::BottomLeft);
+        let bottom_left = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::BottomLeft,
+            ToastHerdrSize::Auto,
+        );
         assert_eq!(bottom_left.x, area.x);
         assert_eq!(bottom_left.y + bottom_left.height, area.y + area.height);
 
-        let bottom_right =
-            toast_notification_rect(area, &toast, false, ToastHerdrPosition::BottomRight);
+        let bottom_right = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::BottomRight,
+            ToastHerdrSize::Auto,
+        );
         assert_eq!(bottom_right.x + bottom_right.width, area.x + area.width);
         assert_eq!(bottom_right.y + bottom_right.height, area.y + area.height);
     }
 
     #[test]
-    fn toast_rect_center_floats_mid_screen_and_ignores_warning_offset() {
-        let area = Rect::new(10, 20, 100, 40);
+    fn toast_rect_center_anchors_to_content_area_and_ignores_warning_offset() {
+        let area = Rect::new(0, 0, 120, 40);
+        let content = Rect::new(30, 2, 90, 38);
         let toast = toast();
 
-        let center = toast_notification_rect(area, &toast, false, ToastHerdrPosition::Center);
-        assert_eq!(center.x, area.x + (area.width - center.width) / 2);
-        assert_eq!(center.y, area.y + (area.height - center.height) / 2);
+        let center = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::Center,
+            ToastHerdrSize::Auto,
+        );
+        assert_eq!(center.x, content.x + (content.width - center.width) / 2);
+        assert_eq!(center.y, content.y + (content.height - center.height) / 2);
 
-        let with_warning = toast_notification_rect(area, &toast, true, ToastHerdrPosition::Center);
+        let with_warning = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            true,
+            ToastHerdrPosition::Center,
+            ToastHerdrSize::Auto,
+        );
         assert_eq!(with_warning, center);
+
+        // With no content area (e.g. empty view), center falls back to the frame.
+        let fallback = toast_notification_rect(
+            area,
+            Rect::default(),
+            &toast,
+            false,
+            ToastHerdrPosition::Center,
+            ToastHerdrSize::Auto,
+        );
+        assert_eq!(fallback.x, area.x + (area.width - fallback.width) / 2);
+        assert_eq!(fallback.y, area.y + (area.height - fallback.height) / 2);
+    }
+
+    #[test]
+    fn toast_rect_size_presets_widen_and_pad_the_box() {
+        let area = Rect::new(0, 0, 120, 40);
+        let content = Rect::new(20, 0, 100, 40);
+        let toast = toast();
+
+        let auto = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::Center,
+            ToastHerdrSize::Auto,
+        );
+        let medium = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::Center,
+            ToastHerdrSize::Medium,
+        );
+        let large = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::Center,
+            ToastHerdrSize::Large,
+        );
+
+        // 40% / 60% of the 100-col content anchor.
+        assert_eq!(medium.width, 40);
+        assert_eq!(large.width, 60);
+        assert!(auto.width < medium.width);
+        // One padding row above and below the two content rows.
+        assert_eq!(medium.height, auto.height + 2);
+        assert_eq!(large.height, auto.height + 2);
+
+        // Corner toasts size against the full frame instead.
+        let corner_large = toast_notification_rect(
+            area,
+            content,
+            &toast,
+            false,
+            ToastHerdrPosition::BottomRight,
+            ToastHerdrSize::Large,
+        );
+        assert_eq!(corner_large.width, 72);
     }
 
     #[test]
@@ -310,7 +457,14 @@ mod tests {
             target: None,
         };
 
-        let rect = toast_notification_rect(area, &toast, false, ToastHerdrPosition::TopRight);
+        let rect = toast_notification_rect(
+            area,
+            Rect::default(),
+            &toast,
+            false,
+            ToastHerdrPosition::TopRight,
+            ToastHerdrSize::Auto,
+        );
 
         let expected_content_width =
             display_width_u16(&toast.title).max(display_width_u16(&toast.context)) + 6;

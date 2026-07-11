@@ -22,7 +22,7 @@ pub use self::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
         ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
         PaneBorderActiveStyleConfig, ShellModeConfig, SidebarCollapsedModeConfig,
-        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
+        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize,
         UpdateChannelConfig, WorkspaceSortConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
