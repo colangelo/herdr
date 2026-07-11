@@ -212,11 +212,14 @@ fn desktop_tab_bar_and_terminal_area(
     }
 }
 
-/// Keep the sidebar lists following focus: when the active workspace or the
-/// focused agent pane changed since the last computed view, scroll the
-/// corresponding list just enough to reveal its entry (nearest edge, no
-/// recentering). Runs in compute_view so it sees settled state regardless of
-/// which path changed focus (keybinding, picker, mouse, or runtime API).
+/// Keep the sidebar lists following focus: while a list's follow is engaged,
+/// every computed view scrolls just enough to keep the active workspace /
+/// focused agent entry visible (nearest edge, no recentering) — even when the
+/// entry moved because the list reordered (priority re-sorts, entries added
+/// or removed). Manual scrolling disengages a list's follow; the next focus
+/// change re-engages it, mirroring `tab_scroll_follow_active`. Runs in
+/// compute_view so it sees settled state regardless of which path changed
+/// focus or order (keybinding, picker, mouse, runtime API, agent state).
 fn follow_sidebar_focus(app: &mut AppState, sidebar_area: Rect) {
     let active_ws_id = app
         .active
@@ -224,6 +227,9 @@ fn follow_sidebar_focus(app: &mut AppState, sidebar_area: Rect) {
         .map(|ws| ws.id.clone());
     if app.sidebar_followed_workspace != active_ws_id {
         app.sidebar_followed_workspace = active_ws_id;
+        app.workspace_list_follow_active = true;
+    }
+    if app.workspace_list_follow_active {
         if let Some(ws_idx) = app.active {
             app.ensure_workspace_visible_in_rect(sidebar_area, ws_idx);
         }
@@ -239,6 +245,9 @@ fn follow_sidebar_focus(app: &mut AppState, sidebar_area: Rect) {
         .map(|(ws_id, _, pane_id)| (ws_id.clone(), *pane_id));
     if app.sidebar_followed_agent != focused_identity {
         app.sidebar_followed_agent = focused_identity;
+        app.agent_panel_follow_active = true;
+    }
+    if app.agent_panel_follow_active {
         if let Some((_, ws_idx, pane_id)) = focused_agent {
             let entry_idx = agent_panel_entries(app)
                 .iter()
@@ -695,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_view_leaves_sidebar_scroll_alone_when_focus_unchanged() {
+    fn compute_view_leaves_sidebar_scroll_alone_after_manual_scroll() {
         let mut app = sidebar_focus_test_app(30);
         let area = Rect::new(0, 0, 80, 24);
         app.active = Some(29);
@@ -704,11 +713,93 @@ mod tests {
         assert!(app.workspace_scroll > 0);
         assert!(app.agent_panel_scroll > 0);
 
+        // Manual scrolling disengages the follow (as the scroll input
+        // handlers do); the lists then stay where the user put them.
+        app.workspace_list_follow_active = false;
+        app.agent_panel_follow_active = false;
         app.workspace_scroll = 0;
         app.agent_panel_scroll = 0;
         compute_view(&mut app, area);
         assert_eq!(app.workspace_scroll, 0);
         assert_eq!(app.agent_panel_scroll, 0);
+
+        // The next focus change re-engages the follow.
+        app.active = Some(28);
+        app.selected = 28;
+        compute_view(&mut app, area);
+        assert!(app.workspace_list_follow_active);
+        assert!(app.agent_panel_follow_active);
+        assert!(app.workspace_scroll > 0);
+        assert!(app.agent_panel_scroll > 0);
+    }
+
+    fn set_agent_state(
+        app: &mut crate::app::state::AppState,
+        ws_idx: usize,
+        state: crate::detect::AgentState,
+    ) {
+        let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+        let terminal_id = app.workspaces[ws_idx].tabs[0]
+            .panes
+            .get(&pane_id)
+            .expect("root pane")
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).expect("terminal").state = state;
+    }
+
+    fn focused_agent_entry_visible(app: &crate::app::state::AppState) -> bool {
+        let (_, detail_area) =
+            expanded_sidebar_sections(app.view.sidebar_rect, app.sidebar_section_split);
+        let metrics = agent_panel_scroll_metrics(app, detail_area);
+        let ws_idx = app.active.expect("active workspace");
+        let pane_id = app.workspaces[ws_idx].focused_pane_id().expect("focus");
+        let idx = agent_panel_entries(app)
+            .iter()
+            .position(|entry| entry.ws_idx == ws_idx && entry.pane_id == pane_id)
+            .expect("focused agent entry");
+        idx >= app.agent_panel_scroll && idx < app.agent_panel_scroll + metrics.viewport_rows
+    }
+
+    #[test]
+    fn compute_view_keeps_focused_agent_visible_when_priority_resort_moves_it() {
+        let mut app = sidebar_focus_test_app(30);
+        app.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
+        let area = Rect::new(0, 0, 80, 24);
+        app.active = Some(29);
+        app.selected = 29;
+        compute_view(&mut app, area);
+        assert!(app.agent_panel_scroll > 0);
+        assert!(focused_agent_entry_visible(&app));
+
+        // The focused agent starts working: priority sort bubbles its entry
+        // to the top without any focus change. The follow keeps it visible.
+        set_agent_state(&mut app, 29, crate::detect::AgentState::Working);
+        assert_eq!(agent_panel_entries(&app)[0].ws_idx, 29);
+        compute_view(&mut app, area);
+        assert!(focused_agent_entry_visible(&app));
+        assert_eq!(app.agent_panel_scroll, 0);
+    }
+
+    #[test]
+    fn compute_view_keeps_active_workspace_visible_when_priority_resort_moves_it() {
+        let mut app = sidebar_focus_test_app(30);
+        app.workspace_sort = crate::app::state::WorkspaceSort::Priority;
+        let area = Rect::new(0, 0, 80, 24);
+        app.active = Some(29);
+        app.selected = 29;
+        compute_view(&mut app, area);
+        assert!(app.workspace_scroll > 0);
+
+        // The active workspace's agent starts working: priority sort moves
+        // its row to the top without a focus change. The follow tracks it.
+        set_agent_state(&mut app, 29, crate::detect::AgentState::Working);
+        compute_view(&mut app, area);
+        assert!(app
+            .view
+            .workspace_card_areas
+            .iter()
+            .any(|card| card.ws_idx == 29));
     }
 
     #[test]
