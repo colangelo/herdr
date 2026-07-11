@@ -134,6 +134,14 @@ impl StatusIndicatorStyle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceSortConfig {
+    #[default]
+    Manual,
+    Priority,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -914,6 +922,9 @@ pub struct UiConfig {
     pub status_indicators: StatusIndicatorStyle,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
+    /// Sidebar workspace list ordering. "manual" keeps the user's drag order,
+    /// "priority" bubbles attention-needing workspaces to the top. Default: "manual".
+    pub workspace_sort: WorkspaceSortConfig,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
@@ -1144,6 +1155,7 @@ impl Default for UiConfig {
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
+            workspace_sort: WorkspaceSortConfig::Manual,
             accent: "cyan".into(),
             workspace_number_color: None,
             toast: ToastConfig::default(),
@@ -1403,6 +1415,35 @@ status_indicators = "symbols"
         )
         .unwrap();
         assert_eq!(config.ui.status_indicators, StatusIndicatorStyle::Symbols);
+    }
+
+    #[test]
+    fn workspace_sort_config_parses_and_defaults() {
+        assert_eq!(
+            Config::default().ui.workspace_sort,
+            WorkspaceSortConfig::Manual
+        );
+
+        let toml = r#"
+[ui]
+workspace_sort = "priority"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Priority);
+
+        let toml = r#"
+[ui]
+workspace_sort = "manual"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
+
+        let toml = r#"
+[ui]
+agent_panel_scope = "current"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
     }
 
     #[test]
