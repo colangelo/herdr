@@ -381,6 +381,7 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::LayoutApply(_) => "layout.apply",
         Method::LayoutSetSplitRatio(_) => "layout.set_split_ratio",
         Method::LayoutBalance(_) => "layout.balance",
+        Method::LayoutSetPreset(_) => "layout.set_preset",
         Method::PaneNeighbor(_) => "pane.neighbor",
         Method::PaneEdges(_) => "pane.edges",
         Method::PaneFocusDirection(_) => "pane.focus_direction",

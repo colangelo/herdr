@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 17,
+  "protocol": 18,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -1905,6 +1905,50 @@
               "type": "object"
             }
           ]
+        },
+        "LayoutPreset": {
+          "description": "A tmux-style layout preset that rebuilds the pane tree.",
+          "oneOf": [
+            {
+              "const": "even_horizontal",
+              "description": "One equal-width row of panes.",
+              "type": "string"
+            },
+            {
+              "const": "even_vertical",
+              "description": "One equal-height column of panes.",
+              "type": "string"
+            },
+            {
+              "const": "tiled",
+              "description": "A near-square grid.",
+              "type": "string"
+            }
+          ]
+        },
+        "LayoutSetPresetParams": {
+          "description": "Rebuild a layout into a preset (`even_horizontal` / `even_vertical` /\n`tiled`). Targets a layout by `tab_id` or `pane_id`; with neither, the\nactive tab is used.",
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "preset": {
+              "$ref": "#/schemas/request/$defs/LayoutPreset"
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "preset"
+          ],
+          "type": "object"
         },
         "LayoutSetSplitRatioParams": {
           "properties": {
@@ -4737,6 +4781,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/LayoutBalanceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "layout.set_preset",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/LayoutSetPresetParams"
             }
           },
           "required": [
@@ -8533,6 +8593,22 @@
                 },
                 "type": {
                   "const": "layout_balanced",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "layout"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "layout": {
+                  "$ref": "#/schemas/success_response/$defs/LayoutDescription"
+                },
+                "type": {
+                  "const": "layout_preset_applied",
                   "type": "string"
                 }
               },
