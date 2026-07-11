@@ -932,6 +932,10 @@ pub struct UiConfig {
     /// Unset uses the theme's muted number color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_number_color: Option<String>,
+    /// Override color for the focused (active) pane border. Same syntax as `accent`.
+    /// Unset uses the theme accent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_border_active_color: Option<String>,
     /// Optional visual toast notifications for background workspace events.
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
@@ -1158,6 +1162,7 @@ impl Default for UiConfig {
             workspace_sort: WorkspaceSortConfig::Manual,
             accent: "cyan".into(),
             workspace_number_color: None,
+            pane_border_active_color: None,
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }

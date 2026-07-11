@@ -703,6 +703,11 @@ impl App {
                 .workspace_number_color
                 .as_deref()
                 .map(crate::config::parse_color),
+            pane_border_active_color: config
+                .ui
+                .pane_border_active_color
+                .as_deref()
+                .map(crate::config::parse_color),
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
@@ -1551,6 +1556,11 @@ impl App {
                 self.state.workspace_number_color = config
                     .ui
                     .workspace_number_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.pane_border_active_color = config
+                    .ui
+                    .pane_border_active_color
                     .as_deref()
                     .map(crate::config::parse_color);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
