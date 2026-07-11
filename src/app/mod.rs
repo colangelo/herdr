@@ -671,6 +671,22 @@ impl App {
                 .pane_border_active_color
                 .as_deref()
                 .map(crate::config::parse_color),
+            pane_border_inactive_color: config
+                .ui
+                .pane_border_inactive_color
+                .as_deref()
+                .map(crate::config::parse_color),
+            pane_border_active_style: config.ui.pane_border_active_style,
+            pane_title_active_color: config
+                .ui
+                .pane_title_active_color
+                .as_deref()
+                .map(crate::config::parse_color),
+            pane_title_inactive_color: config
+                .ui
+                .pane_title_inactive_color
+                .as_deref()
+                .map(crate::config::parse_color),
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
@@ -1483,6 +1499,22 @@ impl App {
                 self.state.pane_border_active_color = config
                     .ui
                     .pane_border_active_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.pane_border_inactive_color = config
+                    .ui
+                    .pane_border_inactive_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.pane_border_active_style = config.ui.pane_border_active_style;
+                self.state.pane_title_active_color = config
+                    .ui
+                    .pane_title_active_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.pane_title_inactive_color = config
+                    .ui
+                    .pane_title_inactive_color
                     .as_deref()
                     .map(crate::config::parse_color);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {

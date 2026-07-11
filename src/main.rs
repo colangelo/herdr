@@ -372,6 +372,18 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Unset uses the theme accent.
 # pane_border_active_color = "#d78700"
 
+# Color for unfocused (inactive) pane borders (same syntax as accent).
+# Unset uses the theme's muted border color.
+# pane_border_inactive_color = "#4a4a4a"
+
+# Box-drawing weight for the focused pane border: "light", "heavy", or "double".
+# pane_border_active_style = "light"
+
+# Colors for pane border titles (same syntax as accent). Unset follows the
+# matching border color.
+# pane_title_active_color = "#ffd700"
+# pane_title_inactive_color = "#7a7a7a"
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications
