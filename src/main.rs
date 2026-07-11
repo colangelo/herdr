@@ -360,6 +360,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # pane_title_active_color = "#ffd700"
 # pane_title_inactive_color = "#7a7a7a"
 
+# Draw border lines above and below the active space and agent in the sidebar,
+# using pane_border_active_color and pane_border_active_style.
+# sidebar_active_border = false
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications
