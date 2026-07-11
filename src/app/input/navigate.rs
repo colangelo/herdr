@@ -2195,6 +2195,35 @@ mod tests {
     }
 
     #[test]
+    fn indexed_switch_workspace_keybind_follows_priority_sorted_order() {
+        let mut state = state_with_workspaces(&["one", "two", "three"]);
+        let mut terminal_runtimes = TerminalRuntimeRegistry::new();
+        state.ensure_test_terminals();
+        state.workspace_sort = crate::app::state::WorkspaceSort::Priority;
+        let pane = state.workspaces[2].tabs[0].root_pane;
+        let terminal_id = state.workspaces[2].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal.state = crate::detect::AgentState::Blocked;
+        state.mode = Mode::Prefix;
+        state.active = Some(0);
+        state.selected = 0;
+
+        // "three" is blocked and bubbles to visible position 0.
+        execute_navigate_action_in_context(
+            &mut state,
+            &mut terminal_runtimes,
+            NavigateAction::SwitchWorkspace(0),
+            ActionContext::Prefix,
+        );
+
+        assert_eq!(state.active, Some(2));
+        assert_eq!(state.selected, 2);
+    }
+
+    #[test]
     fn custom_sidebar_toggle_key_toggles_and_exits_navigate() {
         let mut state = state_with_workspaces(&["test"]);
         state.keybinds.toggle_sidebar = crate::config::ActionKeybinds::prefix("g");
