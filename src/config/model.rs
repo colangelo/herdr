@@ -440,6 +440,8 @@ pub struct KeysConfig {
     pub resize_mode: BindingConfig,
     /// Balance all panes in the current tab to equal sizes. Default: "prefix+="
     pub balance_panes: BindingConfig,
+    /// Cycle the tab through layout presets (even-h -> even-v -> tiled). Default: "prefix+space"
+    pub next_layout: BindingConfig,
     /// Toggle sidebar collapse. Default: "prefix+b"
     pub toggle_sidebar: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
@@ -1020,6 +1022,7 @@ impl Default for KeysConfig {
             zoom: BindingConfig::one("prefix+z"),
             resize_mode: BindingConfig::one("prefix+r"),
             balance_panes: BindingConfig::one("prefix+="),
+            next_layout: BindingConfig::one("prefix+space"),
             toggle_sidebar: BindingConfig::one("prefix+b"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
