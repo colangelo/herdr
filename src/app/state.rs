@@ -1500,6 +1500,8 @@ pub struct AppState {
     pub accent: Color,
     /// Override color for `show_workspace_numbers` labels; None uses the palette default.
     pub workspace_number_color: Option<Color>,
+    /// Override color for the focused (active) pane border; None uses the palette accent.
+    pub pane_border_active_color: Option<Color>,
     pub sound: SoundConfig,
     pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
@@ -1867,6 +1869,7 @@ impl AppState {
             pane_scrollback_limit_bytes: crate::config::DEFAULT_SCROLLBACK_LIMIT_BYTES,
             accent: Color::Cyan,
             workspace_number_color: None,
+            pane_border_active_color: None,
             sound: SoundConfig {
                 enabled: false,
                 ..SoundConfig::default()

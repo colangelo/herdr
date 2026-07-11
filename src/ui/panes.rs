@@ -476,7 +476,7 @@ fn render_pane_borders(app: &AppState, ws: &crate::workspace::Workspace, frame: 
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
         let color = if focused {
-            app.palette.accent
+            app.pane_border_active_color.unwrap_or(app.palette.accent)
         } else {
             app.palette.overlay0
         };
