@@ -1,9 +1,10 @@
 use crate::api::schema::{
-    EmptyParams, LayoutBalanceParams, LayoutSetSplitRatioParams, Method, PaneFocusDirectionParams,
-    PaneInputSetParams, PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams,
-    PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
-    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
+    EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, LayoutSetSplitRatioParams, Method,
+    PaneFocusDirectionParams, PaneInputSetParams, PaneRenameParams, PaneResizeParams,
+    PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, TabCreateParams, TabMoveParams,
+    TabRenameParams, TabTarget, WorkspaceCreateParams, WorkspaceMoveBlockParams,
+    WorkspaceMoveParams, WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams,
+    WorktreeOpenParams, WorktreeRemoveParams,
 };
 
 use super::App;
@@ -171,6 +172,14 @@ impl App {
         params: LayoutBalanceParams,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::LayoutBalance(params))
+    }
+
+    pub(crate) fn runtime_layout_set_preset(
+        &mut self,
+        id: &'static str,
+        params: LayoutSetPresetParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::LayoutSetPreset(params))
     }
 
     pub(crate) fn runtime_worktree_create_deferred(

@@ -173,6 +173,30 @@ pub struct LayoutBalanceParams {
     pub pane_id: Option<String>,
 }
 
+/// A tmux-style layout preset that rebuilds the pane tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutPreset {
+    /// One equal-width row of panes.
+    EvenHorizontal,
+    /// One equal-height column of panes.
+    EvenVertical,
+    /// A near-square grid.
+    Tiled,
+}
+
+/// Rebuild a layout into a preset (`even_horizontal` / `even_vertical` /
+/// `tiled`). Targets a layout by `tab_id` or `pane_id`; with neither, the
+/// active tab is used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LayoutSetPresetParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    pub preset: LayoutPreset,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LayoutDescription {
     pub workspace_id: String,
