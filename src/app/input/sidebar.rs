@@ -1286,6 +1286,44 @@ mod tests {
     }
 
     #[test]
+    fn dragging_workspace_does_not_reorder_under_priority_sort() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![
+            Workspace::test_new("a"),
+            Workspace::test_new("b"),
+            Workspace::test_new("c"),
+        ];
+        app.state.workspace_sort = crate::app::state::WorkspaceSort::Priority;
+        app.state.active = Some(1);
+        app.state.selected = 2;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let source_row = app.state.view.workspace_card_areas[1].rect.y;
+        let target_row = app.state.view.workspace_card_areas[0].rect.y;
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            source_row,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            2,
+            target_row,
+        ));
+
+        assert!(app.state.drag.is_none());
+
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 2, target_row));
+        let names: Vec<_> = app
+            .state
+            .workspaces
+            .iter()
+            .map(|ws| ws.display_name())
+            .collect();
+        assert_eq!(names, vec!["a", "b", "c"]);
+    }
+
+    #[test]
     fn clicking_tab_scroll_button_reveals_hidden_tabs_without_renaming() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");

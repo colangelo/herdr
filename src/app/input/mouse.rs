@@ -695,7 +695,12 @@ impl AppState {
                     if let Some(press) = &self.workspace_press {
                         let delta_col = mouse.column.abs_diff(press.start_col);
                         let delta_row = mouse.row.abs_diff(press.start_row);
-                        let can_reorder = self
+                        // Priority sort derives the visible order from agent
+                        // attention, so manual drag reordering is disabled.
+                        let can_reorder = matches!(
+                            self.workspace_sort,
+                            crate::app::state::WorkspaceSort::Manual
+                        ) && self
                             .workspaces
                             .get(press.ws_idx)
                             .is_some_and(|ws| ws.worktree_space().is_none());
