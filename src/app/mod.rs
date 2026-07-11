@@ -650,6 +650,7 @@ impl App {
             tab_bar_position: config.ui.tab_bar_position,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
+            show_workspace_numbers: config.ui.show_workspace_numbers,
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -1481,6 +1482,7 @@ impl App {
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
                 );
+                self.state.show_workspace_numbers = config.ui.show_workspace_numbers;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.status_indicators = config.ui.status_indicators;

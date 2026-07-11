@@ -369,6 +369,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
+# Show each workspace's jump number (1-9, the switch_workspace target) on the
+# sidebar branch line.
+# show_workspace_numbers = false
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
