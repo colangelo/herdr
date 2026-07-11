@@ -189,7 +189,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # next_workspace = ""     # optional, unset by default
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
-# focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"
+# focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9";
+#                          # add an "a..z" range for entries 10-35, e.g.
+#                          # ["prefix+alt+1..9", "prefix+alt+a..z"]
 # remote_image_paste = "ctrl+v" # only active in herdr --remote; empty disables raw-key image paste
 # new_tab = "prefix+c"
 # rename_tab = "prefix+shift+t"
@@ -356,12 +358,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # (attention-needing workspaces bubble to the top, like agent_panel_sort).
 # workspace_sort = "manual"
 
-# Show each workspace's jump number (1-9, the switch_workspace target) on the
-# sidebar branch line.
+# Show each workspace's jump symbol (1-9, then a-z; the switch_workspace
+# target) on the sidebar branch line.
 # show_workspace_numbers = false
 
-# Show each agent's jump number (1-9, the focus_agent target) on the agent
-# panel status line.
+# Show each agent's jump symbol (1-9, then a-z; the focus_agent target) on
+# the agent panel status line.
 # show_agent_numbers = false
 
 # Accent color for highlights, borders, and navigation UI.

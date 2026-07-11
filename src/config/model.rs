@@ -894,11 +894,11 @@ pub struct UiConfig {
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
-    /// Show the workspace jump number (1-9, the `switch_workspace` target) on the
-    /// sidebar branch line. Default: false.
+    /// Show the workspace jump symbol (1-9, then a-z; the `switch_workspace`
+    /// target) on the sidebar branch line. Default: false.
     pub show_workspace_numbers: bool,
-    /// Show each agent's jump number (1-9, the `focus_agent` target) on the
-    /// agent panel status line. Default: false.
+    /// Show each agent's jump symbol (1-9, then a-z; the `focus_agent`
+    /// target) on the agent panel status line. Default: false.
     pub show_agent_numbers: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
