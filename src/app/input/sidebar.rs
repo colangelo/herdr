@@ -64,6 +64,7 @@ impl AppState {
     }
 
     pub(super) fn set_workspace_list_offset_from_bottom(&mut self, offset_from_bottom: usize) {
+        self.workspace_list_follow_active = false;
         let area = self.workspace_list_rect();
         let metrics = crate::ui::workspace_list_scroll_metrics(self, area);
         self.workspace_scroll = metrics
@@ -77,6 +78,7 @@ impl AppState {
     }
 
     pub(super) fn scroll_workspace_list(&mut self, delta: i16) {
+        self.workspace_list_follow_active = false;
         if delta.is_negative() {
             self.workspace_scroll = self
                 .workspace_scroll
@@ -143,6 +145,7 @@ impl AppState {
     }
 
     pub(super) fn set_agent_panel_offset_from_bottom(&mut self, offset_from_bottom: usize) {
+        self.agent_panel_follow_active = false;
         let area = self.agent_panel_rect();
         let metrics = crate::ui::agent_panel_scroll_metrics(self, area);
         self.agent_panel_scroll = metrics
@@ -151,6 +154,7 @@ impl AppState {
     }
 
     pub(super) fn scroll_agent_panel(&mut self, delta: i16) {
+        self.agent_panel_follow_active = false;
         let area = self.agent_panel_rect();
         let max_scroll = crate::ui::agent_panel_scroll_metrics(self, area).max_offset_from_bottom;
         if delta.is_negative() {
