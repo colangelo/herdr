@@ -328,6 +328,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
+# Workspace list ordering: "manual" (your drag order) or "priority"
+# (attention-needing workspaces bubble to the top, like agent_panel_sort).
+# workspace_sort = "manual"
+
 # Show each workspace's jump number (1-9, the switch_workspace target) on the
 # sidebar branch line.
 # show_workspace_numbers = false
