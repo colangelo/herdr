@@ -368,6 +368,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Unset uses the theme's muted number color.
 # workspace_number_color = "#89b4fa"
 
+# Color for the focused (active) pane border (same syntax as accent).
+# Unset uses the theme accent.
+# pane_border_active_color = "#d78700"
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications

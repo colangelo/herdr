@@ -10,6 +10,7 @@
 - Added tmux-style layout presets (`even_horizontal`, `even_vertical`, `tiled`) via the `layout.set_preset` socket API, a `next_layout` action to cycle them (`prefix+space` by default), and CLI verbs `herdr pane balance` and `herdr pane layout --set <even-h|even-v|tiled>`.
 - Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line, with `ui.workspace_number_color` to set their color (same syntax as `accent`). Default off / theme color.
 - Added `ui.workspace_sort = "priority"` to live-sort the sidebar workspace list by attention priority (blocked, done, working, idle, unknown; most recent state change first within a tier). Worktree groups move as one unit. Default `"manual"` keeps the drag order; drag-reordering is disabled while `"priority"` is active.
+- Added `ui.pane_border_active_color` to set the focused (active) pane border color (same syntax as `accent`). Unset uses the theme accent.
 
 ### Changed
 - Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.
