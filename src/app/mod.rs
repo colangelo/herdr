@@ -589,6 +589,8 @@ impl App {
             agent_panel_scroll: 0,
             sidebar_followed_workspace: None,
             sidebar_followed_agent: None,
+            workspace_list_follow_active: true,
+            agent_panel_follow_active: true,
             tab_scroll: 0,
             tab_scroll_follow_active: true,
             mobile_switcher_scroll: 0,
