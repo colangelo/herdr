@@ -400,6 +400,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # (a vertical bar on that edge). Booleans still work: true = "both".
 # sidebar_active_border = "off"
 
+# Default backgrounds for focused/unfocused pane cells (same syntax as accent),
+# like tmux window-active-style / window-style. Only cells without an
+# app-painted background are tinted. Unset keeps the terminal default.
+# pane_active_bg = "#000000"
+# pane_inactive_bg = "#0c0c0c"
+
+# Dim unfocused pane content in all modes, not only while a herdr mode
+# (prefix/navigate) is active.
+# dim_inactive_panes = false
+
 # Background notification popup delivery
 [ui.toast]
 # off = disable pop-up notifications

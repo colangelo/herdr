@@ -326,14 +326,29 @@ pub(super) fn render_panes(
             rt.render(frame, info.inner_rect, show_cursor);
             render_pane_scrollbar(app, frame, info, rt);
 
-            let should_dim = !info.is_focused && multi_pane && !terminal_active;
-            if should_dim {
+            let should_dim =
+                !info.is_focused && multi_pane && (app.dim_inactive_panes || !terminal_active);
+            // tmux window-style/window-active-style bg: tint only cells that
+            // kept the terminal's default background — app-painted cells win.
+            let bg_tint = if info.is_focused {
+                app.pane_active_bg
+            } else {
+                app.pane_inactive_bg
+            };
+            if should_dim || bg_tint.is_some() {
                 let inner = info.inner_rect;
                 let buf = frame.buffer_mut();
                 for y in inner.y..inner.y + inner.height {
                     for x in inner.x..inner.x + inner.width {
                         let cell = &mut buf[(x, y)];
-                        cell.set_style(cell.style().add_modifier(Modifier::DIM));
+                        if should_dim {
+                            cell.set_style(cell.style().add_modifier(Modifier::DIM));
+                        }
+                        if let Some(bg) = bg_tint {
+                            if cell.style().bg.is_none_or(|c| c == Color::Reset) {
+                                cell.set_style(cell.style().bg(bg));
+                            }
+                        }
                     }
                 }
             }
