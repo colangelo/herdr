@@ -400,6 +400,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # (a vertical bar on that edge). Booleans still work: true = "both".
 # sidebar_active_border = "off"
 
+# Background of the active space and agent rows in the sidebar (same syntax
+# as accent). Unset uses the theme's subtle highlight.
+# sidebar_active_bg = "#000000"
+
 # Default backgrounds for focused/unfocused pane cells (same syntax as accent),
 # like tmux window-active-style / window-style. Only cells without an
 # app-painted background are tinted. Unset keeps the terminal default.
