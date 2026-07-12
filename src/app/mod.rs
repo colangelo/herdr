@@ -683,6 +683,17 @@ impl App {
                 .as_deref()
                 .map(crate::config::parse_color),
             sidebar_active_border: config.ui.sidebar_active_border,
+            pane_active_bg: config
+                .ui
+                .pane_active_bg
+                .as_deref()
+                .map(crate::config::parse_color),
+            pane_inactive_bg: config
+                .ui
+                .pane_inactive_bg
+                .as_deref()
+                .map(crate::config::parse_color),
+            dim_inactive_panes: config.ui.dim_inactive_panes,
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
@@ -1508,6 +1519,17 @@ impl App {
                     .as_deref()
                     .map(crate::config::parse_color);
                 self.state.sidebar_active_border = config.ui.sidebar_active_border;
+                self.state.pane_active_bg = config
+                    .ui
+                    .pane_active_bg
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.pane_inactive_bg = config
+                    .ui
+                    .pane_inactive_bg
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.dim_inactive_panes = config.ui.dim_inactive_panes;
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
                     self.state.request_client_config_reload = true;
                 }
