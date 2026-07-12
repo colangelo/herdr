@@ -1528,6 +1528,9 @@ pub struct AppState {
     /// Highlight pattern for the active space and agent in the sidebar,
     /// styled like the active pane border.
     pub sidebar_active_border: crate::config::SidebarActiveBorderConfig,
+    /// Background of the active space and agent rows in the sidebar; None
+    /// uses the theme's subtle highlight.
+    pub sidebar_active_bg: Option<Color>,
     /// Default background for the focused pane's cells; None keeps the
     /// terminal default. Only default-background cells are tinted.
     pub pane_active_bg: Option<Color>,
@@ -1632,6 +1635,12 @@ impl AppState {
             self.pane_title_inactive_color
         };
         explicit.unwrap_or_else(|| self.pane_border_color(focused))
+    }
+
+    /// Background of the active space/agent band in the sidebar; falls back
+    /// to the theme's subtle highlight when unset.
+    pub fn sidebar_active_band_bg(&self) -> Color {
+        self.sidebar_active_bg.unwrap_or(self.palette.surface_dim)
     }
 
     pub fn pane_history_persistence_enabled(&self) -> bool {
@@ -1937,6 +1946,7 @@ impl AppState {
             pane_title_active_color: None,
             pane_title_inactive_color: None,
             sidebar_active_border: crate::config::SidebarActiveBorderConfig::Off,
+            sidebar_active_bg: None,
             pane_active_bg: None,
             pane_inactive_bg: None,
             dim_inactive_panes: false,
