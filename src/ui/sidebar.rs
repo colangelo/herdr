@@ -799,14 +799,14 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         let row_style = if is_selected {
             Style::default().bg(selection_bg)
         } else if is_active {
-            Style::default().bg(p.active_row_bg)
+            Style::default().bg(app.sidebar_active_band_bg())
         } else {
             Style::default()
         };
         let num_style = if is_selected {
             Style::default().fg(p.overlay1).bg(selection_bg)
         } else if is_active {
-            Style::default().fg(p.text).bg(p.active_row_bg)
+            Style::default().fg(p.text).bg(app.sidebar_active_band_bg())
         } else {
             Style::default().fg(p.overlay0)
         };
@@ -1261,7 +1261,7 @@ fn render_workspace_list(
             } else if is_dragged {
                 p.surface1
             } else {
-                p.active_row_bg
+                app.sidebar_active_band_bg()
             };
             let buf = frame.buffer_mut();
             for y in row_y..row_y + row_height {
@@ -1502,7 +1502,7 @@ fn render_agent_detail(
 
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
         let row_style = if is_active {
-            Style::default().bg(p.active_row_bg)
+            Style::default().bg(app.sidebar_active_band_bg())
         } else {
             Style::default()
         };
