@@ -1503,6 +1503,14 @@ pub struct AppState {
     /// Highlight pattern for the active space and agent in the sidebar,
     /// styled like the active pane border.
     pub sidebar_active_border: crate::config::SidebarActiveBorderConfig,
+    /// Default background for the focused pane's cells; None keeps the
+    /// terminal default. Only default-background cells are tinted.
+    pub pane_active_bg: Option<Color>,
+    /// Default background for unfocused panes' cells; None keeps the
+    /// terminal default. Only default-background cells are tinted.
+    pub pane_inactive_bg: Option<Color>,
+    /// Dim unfocused pane content in all modes, not only in prefix/navigate.
+    pub dim_inactive_panes: bool,
     pub sound: SoundConfig,
     pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
@@ -1907,6 +1915,9 @@ impl AppState {
             pane_title_active_color: None,
             pane_title_inactive_color: None,
             sidebar_active_border: crate::config::SidebarActiveBorderConfig::Off,
+            pane_active_bg: None,
+            pane_inactive_bg: None,
+            dim_inactive_panes: false,
             sound: SoundConfig {
                 enabled: false,
                 ..SoundConfig::default()
