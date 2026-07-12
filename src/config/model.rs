@@ -136,6 +136,82 @@ pub enum PaneBorderActiveStyleConfig {
     Double,
 }
 
+/// Highlight pattern for the active space/agent in the sidebar. Accepts a
+/// string mode or, for backward compatibility, a bool (true = both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarActiveBorderConfig {
+    #[default]
+    Off,
+    Above,
+    Below,
+    Both,
+    Left,
+    Right,
+}
+
+impl SidebarActiveBorderConfig {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Above => "above",
+            Self::Below => "below",
+            Self::Both => "both",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+impl Serialize for SidebarActiveBorderConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SidebarActiveBorderConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ModeVisitor;
+
+        impl serde::de::Visitor<'_> for ModeVisitor {
+            type Value = SidebarActiveBorderConfig;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str(
+                    "a bool or one of \"off\", \"above\", \"below\", \"both\", \"left\", \"right\"",
+                )
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(if value {
+                    SidebarActiveBorderConfig::Both
+                } else {
+                    SidebarActiveBorderConfig::Off
+                })
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value {
+                    "off" => Ok(SidebarActiveBorderConfig::Off),
+                    "above" => Ok(SidebarActiveBorderConfig::Above),
+                    "below" => Ok(SidebarActiveBorderConfig::Below),
+                    "both" => Ok(SidebarActiveBorderConfig::Both),
+                    "left" => Ok(SidebarActiveBorderConfig::Left),
+                    "right" => Ok(SidebarActiveBorderConfig::Right),
+                    _ => Err(E::unknown_variant(
+                        value,
+                        &["off", "above", "below", "both", "left", "right"],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ModeVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -897,10 +973,11 @@ pub struct UiConfig {
     /// Unset follows `pane_border_inactive_color`, then the theme's muted color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_title_inactive_color: Option<String>,
-    /// Draw horizontal border lines above and below the active space and agent
-    /// in the sidebar, using `pane_border_active_color` and
-    /// `pane_border_active_style`. Default: false.
-    pub sidebar_active_border: bool,
+    /// Highlight pattern for the active space and agent in the sidebar, using
+    /// `pane_border_active_color` and `pane_border_active_style`. Accepts
+    /// "off", "above", "below", "both", "left", "right" — or a bool for
+    /// backward compatibility (true = "both"). Default: off.
+    pub sidebar_active_border: SidebarActiveBorderConfig,
     /// Optional visual toast notifications for background workspace events.
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
@@ -1105,7 +1182,7 @@ impl Default for UiConfig {
             pane_border_active_style: PaneBorderActiveStyleConfig::Light,
             pane_title_active_color: None,
             pane_title_inactive_color: None,
-            sidebar_active_border: false,
+            sidebar_active_border: SidebarActiveBorderConfig::Off,
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
         }
@@ -1342,7 +1419,10 @@ agent_panel_scope = "current"
         assert_eq!(defaults.ui.pane_border_inactive_color, None);
         assert_eq!(defaults.ui.pane_title_active_color, None);
         assert_eq!(defaults.ui.pane_title_inactive_color, None);
-        assert!(!defaults.ui.sidebar_active_border);
+        assert_eq!(
+            defaults.ui.sidebar_active_border,
+            SidebarActiveBorderConfig::Off
+        );
 
         let toml = r##"
 [ui]
@@ -1374,7 +1454,30 @@ sidebar_active_border = true
             config.ui.pane_title_inactive_color.as_deref(),
             Some("#7a7a7a")
         );
-        assert!(config.ui.sidebar_active_border);
+        // legacy bool maps to both/off
+        assert_eq!(
+            config.ui.sidebar_active_border,
+            SidebarActiveBorderConfig::Both
+        );
+        let config: Config = toml::from_str("[ui]\nsidebar_active_border = false").unwrap();
+        assert_eq!(
+            config.ui.sidebar_active_border,
+            SidebarActiveBorderConfig::Off
+        );
+
+        for (value, expected) in [
+            ("off", SidebarActiveBorderConfig::Off),
+            ("above", SidebarActiveBorderConfig::Above),
+            ("below", SidebarActiveBorderConfig::Below),
+            ("both", SidebarActiveBorderConfig::Both),
+            ("left", SidebarActiveBorderConfig::Left),
+            ("right", SidebarActiveBorderConfig::Right),
+        ] {
+            let toml = format!("[ui]\nsidebar_active_border = \"{value}\"");
+            let config: Config = toml::from_str(&toml).unwrap();
+            assert_eq!(config.ui.sidebar_active_border, expected, "{value}");
+        }
+        assert!(toml::from_str::<Config>("[ui]\nsidebar_active_border = \"under\"").is_err());
 
         let toml = r#"
 [ui]
