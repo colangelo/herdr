@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Added pane-to-tab keyboard controls: `break_pane` (`prefix+!`) moves the focused pane into a new tab, `move_pane_to_tab` (`prefix+m`) opens a destination picker, and `move_pane_next_tab` / `move_pane_prev_tab` (`prefix+>` / `prefix+<`) move directly without wrapping. Moves preserve the running terminal and surface unavailable or rejected moves as non-blocking feedback.
 - Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
 - Added tmux-style layout presets (`even_horizontal`, `even_vertical`, `tiled`) via the `layout.set_preset` socket API, a `next_layout` action to cycle them (`prefix+space` by default), and CLI verbs `herdr pane balance` and `herdr pane layout --set <even-h|even-v|tiled>`.
 - Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line, with `ui.workspace_number_color` to set their color (same syntax as `accent`). Default off / theme color.
