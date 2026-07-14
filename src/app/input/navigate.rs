@@ -6,9 +6,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use crossterm::event::KeyCode;
-#[cfg(test)]
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Direction;
 
 use crate::{
@@ -333,6 +331,19 @@ impl App {
                 {
                     super::modal::open_rename_pane(&mut self.state, pane_id);
                 }
+            }
+            NavigateAction::BreakPaneToNewTab => {
+                self.break_focused_pane_to_new_tab_via_api();
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::MovePaneToTab => self.open_pane_move_target_picker(),
+            NavigateAction::MovePaneToNextTab => {
+                self.move_focused_pane_to_adjacent_tab_via_api(1);
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::MovePaneToPrevTab => {
+                self.move_focused_pane_to_adjacent_tab_via_api(-1);
+                leave_navigate_mode(&mut self.state);
             }
             NavigateAction::FocusPaneLeft => {
                 self.focus_pane_direction_in_context(NavDirection::Left, context)
@@ -1202,6 +1213,175 @@ impl App {
         self.state.mode = Mode::Terminal;
         Ok((ws_idx, new_pane))
     }
+
+    fn break_focused_pane_to_new_tab_via_api(&mut self) {
+        let Some((ws_idx, tab_idx, source_pane_id)) = focused_pane_move_source(&self.state) else {
+            self.show_pane_move_feedback("pane move unavailable", "no focused pane");
+            return;
+        };
+        let Some(workspace) = self.state.workspaces.get(ws_idx) else {
+            self.show_pane_move_feedback("pane move unavailable", "workspace disappeared");
+            return;
+        };
+        let Some(tab) = workspace.tabs.get(tab_idx) else {
+            self.show_pane_move_feedback("pane move unavailable", "tab disappeared");
+            return;
+        };
+        if tab.layout.pane_count() <= 1 {
+            self.show_pane_move_feedback(
+                "nothing to break out",
+                "the focused pane is already alone in its tab",
+            );
+            return;
+        }
+        let workspace_id = workspace.id.clone();
+
+        self.dispatch_pane_move_with_feedback(
+            "tui.pane.move_new_tab",
+            crate::api::schema::PaneMoveParams {
+                pane_id: source_pane_id,
+                destination: crate::api::schema::PaneMoveDestination::NewTab {
+                    workspace_id: Some(workspace_id),
+                    label: None,
+                },
+                focus: true,
+            },
+        );
+    }
+
+    fn open_pane_move_target_picker(&mut self) {
+        match pane_move_target_picker_for_state(&self.state) {
+            Ok(picker) => {
+                self.state.pane_move_target_picker = Some(picker);
+                self.state.mode = Mode::PaneMoveTargetPicker;
+            }
+            Err(message) => {
+                self.show_pane_move_feedback("pane move unavailable", message);
+                leave_navigate_mode(&mut self.state);
+            }
+        }
+    }
+
+    fn move_focused_pane_to_adjacent_tab_via_api(&mut self, delta: isize) {
+        let Some((ws_idx, tab_idx, source_pane_id)) = focused_pane_move_source(&self.state) else {
+            self.show_pane_move_feedback("pane move unavailable", "no focused pane");
+            return;
+        };
+        let Some(workspace) = self.state.workspaces.get(ws_idx) else {
+            self.show_pane_move_feedback("pane move unavailable", "workspace disappeared");
+            return;
+        };
+        let Some(target_tab_idx) = adjacent_tab_index(tab_idx, workspace.tabs.len(), delta) else {
+            let direction = if delta < 0 { "previous" } else { "next" };
+            self.show_pane_move_feedback(
+                "no adjacent tab",
+                format!("there is no {direction} tab to move into"),
+            );
+            return;
+        };
+        let Some(target_tab_id) = self.public_tab_id(ws_idx, target_tab_idx) else {
+            self.show_pane_move_feedback("pane move unavailable", "target tab disappeared");
+            return;
+        };
+
+        self.dispatch_pane_move_to_tab(source_pane_id, target_tab_id);
+    }
+
+    pub(crate) fn handle_pane_move_target_picker_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.state.pane_move_target_picker = None;
+                leave_navigate_mode(&mut self.state);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(picker) = self.state.pane_move_target_picker.as_mut() {
+                    picker.list.move_prev();
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(picker) = self.state.pane_move_target_picker.as_mut() {
+                    picker.list.move_next(picker.entries.len());
+                }
+            }
+            KeyCode::Enter => self.submit_pane_move_target_picker(),
+            _ => {}
+        }
+    }
+
+    pub(crate) fn submit_pane_move_target_picker(&mut self) {
+        let selection = self
+            .state
+            .pane_move_target_picker
+            .as_ref()
+            .and_then(|picker| {
+                picker
+                    .entries
+                    .get(picker.list.selected)
+                    .map(|entry| (picker.source_pane_id.clone(), entry.tab_id.clone()))
+            });
+        self.state.pane_move_target_picker = None;
+        leave_navigate_mode(&mut self.state);
+        if let Some((source_pane_id, target_tab_id)) = selection {
+            self.dispatch_pane_move_to_tab(source_pane_id, target_tab_id);
+        }
+    }
+
+    fn dispatch_pane_move_to_tab(&mut self, source_pane_id: String, target_tab_id: String) {
+        self.dispatch_pane_move_with_feedback(
+            "tui.pane.move_tab",
+            crate::api::schema::PaneMoveParams {
+                pane_id: source_pane_id,
+                destination: crate::api::schema::PaneMoveDestination::Tab {
+                    tab_id: target_tab_id,
+                    target_pane_id: None,
+                    split: crate::api::schema::SplitDirection::Right,
+                    ratio: None,
+                },
+                focus: true,
+            },
+        );
+    }
+
+    fn dispatch_pane_move_with_feedback(
+        &mut self,
+        id: &'static str,
+        params: crate::api::schema::PaneMoveParams,
+    ) -> bool {
+        let response = self.runtime_pane_move(id, params);
+        if let Ok(success) = serde_json::from_str::<crate::api::schema::SuccessResponse>(&response)
+        {
+            if let crate::api::schema::ResponseResult::PaneMove { move_result } = success.result {
+                if move_result.changed {
+                    return true;
+                }
+                let context = match move_result.reason {
+                    Some(crate::api::schema::PaneMoveReason::ZoomedTab) => {
+                        "pane moves are unavailable while a source or target tab is zoomed"
+                    }
+                    Some(crate::api::schema::PaneMoveReason::SameTab) => {
+                        "the pane is already in that tab"
+                    }
+                    None => "the pane was not moved",
+                };
+                self.show_pane_move_feedback("pane move unavailable", context);
+                return false;
+            }
+        }
+        if let Ok(error) = serde_json::from_str::<crate::api::schema::ErrorResponse>(&response) {
+            self.show_pane_move_feedback("pane move failed", error.error.message);
+            return false;
+        }
+
+        tracing::warn!(response, "unexpected pane.move response");
+        self.show_pane_move_feedback("pane move failed", "unexpected runtime response");
+        false
+    }
+
+    fn show_pane_move_feedback(&mut self, title: impl Into<String>, context: impl Into<String>) {
+        set_pane_move_feedback(&mut self.state, title, context);
+        // Treat feedback as newly shown even when the same edge case is triggered repeatedly.
+        self.sync_toast_deadline(None);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1440,6 +1620,74 @@ pub(crate) fn handle_navigate_key(state: &mut AppState, key: KeyEvent) {
     }
 }
 
+fn set_pane_move_feedback(
+    state: &mut AppState,
+    title: impl Into<String>,
+    context: impl Into<String>,
+) {
+    state.toast = Some(crate::app::state::ToastNotification {
+        kind: crate::app::state::ToastKind::NeedsAttention,
+        title: title.into(),
+        context: context.into(),
+        position: None,
+        target: None,
+    });
+}
+
+fn focused_pane_move_source(state: &AppState) -> Option<(usize, usize, String)> {
+    let ws_idx = state.active?;
+    let workspace = state.workspaces.get(ws_idx)?;
+    let tab_idx = workspace.active_tab_index();
+    let pane_id = workspace.focused_pane_id()?;
+    let pane_number = workspace.public_pane_number(pane_id)?;
+    let public_pane_id = crate::workspace::public_pane_id_for_number(&workspace.id, pane_number);
+    Some((ws_idx, tab_idx, public_pane_id))
+}
+
+fn pane_move_target_picker_for_state(
+    state: &AppState,
+) -> Result<crate::app::state::PaneMoveTargetPickerState, &'static str> {
+    let Some((ws_idx, source_tab_idx, source_pane_id)) = focused_pane_move_source(state) else {
+        return Err("no focused pane");
+    };
+    let Some(workspace) = state.workspaces.get(ws_idx) else {
+        return Err("workspace disappeared");
+    };
+    if workspace
+        .tabs
+        .get(source_tab_idx)
+        .is_some_and(|tab| tab.zoomed)
+    {
+        return Err("pane moves are unavailable while the source tab is zoomed");
+    }
+
+    let entries = workspace
+        .tabs
+        .iter()
+        .enumerate()
+        .filter(|(tab_idx, tab)| *tab_idx != source_tab_idx && !tab.zoomed)
+        .map(|(tab_idx, tab)| crate::app::state::PaneMoveTargetEntry {
+            tab_id: crate::workspace::public_tab_id_for_number(&workspace.id, tab.number),
+            number: tab_idx + 1,
+            label: tab.custom_name.clone().unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return Err("there is no other available tab to move into");
+    }
+
+    Ok(crate::app::state::PaneMoveTargetPickerState {
+        source_pane_id,
+        entries,
+        list: crate::app::state::SelectionListState::new(0),
+    })
+}
+
+fn adjacent_tab_index(current: usize, tab_count: usize, delta: isize) -> Option<usize> {
+    let target = current.checked_add_signed(delta)?;
+    (target < tab_count).then_some(target)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NavigateAction {
     NewWorkspace,
@@ -1464,6 +1712,10 @@ pub(crate) enum NavigateAction {
     MoveTabNext,
     CloseTab,
     RenamePane,
+    BreakPaneToNewTab,
+    MovePaneToTab,
+    MovePaneToNextTab,
+    MovePaneToPrevTab,
     FocusPaneLeft,
     FocusPaneDown,
     FocusPaneUp,
@@ -1613,6 +1865,10 @@ fn non_indexed_action_for_key(
         (&kb.move_tab_next, NavigateAction::MoveTabNext),
         (&kb.close_tab, NavigateAction::CloseTab),
         (&kb.rename_pane, NavigateAction::RenamePane),
+        (&kb.break_pane, NavigateAction::BreakPaneToNewTab),
+        (&kb.move_pane_to_tab, NavigateAction::MovePaneToTab),
+        (&kb.move_pane_next_tab, NavigateAction::MovePaneToNextTab),
+        (&kb.move_pane_prev_tab, NavigateAction::MovePaneToPrevTab),
         (&kb.edit_scrollback, NavigateAction::EditScrollback),
         (&kb.copy_mode, NavigateAction::CopyMode),
         (&kb.focus_pane_left, NavigateAction::FocusPaneLeft),
@@ -1843,6 +2099,34 @@ pub(super) fn execute_navigate_action_in_context(
             {
                 super::modal::open_rename_pane(state, pane_id);
             }
+        }
+        NavigateAction::BreakPaneToNewTab => {
+            let single_pane = state
+                .active
+                .and_then(|ws_idx| state.workspaces.get(ws_idx))
+                .and_then(crate::workspace::Workspace::active_tab)
+                .is_some_and(|tab| tab.layout.pane_count() <= 1);
+            if single_pane {
+                set_pane_move_feedback(
+                    state,
+                    "nothing to break out",
+                    "the focused pane is already alone in its tab",
+                );
+            }
+            leave_navigate_mode(state);
+        }
+        NavigateAction::MovePaneToTab => match pane_move_target_picker_for_state(state) {
+            Ok(picker) => {
+                state.pane_move_target_picker = Some(picker);
+                state.mode = Mode::PaneMoveTargetPicker;
+            }
+            Err(message) => {
+                set_pane_move_feedback(state, "pane move unavailable", message);
+                leave_navigate_mode(state);
+            }
+        },
+        NavigateAction::MovePaneToNextTab | NavigateAction::MovePaneToPrevTab => {
+            leave_navigate_mode(state)
         }
         NavigateAction::FocusPaneLeft => state.navigate_pane(NavDirection::Left),
         NavigateAction::FocusPaneDown => state.navigate_pane(NavDirection::Down),
@@ -2184,6 +2468,271 @@ mod tests {
         app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
 
         assert_eq!(app.state.active, Some(1));
+    }
+
+    #[test]
+    fn default_pane_move_bindings_map_to_their_actions_without_collisions() {
+        let mut state = state_with_workspaces(&["test"]);
+        let config = Config::default();
+        assert!(config.collect_diagnostics().is_empty());
+        state.keybinds = config.keybinds();
+
+        for (key, action) in [
+            ('!', NavigateAction::BreakPaneToNewTab),
+            ('m', NavigateAction::MovePaneToTab),
+            ('>', NavigateAction::MovePaneToNextTab),
+            ('<', NavigateAction::MovePaneToPrevTab),
+        ] {
+            assert_eq!(
+                action_for_key(
+                    &state,
+                    TerminalKey::new(KeyCode::Char(key), KeyModifiers::empty()),
+                    BindingDispatch::Prefix,
+                ),
+                Some(action),
+            );
+        }
+    }
+
+    #[test]
+    fn custom_command_displaces_default_move_to_tab_binding() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.command]]
+key = "prefix+m"
+command = "echo custom"
+"#,
+        )
+        .unwrap();
+        let keybinds = config.keybinds();
+
+        assert!(keybinds.move_pane_to_tab.bindings.is_empty());
+        assert_eq!(keybinds.custom_commands.len(), 1);
+        assert!(config.collect_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn break_single_pane_is_a_no_op_with_feedback() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let root = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.execute_tui_navigate_action(NavigateAction::BreakPaneToNewTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+        assert_eq!(
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
+            Some("nothing to break out")
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn break_pane_creates_focused_tab_and_preserves_terminal_identity() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let moved_pane = app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[0].tabs[0]
+            .terminal_id(moved_pane)
+            .expect("split pane terminal")
+            .clone();
+
+        app.execute_tui_navigate_action(NavigateAction::BreakPaneToNewTab, ActionContext::Prefix);
+
+        let workspace = &app.state.workspaces[0];
+        assert_eq!(workspace.tabs.len(), 2);
+        assert_eq!(workspace.active_tab_index(), 1);
+        assert_eq!(workspace.focused_pane_id(), Some(moved_pane));
+        assert_eq!(
+            workspace
+                .active_tab()
+                .and_then(|tab| tab.terminal_id(moved_pane)),
+            Some(&terminal_id)
+        );
+        assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn break_pane_from_zoomed_tab_is_rejected_with_feedback() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let moved_pane = app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.workspaces[0].tabs[0].zoomed = true;
+        app.state.ensure_test_terminals();
+
+        app.execute_tui_navigate_action(NavigateAction::BreakPaneToNewTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(moved_pane));
+        assert!(app
+            .state
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.context.contains("zoomed")));
+    }
+
+    #[test]
+    fn move_target_picker_does_not_open_without_another_tab() {
+        let mut app = app_with_test_workspaces(&["main"]);
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pane_move_target_picker.is_none());
+        assert_eq!(
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
+            Some("pane move unavailable")
+        );
+        assert!(app
+            .state
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.context.contains("no other available tab")));
+    }
+
+    #[test]
+    fn move_target_picker_excludes_current_and_zoomed_tabs_and_cancel_is_safe() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let zoomed = app.state.workspaces[0].test_add_tab(Some("zoomed"));
+        let available = app.state.workspaces[0].test_add_tab(Some("available"));
+        app.state.workspaces[0].tabs[zoomed].zoomed = true;
+        app.state.workspaces[0].active_tab = 0;
+        app.state.ensure_test_terminals();
+        let available_id = app.public_tab_id(0, available).expect("public tab id");
+        let before_tabs = app.state.workspaces[0].tabs.len();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.mode, Mode::PaneMoveTargetPicker);
+        let picker = app
+            .state
+            .pane_move_target_picker
+            .as_ref()
+            .expect("picker should open");
+        assert_eq!(picker.entries.len(), 1);
+        assert_eq!(picker.entries[0].tab_id, available_id);
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pane_move_target_picker.is_none());
+        assert_eq!(app.state.workspaces[0].tabs.len(), before_tabs);
+    }
+
+    #[test]
+    fn move_target_picker_submit_preserves_terminal_and_focuses_moved_pane() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0]
+            .terminal_id(source)
+            .expect("source terminal")
+            .clone();
+        app.state.workspaces[0].test_add_tab(Some("target"));
+        app.state.ensure_test_terminals();
+        app.state.workspaces[0].active_tab = 0;
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        app.submit_pane_move_target_picker();
+
+        let workspace = &app.state.workspaces[0];
+        assert_eq!(workspace.tabs.len(), 1);
+        assert_eq!(workspace.focused_pane_id(), Some(source));
+        assert_eq!(
+            workspace
+                .active_tab()
+                .and_then(|tab| tab.terminal_id(source)),
+            Some(&terminal_id)
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn stale_move_target_keeps_layout_and_shows_error() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let target = app.state.workspaces[0].test_add_tab(Some("target"));
+        app.state.ensure_test_terminals();
+        app.state.workspaces[0].active_tab = 0;
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        assert!(app.state.workspaces[0].close_tab(target));
+        app.submit_pane_move_target_picker();
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+        assert_eq!(
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
+            Some("pane move failed")
+        );
+    }
+
+    #[test]
+    fn adjacent_pane_moves_do_not_wrap_and_report_zoom_rejection() {
+        assert_eq!(adjacent_tab_index(0, 2, -1), None);
+        assert_eq!(adjacent_tab_index(1, 2, 1), None);
+        assert_eq!(adjacent_tab_index(0, 2, 1), Some(1));
+        assert_eq!(adjacent_tab_index(1, 2, -1), Some(0));
+
+        let mut app = app_with_test_workspaces(&["main"]);
+        let target = app.state.workspaces[0].test_add_tab(Some("target"));
+        app.state.workspaces[0].tabs[target].zoomed = true;
+        app.state.workspaces[0].active_tab = 0;
+        app.state.ensure_test_terminals();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToNextTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+        assert_eq!(app.state.workspaces[0].active_tab_index(), 0);
+        assert_eq!(
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
+            Some("pane move unavailable")
+        );
+        assert!(app
+            .state
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.context.contains("zoomed")));
+    }
+
+    #[test]
+    fn adjacent_pane_move_reports_missing_neighbor_without_mutation() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToPrevTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+        assert_eq!(
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
+            Some("no adjacent tab")
+        );
+    }
+
+    #[test]
+    fn adjacent_pane_move_preserves_terminal_and_focuses_moved_pane() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0]
+            .terminal_id(source)
+            .expect("source terminal")
+            .clone();
+        app.state.workspaces[0].test_add_tab(Some("target"));
+        app.state.workspaces[0].active_tab = 0;
+        app.state.ensure_test_terminals();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToNextTab, ActionContext::Prefix);
+
+        let workspace = &app.state.workspaces[0];
+        assert_eq!(workspace.tabs.len(), 1);
+        assert_eq!(workspace.focused_pane_id(), Some(source));
+        assert_eq!(
+            workspace
+                .active_tab()
+                .and_then(|tab| tab.terminal_id(source)),
+            Some(&terminal_id)
+        );
+        assert!(app.state.toast.is_none());
     }
 
     #[test]
@@ -3737,8 +4286,8 @@ navigate_pane_down = "ctrl+j"
             release_path.display(),
         );
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
-            bindings: crate::config::ActionKeybinds::prefix("m"),
-            label: "prefix+m".into(),
+            bindings: crate::config::ActionKeybinds::prefix("u"),
+            label: "prefix+u".into(),
             command,
             action: crate::config::CustomCommandAction::Shell,
             description: None,
@@ -3754,7 +4303,7 @@ navigate_pane_down = "ctrl+j"
         assert_eq!(app.state.mode, Mode::Prefix);
 
         let launch_started = std::time::Instant::now();
-        app.handle_key(TerminalKey::new(KeyCode::Char('m'), KeyModifiers::empty()))
+        app.handle_key(TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty()))
             .await;
         assert!(launch_started.elapsed() < Duration::from_secs(2));
 
@@ -3826,8 +4375,8 @@ navigate_pane_down = "ctrl+j"
         let output_path = unique_temp_path("custom-pane-command");
         let command = format!("printf done > '{}'", output_path.display());
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
-            bindings: crate::config::ActionKeybinds::prefix("m"),
-            label: "prefix+m".into(),
+            bindings: crate::config::ActionKeybinds::prefix("u"),
+            label: "prefix+u".into(),
             command,
             action: crate::config::CustomCommandAction::Pane,
             description: None,
@@ -3840,7 +4389,7 @@ navigate_pane_down = "ctrl+j"
             app.state.prefix_mods,
         ))
         .await;
-        app.handle_key(TerminalKey::new(KeyCode::Char('m'), KeyModifiers::empty()))
+        app.handle_key(TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty()))
             .await;
 
         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 2);

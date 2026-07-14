@@ -57,6 +57,7 @@ pub(super) enum MouseAction {
     },
     RenameModal(ModalAction),
     ConfirmCloseAccept,
+    SubmitPaneMoveTarget,
     ContextMenu {
         menu: ContextMenuState,
         idx: usize,
@@ -174,6 +175,80 @@ impl AppState {
         }
 
         if self.mode == Mode::KeybindHelp {
+            return None;
+        }
+
+        if self.mode == Mode::PaneMoveTargetPicker {
+            let Some(picker) = self.pane_move_target_picker.as_ref() else {
+                leave_modal(self);
+                return None;
+            };
+            let entry_count = picker.entries.len();
+            let inner = crate::ui::pane_move_target_inner_rect(self.screen_rect(), entry_count)?;
+            let max_rows = usize::from(inner.height.saturating_sub(4));
+            let start = picker
+                .list
+                .selected
+                .saturating_sub(max_rows.saturating_sub(1));
+            let hovered_entry = mouse
+                .row
+                .checked_sub(inner.y.saturating_add(2))
+                .map(usize::from)
+                .filter(|row| *row < max_rows)
+                .filter(|_| {
+                    mouse.column >= inner.x && mouse.column < inner.x.saturating_add(inner.width)
+                })
+                .map(|row| start + row)
+                .filter(|idx| *idx < entry_count);
+
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let (Some(idx), Some(picker)) =
+                        (hovered_entry, self.pane_move_target_picker.as_mut())
+                    {
+                        picker.list.select(idx);
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    if let Some(picker) = self.pane_move_target_picker.as_mut() {
+                        picker.list.move_prev();
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if let Some(picker) = self.pane_move_target_picker.as_mut() {
+                        picker.list.move_next(entry_count);
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(idx) = hovered_entry {
+                        if let Some(picker) = self.pane_move_target_picker.as_mut() {
+                            picker.list.select(idx);
+                        }
+                        return Some(MouseAction::SubmitPaneMoveTarget);
+                    }
+
+                    let (move_button, cancel_button) =
+                        crate::ui::pane_move_target_button_rects(inner);
+                    match modal_action_from_buttons(
+                        mouse.column,
+                        mouse.row,
+                        &[
+                            (move_button, ModalAction::Confirm),
+                            (cancel_button, ModalAction::Cancel),
+                        ],
+                    ) {
+                        Some(ModalAction::Confirm) => {
+                            return Some(MouseAction::SubmitPaneMoveTarget);
+                        }
+                        Some(ModalAction::Cancel) | None => {
+                            self.pane_move_target_picker = None;
+                            leave_modal(self);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
             return None;
         }
 
@@ -3496,6 +3571,43 @@ mod tests {
 
         assert!(app.state.worktree_open.is_none());
         assert_eq!(app.state.mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn clicking_pane_move_picker_row_moves_and_focuses_pane() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("main")];
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let source_pane_id = app.public_pane_id(0, source).expect("source pane id");
+        let target = app.state.workspaces[0].test_add_tab(Some("target"));
+        let target_tab_id = app.public_tab_id(0, target).expect("target tab id");
+        app.state.workspaces[0].active_tab = 0;
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::PaneMoveTargetPicker;
+        app.state.pane_move_target_picker = Some(crate::app::state::PaneMoveTargetPickerState {
+            source_pane_id,
+            entries: vec![crate::app::state::PaneMoveTargetEntry {
+                tab_id: target_tab_id,
+                number: 2,
+                label: "target".into(),
+            }],
+            list: crate::app::state::SelectionListState::new(0),
+        });
+        let inner = crate::ui::pane_move_target_inner_rect(app.state.screen_rect(), 1)
+            .expect("picker rect");
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            inner.x + 1,
+            inner.y + 2,
+        ));
+
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
+        assert!(app.state.pane_move_target_picker.is_none());
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     #[test]

@@ -898,6 +898,7 @@ pub enum Mode {
     RenamePane,
     NewLinkedWorktree,
     OpenExistingWorktree,
+    PaneMoveTargetPicker,
     ConfirmRemoveWorktree,
     Resize,
     ConfirmClose,
@@ -933,6 +934,7 @@ impl Mode {
                 | Mode::Resize
                 | Mode::ConfirmClose
                 | Mode::ConfirmRemoveWorktree
+                | Mode::PaneMoveTargetPicker
                 | Mode::ContextMenu
                 | Mode::GlobalMenu
                 | Mode::KeybindHelp
@@ -1173,6 +1175,20 @@ impl SelectionListState {
     pub fn select(&mut self, idx: usize) {
         self.selected = idx;
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneMoveTargetEntry {
+    pub tab_id: String,
+    pub number: usize,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneMoveTargetPickerState {
+    pub source_pane_id: String,
+    pub entries: Vec<PaneMoveTargetEntry>,
+    pub list: SelectionListState,
 }
 
 #[derive(Debug, Clone)]
@@ -1482,6 +1498,7 @@ pub struct AppState {
     pub rename_pane_target: Option<PaneId>,
     pub worktree_create: Option<WorktreeCreateState>,
     pub worktree_open: Option<WorktreeOpenState>,
+    pub pane_move_target_picker: Option<PaneMoveTargetPickerState>,
     pub worktree_remove: Option<WorktreeRemoveState>,
     pub worktree_directory: std::path::PathBuf,
     pub collapsed_space_keys: std::collections::HashSet<String>,
@@ -1948,6 +1965,7 @@ impl AppState {
             rename_pane_target: None,
             worktree_create: None,
             worktree_open: None,
+            pane_move_target_picker: None,
             worktree_remove: None,
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
             collapsed_space_keys: std::collections::HashSet::new(),
