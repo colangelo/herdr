@@ -353,6 +353,10 @@ pub struct Keybinds {
     pub switch_workspace: Vec<IndexedKeybind>,
     pub close_tab: ActionKeybinds,
     pub rename_pane: ActionKeybinds,
+    pub break_pane: ActionKeybinds,
+    pub move_pane_to_tab: ActionKeybinds,
+    pub move_pane_next_tab: ActionKeybinds,
+    pub move_pane_prev_tab: ActionKeybinds,
     pub edit_scrollback: ActionKeybinds,
     pub copy_mode: ActionKeybinds,
     pub focus_pane_left: ActionKeybinds,
@@ -523,6 +527,10 @@ impl Config {
             switch_workspace: Vec::new(),
             close_tab: empty_action!(),
             rename_pane: empty_action!(),
+            break_pane: empty_action!(),
+            move_pane_to_tab: empty_action!(),
+            move_pane_next_tab: empty_action!(),
+            move_pane_prev_tab: empty_action!(),
             edit_scrollback: empty_action!(),
             copy_mode: empty_action!(),
             focus_pane_left: empty_action!(),
@@ -672,6 +680,10 @@ impl Config {
             );
             apply_action!(keybinds.close_tab, close_tab, source);
             apply_action!(keybinds.rename_pane, rename_pane, source);
+            apply_action!(keybinds.break_pane, break_pane, source);
+            apply_action!(keybinds.move_pane_to_tab, move_pane_to_tab, source);
+            apply_action!(keybinds.move_pane_next_tab, move_pane_next_tab, source);
+            apply_action!(keybinds.move_pane_prev_tab, move_pane_prev_tab, source);
             apply_action!(keybinds.edit_scrollback, edit_scrollback, source);
             apply_action!(keybinds.copy_mode, copy_mode, source);
             apply_action!(keybinds.focus_pane_left, focus_pane_left, source);

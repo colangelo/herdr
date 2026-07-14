@@ -565,6 +565,7 @@ impl App {
             rename_pane_target: None,
             worktree_create: None,
             worktree_open: None,
+            pane_move_target_picker: None,
             worktree_remove: None,
             worktree_directory,
             collapsed_space_keys,
@@ -1993,6 +1994,9 @@ impl App {
             }
             Mode::OpenExistingWorktree => {
                 self.handle_worktree_open_key(key_event);
+            }
+            Mode::PaneMoveTargetPicker => {
+                self.handle_pane_move_target_picker_key(key_event);
             }
             Mode::ConfirmRemoveWorktree => {
                 self.handle_worktree_remove_key(key_event);

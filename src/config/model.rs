@@ -523,6 +523,14 @@ pub struct KeysConfig {
     pub close_tab: BindingConfig,
     /// Rename the focused pane. Default: "prefix+shift+p".
     pub rename_pane: BindingConfig,
+    /// Break the focused pane into a new tab. Default: "prefix+!".
+    pub break_pane: BindingConfig,
+    /// Move the focused pane to another tab via a picker. Default: "prefix+m".
+    pub move_pane_to_tab: BindingConfig,
+    /// Move the focused pane to the next tab without wrapping. Default: "prefix+>".
+    pub move_pane_next_tab: BindingConfig,
+    /// Move the focused pane to the previous tab without wrapping. Default: "prefix+<".
+    pub move_pane_prev_tab: BindingConfig,
     /// Open the focused pane scrollback in $EDITOR. Default: "prefix+e".
     pub edit_scrollback: BindingConfig,
     /// Enter keyboard copy mode for the focused pane. Default: "prefix+[".
@@ -659,6 +667,14 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     rename_pane: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    break_pane: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_pane_to_tab: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_pane_next_tab: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_pane_prev_tab: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     edit_scrollback: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     copy_mode: Option<BindingConfig>,
@@ -763,6 +779,10 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(switch_workspace);
         apply_field!(close_tab);
         apply_field!(rename_pane);
+        apply_field!(break_pane);
+        apply_field!(move_pane_to_tab);
+        apply_field!(move_pane_next_tab);
+        apply_field!(move_pane_prev_tab);
         apply_field!(edit_scrollback);
         apply_field!(copy_mode);
         apply_field!(focus_pane_left);
@@ -867,6 +887,10 @@ impl KeysConfig {
         copy_effective_indexed_field!(switch_workspace, keybinds.switch_workspace);
         copy_effective_action_field!(close_tab, keybinds.close_tab);
         copy_effective_action_field!(rename_pane, keybinds.rename_pane);
+        copy_effective_action_field!(break_pane, keybinds.break_pane);
+        copy_effective_action_field!(move_pane_to_tab, keybinds.move_pane_to_tab);
+        copy_effective_action_field!(move_pane_next_tab, keybinds.move_pane_next_tab);
+        copy_effective_action_field!(move_pane_prev_tab, keybinds.move_pane_prev_tab);
         copy_effective_action_field!(edit_scrollback, keybinds.edit_scrollback);
         copy_effective_action_field!(copy_mode, keybinds.copy_mode);
         copy_effective_action_field!(focus_pane_left, keybinds.focus_pane_left);
@@ -1225,6 +1249,10 @@ impl Default for KeysConfig {
             switch_workspace: BindingConfig::empty(),
             close_tab: BindingConfig::one("prefix+shift+x"),
             rename_pane: BindingConfig::one("prefix+shift+p"),
+            break_pane: BindingConfig::one("prefix+!"),
+            move_pane_to_tab: BindingConfig::one("prefix+m"),
+            move_pane_next_tab: BindingConfig::one("prefix+>"),
+            move_pane_prev_tab: BindingConfig::one("prefix+<"),
             edit_scrollback: BindingConfig::one("prefix+e"),
             copy_mode: BindingConfig::one("prefix+["),
             focus_pane_left: BindingConfig::one("prefix+h"),
