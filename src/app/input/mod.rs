@@ -105,6 +105,7 @@ impl App {
                 }
                 Mode::NewLinkedWorktree => self.handle_worktree_create_key(key_event),
                 Mode::OpenExistingWorktree => self.handle_worktree_open_key(key_event),
+                Mode::PaneMoveTargetPicker => self.handle_pane_move_target_picker_key(key_event),
                 Mode::ConfirmRemoveWorktree => self.handle_worktree_remove_key(key_event),
                 Mode::Resize => self.handle_resize_key_via_api(key),
                 Mode::ConfirmClose => self.handle_confirm_close_key_via_api(key_event),
@@ -440,6 +441,7 @@ impl App {
                         self.apply_rename_mouse_action_via_api(action)
                     }
                     MouseAction::ConfirmCloseAccept => self.confirm_close_accept_via_api(),
+                    MouseAction::SubmitPaneMoveTarget => self.submit_pane_move_target_picker(),
                     MouseAction::ContextMenu { menu, idx } => {
                         self.apply_context_menu_action_via_api(menu, idx)
                     }
@@ -717,6 +719,7 @@ pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
             .worktree_open
             .as_ref()
             .is_some_and(|open| open.search_focused),
+        Mode::PaneMoveTargetPicker => false,
         Mode::Navigator => state.navigator.search_focused,
         Mode::KeybindHelp => state.keybind_help.search_focused,
         Mode::Copy => state

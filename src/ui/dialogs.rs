@@ -229,6 +229,123 @@ pub(crate) fn open_existing_worktree_button_rects(inner: Rect) -> (Rect, Rect) {
     (rects[0], rects[1])
 }
 
+pub(crate) fn pane_move_target_inner_rect(area: Rect, entry_count: usize) -> Option<Rect> {
+    let height = (entry_count as u16).saturating_add(5).clamp(8, 20);
+    centered_popup_rect(area, 64, height).map(|popup| {
+        Rect::new(
+            popup.x + 1,
+            popup.y + 1,
+            popup.width.saturating_sub(2),
+            popup.height.saturating_sub(2),
+        )
+    })
+}
+
+pub(crate) fn pane_move_target_button_rects(inner: Rect) -> (Rect, Rect) {
+    let rects = action_button_row_rects(
+        inner,
+        &[
+            ActionButtonSpec {
+                hint: Some("↵"),
+                label: "move",
+            },
+            ActionButtonSpec {
+                hint: Some("esc"),
+                label: "cancel",
+            },
+        ],
+        2,
+        inner.height.saturating_sub(1),
+    );
+    (rects[0], rects[1])
+}
+
+pub(super) fn render_pane_move_target_picker_overlay(
+    app: &AppState,
+    frame: &mut Frame,
+    area: Rect,
+) {
+    let Some(picker) = app.pane_move_target_picker.as_ref() else {
+        return;
+    };
+
+    super::dim_background(frame, area);
+    let height = (picker.entries.len() as u16).saturating_add(5).clamp(8, 20);
+    let Some(inner) = render_modal_shell(frame, area, 64, height, &app.palette) else {
+        return;
+    };
+    if inner.height < 5 {
+        return;
+    }
+
+    render_modal_header(
+        frame,
+        Rect::new(inner.x, inner.y, inner.width, 1),
+        "move pane to tab",
+        &app.palette,
+    );
+    frame.render_widget(
+        Paragraph::new(" select a destination tab")
+            .style(Style::default().fg(app.palette.overlay0)),
+        Rect::new(inner.x, inner.y.saturating_add(1), inner.width, 1),
+    );
+
+    let max_rows = usize::from(inner.height.saturating_sub(4));
+    let start = picker
+        .list
+        .selected
+        .saturating_sub(max_rows.saturating_sub(1));
+    for (visible_idx, entry) in picker.entries.iter().skip(start).take(max_rows).enumerate() {
+        let entry_idx = start + visible_idx;
+        let selected = entry_idx == picker.list.selected;
+        let marker = if selected { "›" } else { " " };
+        let text = if entry.label.is_empty() {
+            format!("{marker} tab {}", entry.number)
+        } else {
+            format!("{marker} {} · {}", entry.number, entry.label)
+        };
+        let style = if selected {
+            Style::default()
+                .fg(app.palette.text)
+                .bg(app.palette.surface0)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.palette.subtext0)
+        };
+        frame.render_widget(
+            Paragraph::new(truncate_end(&text, inner.width as usize)).style(style),
+            Rect::new(
+                inner.x,
+                inner.y.saturating_add(2 + visible_idx as u16),
+                inner.width,
+                1,
+            ),
+        );
+    }
+
+    let (move_rect, cancel_rect) = pane_move_target_button_rects(inner);
+    render_action_button(
+        frame,
+        move_rect,
+        Some("↵"),
+        "move",
+        Style::default()
+            .fg(panel_contrast_fg(&app.palette))
+            .bg(app.palette.accent)
+            .add_modifier(Modifier::BOLD),
+    );
+    render_action_button(
+        frame,
+        cancel_rect,
+        Some("esc"),
+        "cancel",
+        Style::default()
+            .fg(app.palette.text)
+            .bg(app.palette.surface0)
+            .add_modifier(Modifier::BOLD),
+    );
+}
+
 pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
     let Some(create) = app.worktree_create.as_ref() else {
         return;
