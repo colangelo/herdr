@@ -37,6 +37,9 @@ Panes:
 | --- | --- |
 | Zoom the focused pane | `prefix+z` |
 | Close pane | `prefix+x` |
+| Break pane into a new tab | `prefix+!` |
+| Move pane to a chosen tab | `prefix+m` |
+| Move pane to next / previous tab | `prefix+>` / `prefix+<` |
 | Swap panes | `prefix+shift+h/j/k/l` |
 | Resize mode | `prefix+r` |
 | Balance panes (equal sizes) | `prefix+=` |
@@ -51,6 +54,8 @@ Tabs:
 | Jump to tab 1–9 | `prefix+1..9` |
 | Rename tab | `prefix+shift+t` |
 | Close tab | `prefix+shift+x` |
+
+Pane moves preserve the pane's running process and terminal contents. `prefix+m` opens a destination picker; the quick next/previous actions follow the current tab order and stop at the first or last tab instead of wrapping. Pane moves are unavailable when the source or destination tab is zoomed.
 
 Workspaces and session:
 
