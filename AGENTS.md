@@ -207,6 +207,8 @@ Put local PRDs, planning notes, and exploratory specs under `.local/prd/`; `.loc
 
 Use lowercase conventional commits, no emojis, and no AI co-author lines. Commit subjects feed preview release notes, so keep them descriptive.
 
+Prefer granular commits that each cover one coherent concern. When practical, separate implementation, documentation, planning artifacts, and workflow or instruction updates instead of bundling them into one commit.
+
 Before committing, propose the commit message and get alignment.
 
 When a normal feature or fix commit relates to a GitHub issue, add a commit body line `refs #<issue-number>` after the subject:
