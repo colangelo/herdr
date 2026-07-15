@@ -99,11 +99,11 @@ If the internal push times out: Tailscale may be stopped (`tailscale status`;
   force-push via the fork guard.
 - **Drift check**: skim upstream changes to `justfile` release recipes,
   `scripts/changelog.py`, and `release.yml` — if the release flow moved,
-  update `.claude/skills/herdr-release/SKILL.md` and the `release-ac` recipe
+  update `.pi/skills/herdr-release/SKILL.md` and the `release-ac` recipe
   to match.
 - Keep the fork's PROJECTS entry honest:
   `~/_sync/dev/CONTEXT/PROJECTS/herdr.md`.
 
-Related: `.claude/skills/herdr-release/SKILL.md` (cutting the -ac release
+Related: `.pi/skills/herdr-release/SKILL.md` (cutting the -ac release
 after a sync), `~/_sync/dev/CONTEXT/SKILLS/fork-maintenance/SKILL.md`
 (the general pattern).
