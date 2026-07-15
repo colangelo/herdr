@@ -506,6 +506,42 @@
           "description": "Close the focused pane."
         },
         {
+          "key": "keys.break_pane",
+          "type": "keybinding",
+          "default": "\"prefix+!\"",
+          "description": "Break the focused pane into a new tab."
+        },
+        {
+          "key": "keys.move_pane_to_tab",
+          "type": "keybinding",
+          "default": "\"prefix+m\"",
+          "description": "Move the focused pane to another tab via a picker."
+        },
+        {
+          "key": "keys.move_pane_next_tab",
+          "type": "keybinding",
+          "default": "\"prefix+>\"",
+          "description": "Move the focused pane to the next tab without wrapping."
+        },
+        {
+          "key": "keys.move_pane_prev_tab",
+          "type": "keybinding",
+          "default": "\"prefix+<\"",
+          "description": "Move the focused pane to the previous tab without wrapping."
+        },
+        {
+          "key": "keys.balance_panes",
+          "type": "keybinding",
+          "default": "\"prefix+=\"",
+          "description": "Balance all panes in the current tab to equal sizes."
+        },
+        {
+          "key": "keys.next_layout",
+          "type": "keybinding",
+          "default": "\"prefix+space\"",
+          "description": "Cycle the tab through layout presets (even-h -> even-v -> tiled)."
+        },
+        {
           "key": "keys.zoom",
           "type": "keybinding",
           "default": "\"prefix+z\"",
@@ -647,6 +683,59 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.pane_border_active_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Override color for the focused (active) pane border. Same syntax as `accent`. Unset uses the theme accent."
+        },
+        {
+          "key": "ui.pane_border_inactive_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Override color for unfocused (inactive) pane borders. Same syntax as `accent`. Unset uses the theme's muted border color."
+        },
+        {
+          "key": "ui.pane_border_active_style",
+          "type": "enum",
+          "default": "\"light\"",
+          "description": "Box-drawing weight for the focused pane border: \"light\", \"heavy\", or \"double\".",
+          "values": [
+            "light",
+            "heavy",
+            "double"
+          ]
+        },
+        {
+          "key": "ui.pane_title_active_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Override color for the focused pane's border title. Same syntax as `accent`. Unset follows `pane_border_active_color`, then the theme accent."
+        },
+        {
+          "key": "ui.pane_title_inactive_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Override color for unfocused panes' border titles. Same syntax as `accent`. Unset follows `pane_border_inactive_color`, then the theme's muted color."
+        },
+        {
+          "key": "ui.pane_active_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Default background for the focused pane's cells (tmux `window-active-style` bg). Same syntax as `accent`. Only cells without an explicit app-painted background are tinted. Unset keeps the terminal default."
+        },
+        {
+          "key": "ui.pane_inactive_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Default background for unfocused panes' cells (tmux `window-style` bg). Same syntax and semantics as `pane_active_bg`."
+        },
+        {
+          "key": "ui.dim_inactive_panes",
+          "type": "boolean",
+          "default": "false",
+          "description": "Dim unfocused pane content in all modes, not only while a herdr mode (prefix/navigate) is active."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",
@@ -699,6 +788,60 @@
           "description": "Expanded Space sidebar layout. Supports built-in tokens and $name metadata tokens; at most 16 rows and 16 tokens per row."
         },
         {
+          "key": "ui.show_workspace_numbers",
+          "type": "boolean",
+          "default": "false",
+          "description": "Show the workspace jump symbol (1-9, then a-z; the `switch_workspace` target) on the sidebar branch line."
+        },
+        {
+          "key": "ui.show_agent_numbers",
+          "type": "boolean",
+          "default": "false",
+          "description": "Show each agent's jump symbol (1-9, then a-z; the `focus_agent` target) on the agent panel status line."
+        },
+        {
+          "key": "ui.workspace_number_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for `show_workspace_numbers` labels. Same syntax as `accent`. Unset uses the theme's muted number color."
+        },
+        {
+          "key": "ui.agent_number_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for `show_agent_numbers` labels. Same syntax as `accent`. Unset uses the theme's muted number color."
+        },
+        {
+          "key": "ui.workspace_sort",
+          "type": "enum",
+          "default": "\"manual\"",
+          "description": "Sidebar workspace list ordering. \"manual\" keeps the user's drag order, \"priority\" bubbles attention-needing workspaces to the top.",
+          "values": [
+            "manual",
+            "priority"
+          ]
+        },
+        {
+          "key": "ui.sidebar_active_border",
+          "type": "enum",
+          "default": "\"off\"",
+          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" — or a bool for backward compatibility (true = \"both\").",
+          "values": [
+            "off",
+            "above",
+            "below",
+            "both",
+            "left",
+            "right"
+          ]
+        },
+        {
+          "key": "ui.sidebar_active_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Background of the active space and agent rows in the sidebar. Same syntax as `accent`. Unset uses the theme's subtle highlight."
+        },
+        {
           "key": "ui.accent",
           "type": "color",
           "default": "\"cyan\"",
@@ -737,8 +880,38 @@
             "top-left",
             "top-right",
             "bottom-left",
-            "bottom-right"
+            "bottom-right",
+            "center"
           ]
+        },
+        {
+          "key": "ui.toast.herdr.size",
+          "type": "enum",
+          "default": "\"auto\"",
+          "description": "Toast box size preset: \"auto\" hugs the text, \"medium\" and \"large\" widen the box relative to the anchor area.",
+          "values": [
+            "auto",
+            "medium",
+            "large"
+          ]
+        },
+        {
+          "key": "ui.toast.herdr.needs_attention_seconds",
+          "type": "integer",
+          "default": "8",
+          "description": "How long a needs-attention toast stays visible, in seconds. 0 keeps it visible until clicked or replaced."
+        },
+        {
+          "key": "ui.toast.herdr.finished_seconds",
+          "type": "integer",
+          "default": "5",
+          "description": "How long a finished toast stays visible, in seconds. 0 keeps it visible until clicked or replaced."
+        },
+        {
+          "key": "ui.toast.herdr.update_seconds",
+          "type": "integer",
+          "default": "3",
+          "description": "How long an update-installed toast stays visible, in seconds. 0 keeps it visible until clicked or replaced."
         },
         {
           "key": "ui.toast.clipboard.enabled",
