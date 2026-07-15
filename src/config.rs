@@ -14,7 +14,7 @@ pub use self::{
         upsert_section_value,
     },
     keybinds::{
-        format_key_combo, jump_symbol, normalize_key_combo, terminal_key_matches_combo,
+        format_key_combo, normalize_key_combo, terminal_key_matches_combo,
         ActionKeybinds, BindingConfig, CommandKeybindConfig, CustomCommandAction,
         CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
     },
