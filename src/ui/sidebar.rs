@@ -12,7 +12,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
-use crate::app::state::{AgentPanelSort, Palette};
+use crate::app::state::{AgentPanelSort, Palette, WorkspaceSort};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
@@ -257,6 +257,14 @@ fn space_aggregate_state(app: &AppState, key: &str) -> (AgentState, bool) {
         .unwrap_or((AgentState::Unknown, true))
 }
 
+fn space_last_agent_state_change_seq(app: &AppState, key: &str) -> Option<u64> {
+    app.workspaces
+        .iter()
+        .filter(|ws| ws.worktree_space().is_some_and(|space| space.key == key))
+        .filter_map(|ws| ws.last_agent_state_change_seq(&app.terminals))
+        .max()
+}
+
 pub(crate) fn workspace_parent_group_state(
     app: &AppState,
     ws_idx: usize,
@@ -371,16 +379,42 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
             .map(|space| space.key.clone())
     });
 
+    // A top-level unit: an ungrouped workspace, or a whole worktree group
+    // (parent + member rows). Units are what priority sort reorders; group
+    // members always stay contiguous under their parent.
+    struct Unit {
+        priority: u8,
+        last_change_seq: Option<u64>,
+        entries: Vec<WorkspaceListEntry>,
+    }
+
+    let prioritize = matches!(app.workspace_sort, WorkspaceSort::Priority);
+    let workspace_rank = |ws: &crate::workspace::Workspace| {
+        if !prioritize {
+            return (0, None);
+        }
+        let (state, seen) = ws.aggregate_state(&app.terminals);
+        (
+            workspace_attention_priority(state, seen),
+            ws.last_agent_state_change_seq(&app.terminals),
+        )
+    };
+
     let mut emitted_groups = std::collections::HashSet::<String>::new();
-    let mut entries = Vec::new();
+    let mut units = Vec::new();
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
         let Some(space) = ws
             .worktree_space()
             .filter(|space| grouped_keys.contains(&space.key))
         else {
-            entries.push(WorkspaceListEntry::Workspace {
-                ws_idx,
-                indented: false,
+            let (priority, last_change_seq) = workspace_rank(ws);
+            units.push(Unit {
+                priority,
+                last_change_seq,
+                entries: vec![WorkspaceListEntry::Workspace {
+                    ws_idx,
+                    indented: false,
+                }],
             });
             continue;
         };
@@ -398,17 +432,22 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
                 .and_then(|member| member.worktree_space())
                 .is_some_and(|member_space| !member_space.is_linked_worktree)
         }) else {
-            entries.push(WorkspaceListEntry::Workspace {
-                ws_idx,
-                indented: false,
+            let (priority, last_change_seq) = workspace_rank(ws);
+            units.push(Unit {
+                priority,
+                last_change_seq,
+                entries: vec![WorkspaceListEntry::Workspace {
+                    ws_idx,
+                    indented: false,
+                }],
             });
             continue;
         };
         let collapsed = !force_expanded && app.collapsed_space_keys.contains(&space.key);
-        entries.push(WorkspaceListEntry::Workspace {
+        let mut entries = vec![WorkspaceListEntry::Workspace {
             ws_idx: parent_idx,
             indented: false,
-        });
+        }];
 
         if collapsed {
             if let Some(active_idx) = visible_group_idx
@@ -431,8 +470,36 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
                 });
             }
         }
+
+        // Rank a group by its whole space, even when collapsed rows are hidden.
+        let (priority, last_change_seq) = if prioritize {
+            let (state, seen) = space_aggregate_state(app, &space.key);
+            (
+                workspace_attention_priority(state, seen),
+                space_last_agent_state_change_seq(app, &space.key),
+            )
+        } else {
+            (0, None)
+        };
+        units.push(Unit {
+            priority,
+            last_change_seq,
+            entries,
+        });
     }
-    entries
+
+    if prioritize {
+        // Stable sort: within a tier, most recent state change first, then
+        // the manual order.
+        units.sort_by_key(|unit| {
+            (
+                std::cmp::Reverse(unit.priority),
+                std::cmp::Reverse(unit.last_change_seq),
+            )
+        });
+    }
+
+    units.into_iter().flat_map(|unit| unit.entries).collect()
 }
 
 pub(crate) fn workspace_list_rect(area: Rect, split_ratio: f32) -> Rect {
@@ -778,7 +845,12 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         return;
     }
 
-    for (visible_idx, ws) in app.workspaces.iter().enumerate() {
+    // Rows follow the visible list order so the numbers stay the jump targets
+    // `prefix+1..9` resolves via `workspace_at_visible_position`.
+    for (visible_idx, ws_idx) in app.visible_workspace_order().into_iter().enumerate() {
+        let Some(ws) = app.workspaces.get(ws_idx) else {
+            continue;
+        };
         let y = ws_area.y + visible_idx as u16;
         if y >= ws_area.y + ws_area.height {
             break;
@@ -1197,6 +1269,64 @@ fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) 
     style
 }
 
+fn sidebar_active_border_symbol(style: crate::config::PaneBorderActiveStyleConfig) -> &'static str {
+    match style {
+        crate::config::PaneBorderActiveStyleConfig::Light => "─",
+        crate::config::PaneBorderActiveStyleConfig::Heavy => "━",
+        crate::config::PaneBorderActiveStyleConfig::Double => "═",
+    }
+}
+
+fn draw_sidebar_active_border_line(app: &AppState, frame: &mut Frame, x: u16, y: u16, width: u16) {
+    if width == 0 {
+        return;
+    }
+    let line = sidebar_active_border_symbol(app.pane_border_active_style).repeat(width as usize);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            line,
+            Style::default().fg(app.pane_border_color(true)),
+        )),
+        Rect::new(x, y, width, 1),
+    );
+}
+
+fn sidebar_active_border_vertical_symbol(
+    style: crate::config::PaneBorderActiveStyleConfig,
+) -> &'static str {
+    match style {
+        crate::config::PaneBorderActiveStyleConfig::Light => "│",
+        crate::config::PaneBorderActiveStyleConfig::Heavy => "┃",
+        crate::config::PaneBorderActiveStyleConfig::Double => "║",
+    }
+}
+
+fn draw_sidebar_active_border_bar(
+    app: &AppState,
+    frame: &mut Frame,
+    x: u16,
+    y: u16,
+    height: u16,
+    clamp_bottom: u16,
+) {
+    let symbol = sidebar_active_border_vertical_symbol(app.pane_border_active_style);
+    let color = app.pane_border_color(true);
+    let buf = frame.buffer_mut();
+    let area = buf.area;
+    for row in y..y.saturating_add(height).min(clamp_bottom) {
+        if x < area.x
+            || x >= area.x.saturating_add(area.width)
+            || row < area.y
+            || row >= area.y.saturating_add(area.height)
+        {
+            continue;
+        }
+        let cell = &mut buf[(x, row)];
+        cell.set_symbol(symbol);
+        cell.set_style(Style::default().fg(color));
+    }
+}
+
 fn render_workspace_list(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -1234,6 +1364,12 @@ fn render_workspace_list(
     let scrollbar_rect = workspace_list_scrollbar_rect(app, area);
     let cards = &app.view.workspace_card_areas;
     let entries = workspace_list_entries(app);
+    // Jump labels follow the full visible order so they match what
+    // `keys.switch_workspace` (prefix+1..9, a..z) resolves via
+    // `workspace_at_visible_position`, regardless of scroll or priority sort.
+    let visible_order = app
+        .show_workspace_numbers
+        .then(|| app.visible_workspace_order());
 
     for card in cards {
         let i = card.ws_idx;
@@ -1245,6 +1381,13 @@ fn render_workspace_list(
         let is_dragged = dragged_ws_idx == Some(i);
         let highlighted = selected || is_active || is_dragged;
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
+
+        // Jump number for this card, if enabled and within the label range.
+        let jump_number = visible_order.as_ref().and_then(|order| {
+            let pos = order.iter().position(|idx| *idx == i)?;
+            crate::config::jump_symbol(pos)
+        });
+        let number_prefix_width: u16 = if jump_number.is_some() { 2 } else { 0 };
 
         if highlighted {
             let bg = if selected {
@@ -1262,6 +1405,47 @@ fn render_workspace_list(
                 for x in card.rect.x..card.rect.x + card.rect.width {
                     buf[(x, y)].set_style(Style::default().bg(bg));
                 }
+            }
+        }
+
+        // Active-space border lines live in the blank gap rows between cards,
+        // so they never shift the list layout. They only appear when a
+        // `row_gap` leaves a blank row to draw into. Bar modes render after the
+        // card loop so the bar wins the cell over row content.
+        let border_mode = app.sidebar_active_border;
+        if is_active
+            && matches!(
+                border_mode,
+                crate::config::SidebarActiveBorderConfig::Above
+                    | crate::config::SidebarActiveBorderConfig::Below
+                    | crate::config::SidebarActiveBorderConfig::Both
+            )
+        {
+            let row_is_blank = |y: u16| {
+                !cards
+                    .iter()
+                    .any(|c| y >= c.rect.y && y < c.rect.y + c.rect.height)
+            };
+            if border_mode != crate::config::SidebarActiveBorderConfig::Below {
+                if let Some(top_y) = row_y.checked_sub(1) {
+                    // area.y holds the " spaces" header; the row below it is padding.
+                    if top_y > area.y && row_is_blank(top_y) {
+                        draw_sidebar_active_border_line(
+                            app,
+                            frame,
+                            card.rect.x,
+                            top_y,
+                            card.rect.width,
+                        );
+                    }
+                }
+            }
+            let bottom_y = row_y + row_height;
+            if border_mode != crate::config::SidebarActiveBorderConfig::Above
+                && bottom_y < list_bottom
+                && row_is_blank(bottom_y)
+            {
+                draw_sidebar_active_border_line(app, frame, card.rect.x, bottom_y, card.rect.width);
             }
         }
 
@@ -1322,29 +1506,41 @@ fn render_workspace_list(
                 break;
             }
             let mut spans = Vec::new();
-            let prefix_width = if card.indented {
-                spans.push(Span::raw("   "));
-                if row_index == 0 {
-                    spans.push(Span::styled(
-                        if is_last_child { "└─ " } else { "├─ " },
-                        Style::default().fg(p.overlay0),
-                    ));
-                    6
-                } else if is_last_child {
-                    spans.push(Span::raw("     "));
-                    8
-                } else {
-                    spans.push(Span::styled("│", Style::default().fg(p.overlay0)));
-                    spans.push(Span::raw("    "));
-                    8
+            // Jump label occupies a leading two-column gutter on every row so
+            // the token columns stay aligned across the multi-row entry.
+            if number_prefix_width > 0 {
+                match (row_index, jump_number) {
+                    (0, Some(symbol)) => spans.push(Span::styled(
+                        format!("{symbol} "),
+                        Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0)),
+                    )),
+                    _ => spans.push(Span::raw("  ")),
                 }
-            } else if row_index == 0 {
-                spans.push(Span::raw(" "));
-                1
-            } else {
-                spans.push(Span::raw("   "));
-                3
-            };
+            }
+            let prefix_width = number_prefix_width
+                + if card.indented {
+                    spans.push(Span::raw("   "));
+                    if row_index == 0 {
+                        spans.push(Span::styled(
+                            if is_last_child { "└─ " } else { "├─ " },
+                            Style::default().fg(p.overlay0),
+                        ));
+                        6
+                    } else if is_last_child {
+                        spans.push(Span::raw("     "));
+                        8
+                    } else {
+                        spans.push(Span::styled("│", Style::default().fg(p.overlay0)));
+                        spans.push(Span::raw("    "));
+                        8
+                    }
+                } else if row_index == 0 {
+                    spans.push(Span::raw(" "));
+                    1
+                } else {
+                    spans.push(Span::raw("   "));
+                    3
+                };
             let trailing_width = if row_index == 0 && parent_group.is_some() {
                 2
             } else {
@@ -1375,6 +1571,30 @@ fn render_workspace_list(
                     Style::default().fg(p.accent),
                 )),
                 workspace_group_chevron_rect(card),
+            );
+        }
+    }
+
+    // Bar modes overlay the active card's edge column after its content is
+    // rendered, so the bar wins the cell.
+    if matches!(
+        app.sidebar_active_border,
+        crate::config::SidebarActiveBorderConfig::Left
+            | crate::config::SidebarActiveBorderConfig::Right
+    ) {
+        if let Some(card) = cards.iter().find(|card| Some(card.ws_idx) == app.active) {
+            let x = if app.sidebar_active_border == crate::config::SidebarActiveBorderConfig::Left {
+                card.rect.x
+            } else {
+                card.rect.x + card.rect.width.saturating_sub(1)
+            };
+            draw_sidebar_active_border_bar(
+                app,
+                frame,
+                x,
+                card.rect.y,
+                card.rect.height,
+                list_bottom,
             );
         }
     }
@@ -1483,6 +1703,9 @@ fn render_agent_detail(
     let scroll = app.agent_panel_scroll.min(metrics.max_offset_from_bottom);
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
+    // Tracks whether the row directly above the current entry is a blank
+    // spacer (only true when the previous entry left a `row_gap`).
+    let mut prev_gap: u16 = 0;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
         let label_color = state_label_color(detail.state, detail.seen, p);
         let rows = resolved_agent_rows(app, detail);
@@ -1492,6 +1715,50 @@ fn render_agent_detail(
         }
 
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
+
+        // Jump label follows the visible panel order (matches keys.focus_agent
+        // resolution), shown only on the first row of the entry.
+        let jump_number = app
+            .show_agent_numbers
+            .then(|| crate::config::jump_symbol(index))
+            .flatten();
+        let number_prefix_width: u16 = if jump_number.is_some() { 2 } else { 0 };
+
+        let gap = agent_entry_gap(app, index, details.len());
+        // Active-agent border lines live in blank spacer rows between entries,
+        // so they never shift layout; they only appear when a `row_gap` exists.
+        // Bar modes render after the entry so the bar wins the cell.
+        let border_mode = app.sidebar_active_border;
+        if is_active
+            && matches!(
+                border_mode,
+                crate::config::SidebarActiveBorderConfig::Above
+                    | crate::config::SidebarActiveBorderConfig::Below
+                    | crate::config::SidebarActiveBorderConfig::Both
+            )
+        {
+            if border_mode != crate::config::SidebarActiveBorderConfig::Below
+                && prev_gap > 0
+                && row_y > body.y
+            {
+                draw_sidebar_active_border_line(app, frame, body.x, row_y - 1, body.width);
+            }
+            let bottom_y = row_y + height;
+            if border_mode != crate::config::SidebarActiveBorderConfig::Above
+                && gap > 0
+                && bottom_y < body_bottom
+            {
+                draw_sidebar_active_border_line(app, frame, body.x, bottom_y, body.width);
+            }
+        }
+        let active_bar_top = (is_active
+            && matches!(
+                border_mode,
+                crate::config::SidebarActiveBorderConfig::Left
+                    | crate::config::SidebarActiveBorderConfig::Right
+            ))
+        .then_some(row_y);
+
         let row_style = if is_active {
             Style::default().bg(app.sidebar_active_band_bg())
         } else {
@@ -1511,7 +1778,20 @@ fn render_agent_detail(
         let state_icon = state_icon(detail.state, detail.seen, app.status_indicators, p);
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
-            let mut spans = vec![Span::raw(if row_index == 0 { " " } else { "   " })];
+            let mut spans = Vec::new();
+            // Jump label occupies a leading two-column gutter on every row so
+            // the token columns stay aligned across the entry.
+            if number_prefix_width > 0 {
+                match (row_index, jump_number) {
+                    (0, Some(symbol)) => spans.push(Span::styled(
+                        format!("{symbol} "),
+                        Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
+                    )),
+                    _ => spans.push(Span::raw("  ")),
+                }
+            }
+            spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
+            let prefix_width = number_prefix_width + if row_index == 0 { 1 } else { 3 };
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1520,18 +1800,30 @@ fn render_agent_detail(
                 agent_style,
                 agent_style,
                 p,
-                body.width
-                    .saturating_sub(if row_index == 0 { 1 } else { 3 }) as usize,
+                body.width.saturating_sub(prefix_width) as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
                 Rect::new(body.x, row_y + row_index as u16, body.width, 1),
             );
         }
+
+        // Bar modes overlay the entry's edge column after its rows render, so
+        // the bar wins the cell over row content.
+        if let Some(top) = active_bar_top {
+            let x = if border_mode == crate::config::SidebarActiveBorderConfig::Left {
+                body.x
+            } else {
+                body.x + body.width.saturating_sub(1)
+            };
+            draw_sidebar_active_border_bar(app, frame, x, top, height, body_bottom);
+        }
+
         row_y = row_y
             .saturating_add(height)
-            .saturating_add(agent_entry_gap(app, index, details.len()))
+            .saturating_add(gap)
             .min(body_bottom);
+        prev_gap = gap;
     }
 
     if let Some(track) = scrollbar_rect {
