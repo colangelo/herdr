@@ -1350,6 +1350,10 @@ mod tests {
     fn expanded_sidebar_workspace_numbers_follow_priority_visible_order() {
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        // A branch gives each entry a second (branch) row, where the jump number
+        // renders under the dot.
+        app.workspaces[0].cached_git_branch = Some("main".into());
+        app.workspaces[1].cached_git_branch = Some("main".into());
         app.ensure_test_terminals();
         app.show_workspace_numbers = true;
         app.workspace_sort = crate::app::state::WorkspaceSort::Priority;
@@ -1376,17 +1380,20 @@ mod tests {
 
         let top = app.view.workspace_card_areas[0].rect;
         let second = app.view.workspace_card_areas[1].rect;
-        let top_line = buffer_row_text(buffer, top, top.y);
-        let second_line = buffer_row_text(buffer, second, second.y);
 
-        assert!(top_line.starts_with('1'), "top: {top_line:?}");
-        assert!(top_line.contains("two"), "top: {top_line:?}");
-        assert!(second_line.starts_with('2'), "second: {second_line:?}");
-        assert!(second_line.contains("one"), "second: {second_line:?}");
+        // Row 0 shows the name; the jump number sits under the dot on row 1
+        // (column x+1 for a plain space) and follows the priority-visible order.
+        assert!(
+            buffer_row_text(buffer, top, top.y).contains("two"),
+            "top row0: {:?}",
+            buffer_row_text(buffer, top, top.y)
+        );
+        assert_eq!(buffer[(top.x + 1, top.y + 1)].symbol(), "1");
+        assert_eq!(buffer[(second.x + 1, second.y + 1)].symbol(), "2");
 
         // The number label is styled with the palette default when no override.
         assert_eq!(
-            buffer[(top.x, top.y)].style().fg,
+            buffer[(top.x + 1, top.y + 1)].style().fg,
             Some(app.palette.overlay0)
         );
     }
