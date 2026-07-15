@@ -373,5 +373,44 @@ jobs:
           git diff --staged --quiet || git commit -m "Update herdr to v${VERSION}"
           git push
 
-  # fork: update-latest-json removed — herdr.dev latest.json/self-update is upstream
-  # product infra; this fork distributes via colangelo/homebrew-tap (update-homebrew).
+  # fork: publishes the fork's OWN website/latest.json (served via raw GitHub and
+  # read by the fork-aware update check) with fork release data. This replaces the
+  # upstream update-latest-json job, which needed upstream deploy keys and served
+  # herdr.dev/ogulcancelik data. See openspec/changes/fork-aware-update-check.
+  update-latest-json:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Update fork latest manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"                 # e.g. v0.7.4-ac
+          VERSION="${TAG#v}"                       # e.g. 0.7.4-ac
+          BASE="${VERSION%%-ac*}"                  # e.g. 0.7.4 (matches Cargo.toml / binary version)
+          RELEASE_PROTOCOL=$(python3 -c 'import re, sys; m = re.search(r"pub const PROTOCOL_VERSION: u32 = (\d+);", open("src/protocol/wire.rs").read()); sys.exit("no PROTOCOL_VERSION") if m is None else print(m.group(1))')
+          # --tag reads the fork's suffixed release; --version keeps the base semver
+          # the binary reports; --force allows same-base -ac.N hotfix republishes.
+          python3 scripts/changelog.py sync-latest-json \
+            --repo colangelo/herdr \
+            --tag "$TAG" \
+            --version "$BASE" \
+            --protocol "$RELEASE_PROTOCOL" \
+            --force \
+            --output website/latest.json
+
+      - name: Commit fork latest manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add website/latest.json
+          git diff --cached --quiet || git commit -m "docs: update fork latest manifest for ${GITHUB_REF_NAME}"
+          git push origin master
