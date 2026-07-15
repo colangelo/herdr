@@ -1,6 +1,6 @@
 //! Self-update mechanism.
 //!
-//! Checks the hosted herdr.dev update manifest for newer versions.
+//! Checks this fork's update manifest (served via raw GitHub) for newer versions.
 //! Manual `herdr update` downloads and installs the binary.
 //! Background checks only surface availability and release notes.
 //! Uses `curl` as a subprocess for HTTP — no additional Rust HTTP dependencies.
@@ -23,8 +23,14 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::Stream as _;
 use serde::{Deserialize, Deserializer};
 
-const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
-const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
+// Fork-aware update check: point at this fork's own checked-in manifests served
+// via raw GitHub, not upstream herdr.dev. `website/preview.json` is maintained by
+// the fork's preview workflow; `website/latest.json` is rewritten by the
+// `release-ac` publish step on each stable fork release.
+const STABLE_UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/colangelo/herdr/master/website/latest.json";
+const PREVIEW_UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/colangelo/herdr/master/website/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";
@@ -3441,8 +3447,14 @@ mod tests {
                 .get(target)
                 .unwrap_or_else(|| panic!("missing asset URL for {target}"))
                 .url;
+            // Fork manifest: the binary/version is the base semver, but releases
+            // are tagged `v{version}-ac` (optionally `-ac.N`) on colangelo/herdr.
             assert!(
-                url.contains(&format!("/releases/download/v{}/", manifest.version)),
+                url.contains("github.com/colangelo/herdr/"),
+                "expected a fork asset URL for {target}: {url}"
+            );
+            assert!(
+                url.contains(&format!("/releases/download/v{}-ac", manifest.version)),
                 "unexpected release URL for {target}: {url}"
             );
             assert!(
@@ -3467,7 +3479,11 @@ mod tests {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_else(|| panic!("missing asset URL for {version} {target}"));
                 assert!(
-                    url.contains(&format!("/releases/download/v{version}/")),
+                    url.contains("github.com/colangelo/herdr/"),
+                    "expected a fork asset URL for {version} {target}: {url}"
+                );
+                assert!(
+                    url.contains(&format!("/releases/download/v{version}-ac")),
                     "unexpected release URL for {version} {target}: {url}"
                 );
                 assert!(
