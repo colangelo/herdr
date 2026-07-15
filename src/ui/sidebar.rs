@@ -1379,6 +1379,10 @@ fn render_workspace_list(
     let visible_order = app
         .show_workspace_numbers
         .then(|| app.visible_workspace_order());
+    // `left` reserves a dedicated leftmost column for the active bar, so it never
+    // overwrites the chevron/dot/number/name; all rows shift right by one cell.
+    let bar_reserve: u16 =
+        u16::from(app.sidebar_active_border == crate::config::SidebarActiveBorderConfig::Left);
 
     for card in cards {
         let i = card.ws_idx;
@@ -1396,7 +1400,6 @@ fn render_workspace_list(
             let pos = order.iter().position(|idx| *idx == i)?;
             crate::config::jump_symbol(pos)
         });
-        let number_prefix_width: u16 = if jump_number.is_some() { 2 } else { 0 };
 
         if highlighted {
             let bg = if selected {
@@ -1510,51 +1513,53 @@ fn render_workspace_list(
             },
         );
 
+        // Row 0's leading prefix width doubles as the dot column; the jump number
+        // sits under the dot on the second row, matching the pre-0.7.4 layout.
+        let lead0: u16 = if card.indented {
+            3
+        } else if parent_group.is_some() {
+            2
+        } else {
+            1
+        };
+        let lead_rest: u16 = if card.indented { 5 } else { 3 };
+        let has_second_row = rows.len() >= 2;
+
         for (row_index, resolved) in rows.iter().enumerate() {
             if row_index as u16 >= row_height || row_y + row_index as u16 >= list_bottom {
                 break;
             }
             let mut spans = Vec::new();
-            // Jump label occupies a leading two-column gutter on every row so
-            // the token columns stay aligned across the multi-row entry.
-            if number_prefix_width > 0 {
-                match (row_index, jump_number) {
-                    (0, Some(symbol)) => spans.push(Span::styled(
-                        format!("{symbol} "),
-                        Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0)),
-                    )),
-                    _ => spans.push(Span::raw("  ")),
-                }
+            if bar_reserve > 0 {
+                spans.push(Span::raw(" "));
             }
-            let prefix_width = number_prefix_width
-                + if card.indented {
+            if row_index == 0 {
+                if card.indented {
                     spans.push(Span::raw("   "));
-                    if row_index == 0 {
-                        spans.push(Span::styled(
-                            if is_last_child { "└─ " } else { "├─ " },
-                            Style::default().fg(p.overlay0),
-                        ));
-                        6
-                    } else if is_last_child {
-                        spans.push(Span::raw("     "));
-                        8
-                    } else {
-                        spans.push(Span::styled("│", Style::default().fg(p.overlay0)));
-                        spans.push(Span::raw("    "));
-                        8
-                    }
-                } else if row_index == 0 {
+                } else if let Some((_, collapsed)) = parent_group.as_ref() {
+                    spans.push(Span::styled(
+                        if *collapsed { "▸" } else { "▾" },
+                        Style::default().fg(p.accent),
+                    ));
                     spans.push(Span::raw(" "));
-                    1
                 } else {
-                    spans.push(Span::raw("   "));
-                    3
-                };
-            let trailing_width = if row_index == 0 && parent_group.is_some() {
-                2
+                    spans.push(Span::raw(" "));
+                }
+            } else if row_index == 1 && has_second_row && jump_number.is_some() {
+                // Jump number in the dot column of the second row (under the dot).
+                let symbol = jump_number.unwrap_or(' ');
+                spans.push(Span::raw(" ".repeat(lead0 as usize)));
+                spans.push(Span::styled(
+                    symbol.to_string(),
+                    Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0)),
+                ));
+                spans.push(Span::raw(
+                    " ".repeat(lead_rest.saturating_sub(lead0).saturating_sub(1) as usize),
+                ));
             } else {
-                0
-            };
+                spans.push(Span::raw(" ".repeat(lead_rest as usize)));
+            }
+            let prefix_width = bar_reserve + if row_index == 0 { lead0 } else { lead_rest };
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1712,6 +1717,10 @@ fn render_agent_detail(
     let scroll = app.agent_panel_scroll.min(metrics.max_offset_from_bottom);
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
+    // `left` reserves a dedicated leftmost column for the active bar so it never
+    // overwrites the dot/number/name; all rows shift right by one cell.
+    let bar_reserve: u16 =
+        u16::from(app.sidebar_active_border == crate::config::SidebarActiveBorderConfig::Left);
     // Tracks whether the row directly above the current entry is a blank
     // spacer (only true when the previous entry left a `row_gap`).
     let mut prev_gap: u16 = 0;
@@ -1726,12 +1735,12 @@ fn render_agent_detail(
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
 
         // Jump label follows the visible panel order (matches keys.focus_agent
-        // resolution), shown only on the first row of the entry.
+        // resolution), shown under the dot on the entry's second row.
         let jump_number = app
             .show_agent_numbers
             .then(|| crate::config::jump_symbol(index))
             .flatten();
-        let number_prefix_width: u16 = if jump_number.is_some() { 2 } else { 0 };
+        let has_second_row = rows.len() >= 2;
 
         let gap = agent_entry_gap(app, index, details.len());
         // Active-agent border lines live in blank spacer rows between entries,
@@ -1788,19 +1797,22 @@ fn render_agent_detail(
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
             let mut spans = Vec::new();
-            // Jump label occupies a leading two-column gutter on every row so
-            // the token columns stay aligned across the entry.
-            if number_prefix_width > 0 {
-                match (row_index, jump_number) {
-                    (0, Some(symbol)) => spans.push(Span::styled(
-                        format!("{symbol} "),
-                        Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
-                    )),
-                    _ => spans.push(Span::raw("  ")),
-                }
+            if bar_reserve > 0 {
+                spans.push(Span::raw(" "));
             }
-            spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
-            let prefix_width = number_prefix_width + if row_index == 0 { 1 } else { 3 };
+            if row_index == 1 && has_second_row && jump_number.is_some() {
+                // Jump number in the dot column of the second row (under the dot).
+                let symbol = jump_number.unwrap_or(' ');
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    symbol.to_string(),
+                    Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
+                ));
+                spans.push(Span::raw(" "));
+            } else {
+                spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
+            }
+            let prefix_width = bar_reserve + if row_index == 0 { 1 } else { 3 };
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
