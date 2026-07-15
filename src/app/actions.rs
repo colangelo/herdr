@@ -989,6 +989,87 @@ fn activity_summary_for_panes<'a>(
 // ---------------------------------------------------------------------------
 
 impl AppState {
+    pub(crate) fn ensure_workspace_visible_in_rect(
+        &mut self,
+        sidebar_rect: ratatui::layout::Rect,
+        idx: usize,
+    ) {
+        if idx >= self.workspaces.len() {
+            return;
+        }
+
+        if self.sidebar_collapsed {
+            return;
+        }
+
+        let entries = crate::ui::workspace_list_entries(self);
+        let Some(target_entry_idx) = entries.iter().position(|entry| {
+            matches!(
+                entry,
+                crate::ui::WorkspaceListEntry::Workspace { ws_idx, .. } if *ws_idx == idx
+            )
+        }) else {
+            return;
+        };
+
+        self.workspace_scroll =
+            crate::ui::normalized_workspace_scroll(self, sidebar_rect, self.workspace_scroll);
+        let mut cards = crate::ui::compute_workspace_card_areas(self, sidebar_rect);
+        if cards.iter().any(|card| card.ws_idx == idx) {
+            return;
+        }
+
+        if target_entry_idx < self.workspace_scroll {
+            self.workspace_scroll = target_entry_idx;
+            return;
+        }
+
+        while !cards.iter().any(|card| card.ws_idx == idx) {
+            let previous_scroll = self.workspace_scroll;
+            self.workspace_scroll = self.workspace_scroll.saturating_add(1);
+            if self.workspace_scroll == previous_scroll {
+                break;
+            }
+            self.workspace_scroll =
+                crate::ui::normalized_workspace_scroll(self, sidebar_rect, self.workspace_scroll);
+            if self.workspace_scroll == previous_scroll {
+                break;
+            }
+            cards = crate::ui::compute_workspace_card_areas(self, sidebar_rect);
+            if cards.is_empty() {
+                break;
+            }
+        }
+    }
+
+    pub(crate) fn ensure_agent_panel_entry_visible_in_rect(
+        &mut self,
+        sidebar_rect: ratatui::layout::Rect,
+        idx: usize,
+    ) {
+        if self.sidebar_collapsed {
+            return;
+        }
+
+        let (_, detail_area) =
+            crate::ui::expanded_sidebar_sections(sidebar_rect, self.sidebar_section_split);
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, detail_area);
+        let visible = metrics.viewport_rows;
+        if visible == 0 {
+            return;
+        }
+
+        if idx < self.agent_panel_scroll {
+            self.agent_panel_scroll = idx;
+        } else if idx >= self.agent_panel_scroll.saturating_add(visible) {
+            self.agent_panel_scroll = idx.saturating_add(1).saturating_sub(visible);
+        }
+
+        let max_scroll =
+            crate::ui::agent_panel_scroll_metrics(self, detail_area).max_offset_from_bottom;
+        self.agent_panel_scroll = self.agent_panel_scroll.min(max_scroll);
+    }
+
     pub(crate) fn next_agent_metadata_expiry(&self) -> Option<std::time::Instant> {
         self.terminals
             .values()
