@@ -1347,6 +1347,79 @@ mod tests {
     }
 
     #[test]
+    fn expanded_sidebar_workspace_numbers_follow_priority_visible_order() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        app.show_workspace_numbers = true;
+        app.workspace_sort = crate::app::state::WorkspaceSort::Priority;
+
+        // "two" (state index 1) is blocked, so it bubbles to visible position 0
+        // and must take jump number 1; "one" falls to position 1 (number 2).
+        let pane = app.workspaces[1].tabs[0].root_pane;
+        let terminal_id = app.workspaces[1].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal.state = crate::detect::AgentState::Blocked;
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Navigate;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let top = app.view.workspace_card_areas[0].rect;
+        let second = app.view.workspace_card_areas[1].rect;
+        let top_line = buffer_row_text(buffer, top, top.y);
+        let second_line = buffer_row_text(buffer, second, second.y);
+
+        assert!(top_line.starts_with('1'), "top: {top_line:?}");
+        assert!(top_line.contains("two"), "top: {top_line:?}");
+        assert!(second_line.starts_with('2'), "second: {second_line:?}");
+        assert!(second_line.contains("one"), "second: {second_line:?}");
+
+        // The number label is styled with the palette default when no override.
+        assert_eq!(
+            buffer[(top.x, top.y)].style().fg,
+            Some(app.palette.overlay0)
+        );
+    }
+
+    #[test]
+    fn expanded_sidebar_active_border_left_draws_bar_on_active_card_edge() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        app.sidebar_active_border = crate::config::SidebarActiveBorderConfig::Left;
+        app.active = Some(1);
+        app.selected = 1;
+        app.mode = Mode::Terminal;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let active_card = app.view.workspace_card_areas[1].rect;
+        let bar_symbol = buffer[(active_card.x, active_card.y)].symbol().to_string();
+        assert_eq!(bar_symbol, "│", "expected vertical bar on active card edge");
+
+        let inactive_card = app.view.workspace_card_areas[0].rect;
+        let inactive_symbol = buffer[(inactive_card.x, inactive_card.y)]
+            .symbol()
+            .to_string();
+        assert_ne!(inactive_symbol, "│", "inactive card must not have a bar");
+    }
+
+    #[test]
     fn tab_bar_dims_auto_named_tabs_and_emphasizes_custom_tabs() {
         let mut app = crate::app::state::AppState::test_new();
         let mut ws = Workspace::test_new("test");
