@@ -344,11 +344,22 @@ def default_release_assets(version: str, repo: str = DEFAULT_RELEASE_REPO) -> di
 
 
 def manifest_from_release_payload(
-    payload: dict[str, Any], version: str, protocol: int | None = None
+    payload: dict[str, Any],
+    version: str,
+    protocol: int | None = None,
+    expected_tag: str | None = None,
 ) -> dict[str, Any]:
     normalized_version = normalize_version(version)
     tag_name = str(payload.get("tagName") or "")
-    if normalize_version(tag_name) != normalized_version:
+    # Forks tag releases with a suffix (e.g. `v0.7.4-ac`) while the manifest
+    # `version` stays the base semver that the binary reports. When an explicit
+    # tag is given, validate against it instead of deriving `v{version}`.
+    if expected_tag is not None:
+        if tag_name != expected_tag:
+            raise ChangelogError(
+                f"GitHub release tag mismatch: expected {expected_tag}, got {tag_name or '<missing>'}"
+            )
+    elif normalize_version(tag_name) != normalized_version:
         raise ChangelogError(
             f"GitHub release tag mismatch: expected v{normalized_version}, got {tag_name or '<missing>'}"
         )
@@ -542,13 +553,14 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def fetch_release_payload(version: str, repo: str) -> dict[str, Any]:
+def fetch_release_payload(version: str, repo: str, tag: str | None = None) -> dict[str, Any]:
     normalized_version = normalize_version(version)
+    release_tag = tag or f"v{normalized_version}"
     command = [
         "gh",
         "release",
         "view",
-        f"v{normalized_version}",
+        release_tag,
         "--repo",
         repo,
         "--json",
@@ -557,7 +569,7 @@ def fetch_release_payload(version: str, repo: str) -> dict[str, Any]:
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip() or "unknown gh error"
-        raise ChangelogError(f"failed to read GitHub release v{normalized_version}: {stderr}")
+        raise ChangelogError(f"failed to read GitHub release {release_tag}: {stderr}")
 
     try:
         payload = json.loads(result.stdout)
@@ -661,11 +673,17 @@ def cmd_sync_latest_json(args: argparse.Namespace) -> int:
     manifest_path = Path(args.output)
     version = normalize_version(args.version)
 
+    tag = getattr(args, "tag", None)
     current_manifest = load_json(manifest_path)
-    ensure_manifest_is_outdated(current_manifest, version)
+    # `--force` skips the monotonic-version guard so a fork can correct a manifest
+    # that was seeded with unrelated (upstream) data of an equal-or-higher version.
+    if not getattr(args, "force", False):
+        ensure_manifest_is_outdated(current_manifest, version)
 
-    release_payload = fetch_release_payload(version, args.repo)
-    new_manifest = manifest_from_release_payload(release_payload, version, args.protocol)
+    release_payload = fetch_release_payload(version, args.repo, tag=tag)
+    new_manifest = manifest_from_release_payload(
+        release_payload, version, args.protocol, expected_tag=tag
+    )
     announcement_path = Path(args.announcement)
     announcement = load_product_announcement(announcement_path)
     output = build_latest_json(
@@ -770,6 +788,16 @@ def build_parser() -> argparse.ArgumentParser:
     sync_latest_json.add_argument("--output", default=str(DEFAULT_LATEST_JSON_PATH))
     sync_latest_json.add_argument("--announcement", default=str(DEFAULT_PRODUCT_ANNOUNCEMENT_PATH))
     sync_latest_json.add_argument("--protocol", type=int)
+    sync_latest_json.add_argument(
+        "--tag",
+        default=None,
+        help="Explicit release tag to read (e.g. v0.7.4-ac for forks). Defaults to v{version}.",
+    )
+    sync_latest_json.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip the monotonic-version guard (use to correct a manifest seeded with unrelated data).",
+    )
     sync_latest_json.set_defaults(func=cmd_sync_latest_json)
 
     validate_product_announcement = subparsers.add_parser(

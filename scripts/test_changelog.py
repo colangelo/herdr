@@ -389,6 +389,39 @@ class ChangelogScriptTests(unittest.TestCase):
                 "0.1.1",
             )
 
+    def test_manifest_from_release_payload_accepts_fork_suffixed_tag(self) -> None:
+        # A fork tags `v0.1.1-ac` while the manifest version stays the base `0.1.1`.
+        manifest = manifest_from_release_payload(
+            {
+                "tagName": "v0.1.1-ac",
+                "isDraft": False,
+                "isPrerelease": False,
+                "body": "### Fixed\n- One\n",
+                "assets": release_assets_with_digests(),
+            },
+            "0.1.1",
+            expected_tag="v0.1.1-ac",
+        )
+
+        self.assertEqual(manifest["version"], "0.1.1")
+        self.assertEqual(
+            manifest["assets"]["linux-x86_64"], "https://example.com/linux-x86_64"
+        )
+
+    def test_manifest_from_release_payload_rejects_wrong_explicit_tag(self) -> None:
+        with self.assertRaisesRegex(ChangelogError, "expected v0.1.1-ac, got v0.1.1"):
+            manifest_from_release_payload(
+                {
+                    "tagName": "v0.1.1",
+                    "isDraft": False,
+                    "isPrerelease": False,
+                    "body": "### Fixed\n- One\n",
+                    "assets": release_assets_with_digests(),
+                },
+                "0.1.1",
+                expected_tag="v0.1.1-ac",
+            )
+
     def test_manifest_from_release_payload_rejects_missing_asset(self) -> None:
         with self.assertRaisesRegex(ChangelogError, "missing asset herdr-macos-aarch64"):
             manifest_from_release_payload(
