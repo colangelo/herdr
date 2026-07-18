@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.7.4-ac] - 2026-07-18
+
 ### Added
 - Added a clear-scrollback action with tmux `clear-history` semantics: the `pane.clear` socket method and `herdr pane clear [<pane_id>|--pane ID|--current]` CLI purge a pane's saved scrollback while leaving the visible screen and running process untouched, and the `keys.clear_scrollback` binding (unset by default) clears the focused pane.
 - Added pane-to-tab keyboard controls: `break_pane` (`prefix+!`) moves the focused pane into a new tab, `move_pane_to_tab` (`prefix+m`) opens a destination picker, and `move_pane_next_tab` / `move_pane_prev_tab` (`prefix+>` / `prefix+<`) move directly without wrapping. Moves preserve the running terminal and surface unavailable or rejected moves as non-blocking feedback.
