@@ -359,6 +359,7 @@ pub struct Keybinds {
     pub move_pane_next_tab: ActionKeybinds,
     pub move_pane_prev_tab: ActionKeybinds,
     pub edit_scrollback: ActionKeybinds,
+    pub clear_scrollback: ActionKeybinds,
     pub copy_mode: ActionKeybinds,
     pub focus_pane_left: ActionKeybinds,
     pub focus_pane_down: ActionKeybinds,
@@ -527,6 +528,7 @@ impl Config {
             move_pane_next_tab: empty_action!(),
             move_pane_prev_tab: empty_action!(),
             edit_scrollback: empty_action!(),
+            clear_scrollback: empty_action!(),
             copy_mode: empty_action!(),
             focus_pane_left: empty_action!(),
             focus_pane_down: empty_action!(),
@@ -674,6 +676,7 @@ impl Config {
             apply_action!(keybinds.move_pane_next_tab, move_pane_next_tab, source);
             apply_action!(keybinds.move_pane_prev_tab, move_pane_prev_tab, source);
             apply_action!(keybinds.edit_scrollback, edit_scrollback, source);
+            apply_action!(keybinds.clear_scrollback, clear_scrollback, source);
             apply_action!(keybinds.copy_mode, copy_mode, source);
             apply_action!(keybinds.focus_pane_left, focus_pane_left, source);
             apply_action!(keybinds.focus_pane_down, focus_pane_down, source);
