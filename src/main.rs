@@ -207,6 +207,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # move_pane_prev_tab = "prefix+<"
 # edit_scrollback = "prefix+e"
 # clear_scrollback = ""   # optional, unset by default; purge saved scrollback (tmux clear-history)
+# copy_mode_page_up = "prefix+pageup"       # enter copy mode + page up in one gesture (tmux copy-mode -u)
+# copy_mode_half_page_up = "prefix+ctrl+u"  # enter copy mode + half page up
+# copy_mode_line_up = "prefix+ctrl+k"       # enter copy mode + one line up; with a non-ctrl+b prefix
+#                                           # "prefix+ctrl+b" is also free (the default prefix shadows it via send-prefix)
 # focus_pane_left = "prefix+h"
 # focus_pane_down = "prefix+j"
 # focus_pane_up = "prefix+k"

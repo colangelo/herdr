@@ -9,6 +9,8 @@ use bytes::Bytes;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Direction;
 
+use super::copy_mode::CopyModeEntryScroll;
+
 use crate::{
     app::{
         state::{AppState, Mode},
@@ -393,6 +395,15 @@ impl App {
             }
             NavigateAction::EditScrollback => {}
             NavigateAction::CopyMode => self.state.enter_copy_mode(&self.terminal_runtimes),
+            NavigateAction::CopyModePageUp => self
+                .state
+                .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Page),
+            NavigateAction::CopyModeHalfPageUp => self
+                .state
+                .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::HalfPage),
+            NavigateAction::CopyModeLineUp => self
+                .state
+                .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Line),
             NavigateAction::Zoom => {
                 self.zoom_focused_pane_via_api();
                 leave_navigate_mode(&mut self.state);
@@ -1672,6 +1683,9 @@ pub(crate) enum NavigateAction {
     ClosePane,
     EditScrollback,
     CopyMode,
+    CopyModePageUp,
+    CopyModeHalfPageUp,
+    CopyModeLineUp,
     Zoom,
     EnterResizeMode,
     BalancePanes,
@@ -1708,6 +1722,9 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CyclePanePrevious
             | NavigateAction::LastPane
             | NavigateAction::OpenNotificationTarget
+            | NavigateAction::CopyModePageUp
+            | NavigateAction::CopyModeHalfPageUp
+            | NavigateAction::CopyModeLineUp
     )
 }
 
@@ -1809,6 +1826,12 @@ fn non_indexed_action_for_key(
         (&kb.move_pane_prev_tab, NavigateAction::MovePaneToPrevTab),
         (&kb.edit_scrollback, NavigateAction::EditScrollback),
         (&kb.copy_mode, NavigateAction::CopyMode),
+        (&kb.copy_mode_page_up, NavigateAction::CopyModePageUp),
+        (
+            &kb.copy_mode_half_page_up,
+            NavigateAction::CopyModeHalfPageUp,
+        ),
+        (&kb.copy_mode_line_up, NavigateAction::CopyModeLineUp),
         (&kb.focus_pane_left, NavigateAction::FocusPaneLeft),
         (&kb.focus_pane_down, NavigateAction::FocusPaneDown),
         (&kb.focus_pane_up, NavigateAction::FocusPaneUp),
@@ -2089,6 +2112,15 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::EditScrollback => {}
         NavigateAction::CopyMode => state.enter_copy_mode(terminal_runtimes),
+        NavigateAction::CopyModePageUp => {
+            state.enter_copy_mode_scrolled(terminal_runtimes, CopyModeEntryScroll::Page)
+        }
+        NavigateAction::CopyModeHalfPageUp => {
+            state.enter_copy_mode_scrolled(terminal_runtimes, CopyModeEntryScroll::HalfPage)
+        }
+        NavigateAction::CopyModeLineUp => {
+            state.enter_copy_mode_scrolled(terminal_runtimes, CopyModeEntryScroll::Line)
+        }
         NavigateAction::Zoom => {
             state.toggle_zoom();
             leave_navigate_mode(state);

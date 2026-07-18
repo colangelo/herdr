@@ -26,6 +26,14 @@ impl App {
     }
 }
 
+/// How a one-gesture copy-mode entry scrolls after entering (tmux `copy-mode -u`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyModeEntryScroll {
+    Page,
+    HalfPage,
+    Line,
+}
+
 impl AppState {
     pub(crate) fn enter_copy_mode(&mut self, terminal_runtimes: &TerminalRuntimeRegistry) {
         let Some(ws_idx) = self.active else {
@@ -73,6 +81,37 @@ impl AppState {
             },
         });
         self.mode = Mode::Copy;
+    }
+
+    /// One-gesture scrollback entry (tmux `copy-mode -u`): enter copy mode on the focused pane,
+    /// then scroll up by the requested amount. If copy mode is already active on the focused pane,
+    /// only scroll — re-entering would clobber the entry scroll anchor (`entry_offset_from_bottom`)
+    /// and the cursor. Stale copy mode on another pane is cancelled first (restoring that pane's
+    /// scroll) before entering fresh on the focused pane.
+    pub(crate) fn enter_copy_mode_scrolled(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        scroll: CopyModeEntryScroll,
+    ) {
+        if !(self.copy_mode.is_some() && self.copy_mode_pane_is_focused()) {
+            if self.copy_mode.is_some() {
+                self.cancel_copy_mode(terminal_runtimes);
+            }
+            self.enter_copy_mode(terminal_runtimes);
+            if self.copy_mode.is_none() {
+                // No focused pane or zero-size pane: entering declined, nothing to scroll.
+                return;
+            }
+        }
+        match scroll {
+            CopyModeEntryScroll::Page => self.scroll_copy_mode_page(terminal_runtimes, -1, false),
+            CopyModeEntryScroll::HalfPage => {
+                self.scroll_copy_mode_page(terminal_runtimes, -1, true)
+            }
+            CopyModeEntryScroll::Line => self.scroll_copy_mode_viewport_line(terminal_runtimes, -1),
+        }
+        // The scroll-only path is reached from Prefix (or Navigate) mode; settle back into Copy.
+        self.sync_copy_mode_with_focus();
     }
 
     pub(crate) fn handle_copy_mode_key(
@@ -1403,6 +1442,149 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::Copy);
         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+    }
+
+    #[tokio::test]
+    async fn prefix_page_up_enters_copy_mode_scrolled_and_repeats() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.prefix_code = KeyCode::Char('a');
+        app.state.prefix_mods = KeyModifiers::CONTROL;
+
+        // One gesture: prefix + PageUp enters copy mode already scrolled one page up.
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty()))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Copy);
+        let copy_mode = app.state.copy_mode.as_ref().expect("copy mode");
+        assert_eq!(copy_mode.entry_offset_from_bottom, 0);
+        let height = app
+            .state
+            .pane_info_by_id(pane_id)
+            .expect("pane info")
+            .inner_rect
+            .height;
+        let page = copy_mode_page_lines(height, false);
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), page);
+
+        // Repeating the gesture scrolls further without re-entering (anchor preserved).
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty()))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Copy);
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 2 * page);
+        assert_eq!(
+            app.state
+                .copy_mode
+                .as_ref()
+                .expect("copy mode")
+                .entry_offset_from_bottom,
+            0
+        );
+
+        // Exit restores the pre-gesture scroll position.
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('q'), KeyModifiers::empty()));
+        assert!(app.state.copy_mode.is_none());
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+    }
+
+    #[tokio::test]
+    async fn prefix_ctrl_u_and_ctrl_k_enter_copy_mode_scrolled() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.prefix_code = KeyCode::Char('a');
+        app.state.prefix_mods = KeyModifiers::CONTROL;
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::Char('u'), KeyModifiers::CONTROL))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Copy);
+        let height = app
+            .state
+            .pane_info_by_id(pane_id)
+            .expect("pane info")
+            .inner_rect
+            .height;
+        assert_eq!(
+            copy_mode_offset_from_bottom(&app, pane_id),
+            copy_mode_page_lines(height, true)
+        );
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('q'), KeyModifiers::empty()));
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Copy);
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 1);
+    }
+
+    #[tokio::test]
+    async fn prefix_page_up_without_scrollback_still_enters_copy_mode() {
+        let (mut app, _) = app_with_copy_screen(b"alpha\nbeta\n");
+        app.state.prefix_code = KeyCode::Char('a');
+        app.state.prefix_mods = KeyModifiers::CONTROL;
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty()))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Copy);
+        assert!(app.state.copy_mode.is_some());
+    }
+
+    #[tokio::test]
+    async fn send_prefix_takes_precedence_over_copy_mode_scroll_binding() {
+        let (mut app, _) = app_with_copy_screen(b"alpha\nbeta\n");
+        // Default prefix is ctrl+b; bind the page-up entry to prefix+ctrl+b to prove
+        // the send-prefix check still wins over the binding.
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[keys]
+copy_mode_page_up = "prefix+ctrl+b"
+"#,
+        )
+        .expect("config");
+        app.state.keybinds = config.keybinds();
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+
+        assert!(app.state.copy_mode.is_none());
+        assert_ne!(app.state.mode, Mode::Copy);
     }
 
     #[tokio::test]
