@@ -97,7 +97,7 @@ Raw socket method names use dot notation:
 | Area | Methods |
 | --- | --- |
 | Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
-| Notification | `notification.show` |
+| Notification | `notification.show`, `notification.list`, `notification.mark_seen` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
@@ -407,6 +407,40 @@ The response reports whether anything was shown:
 ```
 
 Possible reasons are `shown`, `disabled`, `rate_limited`, `no_foreground_client`, and `busy`. `disabled` means `ui.toast.delivery = "off"`. `busy` means an existing in-app toast was not replaced. Terminal and system delivery are best-effort through the current foreground attached Herdr client.
+
+The server also keeps a bounded in-memory notification log (the newest 100
+entries) of every in-app toast it showed: agent needs-attention and finished
+notifications, update notifications, and `notification.show` injections. The
+log carries one `last_seen_id` marker; entries newer than the marker are
+unread. The log is in-memory only and empties on a cold server restart.
+
+List the log newest-first:
+
+```json
+{"id":"req_nlist","method":"notification.list","params":{}}
+```
+
+```json
+{"id":"req_nlist","result":{"type":"notification_list","notifications":[{"id":3,"kind":"finished","title":"claude finished","context":"api · 2","workspace_id":"w1","pane_id":"w1:p2","posted_at_unix":1789000000}],"unread_count":1,"last_seen_id":2}}
+```
+
+`kind` is `needs_attention`, `finished`, or `update_installed`. `workspace_id`
+and `pane_id` are present when the notification targets a pane; `pane_id` is
+omitted when the pane no longer resolves.
+
+Advance the seen marker to the newest entry (idempotent):
+
+```json
+{"id":"req_nseen","method":"notification.mark_seen","params":{}}
+```
+
+```json
+{"id":"req_nseen","result":{"type":"notification_mark_seen","last_seen_id":3,"changed":true}}
+```
+
+Opening the notification center panel in the Herdr TUI advances the same
+marker, so external consumers and the built-in unread indicator always agree.
+Subscribe to `notification.posted` for a push feed of new entries.
 
 Set or clear the foreground client's outer terminal window title:
 
@@ -859,6 +893,10 @@ Layout event subscriptions include `layout.updated`. The event carries the
 updated `PaneLayoutSnapshot` for one tab. Clients that bootstrap with
 `session.snapshot` should replace the cached layout with the same
 `workspace_id` and `tab_id`.
+
+Notification subscriptions include `notification.posted`, emitted whenever an
+entry is appended to the server's notification log. The event carries the same
+`notification` record as `notification.list`.
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the opened `workspace` and created `worktree`. `worktree.opened` includes the target `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.
 
