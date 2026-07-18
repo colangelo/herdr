@@ -98,11 +98,12 @@ herdr server reload-agent-manifests
 ```bash
 herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right|center] [--sound none|done|request]
 herdr notification list [--json]
+herdr notification clear [--json]
 ```
 
 `notification show` uses the configured `[ui.toast]` delivery. `--position` only affects in-app Herdr toasts. `--sound` defaults to `none`; `done` and `request` play the existing finished and needs-attention sounds only when the notification is shown.
 
-`notification list` prints the server's notification log newest-first — the same feed as the in-app notification center — with unread entries marked `*` and a trailing unread count. Pass `--json` for the raw `notification.list` response, including each entry's `id`, `kind`, target ids, and `posted_at_unix`. The log holds the newest 100 entries in server memory and empties on a cold server restart.
+`notification list` prints the server's notification log newest-first — the same feed as the in-app notification center — with unread entries marked `*` and a trailing unread count. Pass `--json` for the raw `notification.list` response, including each entry's `id`, `kind`, target ids, and `posted_at_unix`. The log holds the newest 100 entries in server memory and empties on a cold server restart. `notification clear` empties the log (the same action as the notification center's "Clear all" button) and reports how many entries were removed.
 
 ## Sessions
 

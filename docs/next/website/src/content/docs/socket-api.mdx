@@ -97,7 +97,7 @@ Raw socket method names use dot notation:
 | Area | Methods |
 | --- | --- |
 | Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
-| Notification | `notification.show`, `notification.list`, `notification.mark_seen` |
+| Notification | `notification.show`, `notification.list`, `notification.mark_seen`, `notification.clear` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
@@ -428,6 +428,19 @@ Advance the seen marker to the newest entry (idempotent):
 ```json
 {"id":"req_nseen","result":{"type":"notification_mark_seen","last_seen_id":3,"changed":true}}
 ```
+
+Empty the log entirely (the notification center's "Clear all" action):
+
+```json
+{"id":"req_nclear","method":"notification.clear","params":{}}
+```
+
+```json
+{"id":"req_nclear","result":{"type":"notification_cleared","cleared":3}}
+```
+
+`cleared` is how many entries were removed. Ids stay monotonic across a clear,
+so a later entry never reuses an id.
 
 Opening the notification center panel in the Herdr TUI advances the same
 marker, so external consumers and the built-in unread indicator always agree.
