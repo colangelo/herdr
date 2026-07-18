@@ -360,6 +360,9 @@ pub struct Keybinds {
     pub edit_scrollback: ActionKeybinds,
     pub clear_scrollback: ActionKeybinds,
     pub copy_mode: ActionKeybinds,
+    pub copy_mode_page_up: ActionKeybinds,
+    pub copy_mode_half_page_up: ActionKeybinds,
+    pub copy_mode_line_up: ActionKeybinds,
     pub focus_pane_left: ActionKeybinds,
     pub focus_pane_down: ActionKeybinds,
     pub focus_pane_up: ActionKeybinds,
@@ -535,6 +538,9 @@ impl Config {
             edit_scrollback: empty_action!(),
             clear_scrollback: empty_action!(),
             copy_mode: empty_action!(),
+            copy_mode_page_up: empty_action!(),
+            copy_mode_half_page_up: empty_action!(),
+            copy_mode_line_up: empty_action!(),
             focus_pane_left: empty_action!(),
             focus_pane_down: empty_action!(),
             focus_pane_up: empty_action!(),
@@ -689,6 +695,13 @@ impl Config {
             apply_action!(keybinds.edit_scrollback, edit_scrollback, source);
             apply_action!(keybinds.clear_scrollback, clear_scrollback, source);
             apply_action!(keybinds.copy_mode, copy_mode, source);
+            apply_action!(keybinds.copy_mode_page_up, copy_mode_page_up, source);
+            apply_action!(
+                keybinds.copy_mode_half_page_up,
+                copy_mode_half_page_up,
+                source
+            );
+            apply_action!(keybinds.copy_mode_line_up, copy_mode_line_up, source);
             apply_action!(keybinds.focus_pane_left, focus_pane_left, source);
             apply_action!(keybinds.focus_pane_down, focus_pane_down, source);
             apply_action!(keybinds.focus_pane_up, focus_pane_up, source);
@@ -1183,6 +1196,8 @@ pub fn format_key_combo(binding: KeyCombo) -> String {
         KeyCode::Right => "right".to_string(),
         KeyCode::Up => "up".to_string(),
         KeyCode::Down => "down".to_string(),
+        KeyCode::PageUp => "pageup".to_string(),
+        KeyCode::PageDown => "pagedown".to_string(),
         KeyCode::F(n) => format!("f{n}"),
         _ => format!("{:?}", code).to_lowercase(),
     };
@@ -1313,6 +1328,8 @@ pub(crate) fn parse_key_combo(s: &str) -> Option<KeyCombo> {
         "right" => KeyCode::Right,
         "up" => KeyCode::Up,
         "down" => KeyCode::Down,
+        "pageup" | "page_up" => KeyCode::PageUp,
+        "pagedown" | "page_down" => KeyCode::PageDown,
         "minus" => KeyCode::Char('-'),
         "comma" => KeyCode::Char(','),
         "period" => KeyCode::Char('.'),
@@ -1666,6 +1683,32 @@ next_tab = "prefix+n"
             vec![BindingTrigger::Prefix((
                 KeyCode::Char('['),
                 KeyModifiers::empty()
+            ))]
+        );
+    }
+
+    #[test]
+    fn copy_mode_scroll_entry_defaults() {
+        let kb = Config::default().keybinds();
+        assert_eq!(
+            binding_triggers(&kb.copy_mode_page_up),
+            vec![BindingTrigger::Prefix((
+                KeyCode::PageUp,
+                KeyModifiers::empty()
+            ))]
+        );
+        assert_eq!(
+            binding_triggers(&kb.copy_mode_half_page_up),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL
+            ))]
+        );
+        assert_eq!(
+            binding_triggers(&kb.copy_mode_line_up),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('k'),
+                KeyModifiers::CONTROL
             ))]
         );
     }
