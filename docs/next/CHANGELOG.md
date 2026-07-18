@@ -18,11 +18,15 @@
 - Added `ui.dim_inactive_panes` to dim unfocused pane content in all modes, not only while a herdr mode is active. Default off.
 - Added a `center` position for in-app toasts (`ui.toast.herdr.position` and `herdr notification show --position`), floating the toast over the pane area, centered between the panes. Added `ui.toast.herdr.size` presets (`auto`, `medium`, `large`) to widen the toast box.
 - Added per-kind in-app toast durations: `ui.toast.herdr.needs_attention_seconds` (default 8), `finished_seconds` (5), and `update_seconds` (3); `0` keeps that toast visible until clicked or replaced.
+- Added `ctrl+k` / `ctrl+j` line-wise viewport scroll in copy mode (vim `ctrl+y` / `ctrl+e`): scroll the window up or down one line without moving the cursor relative to the buffer text. Repeatable while held.
 
 ### Changed
 - Bumped the client/server protocol version to 18 for the `layout.balance` and `layout.set_preset` socket API methods.
 - Sidebar workspace jump numbers (`ui.show_workspace_numbers`) and the collapsed sidebar's workspace rows now follow the visible row order, matching what `prefix+1..9` switches to when worktree grouping or priority sort reorders the list.
 - The sidebar spaces and agents lists now follow the active workspace and focused agent: the lists scroll just enough to keep the focused entry visible (nearest-edge reveal, no recentering) across any focus change (keybindings, picker, navigate mode, mouse, socket API) and any reordering (priority re-sorts, entries added or removed). Manually scrolling a list disengages its follow; the next focus change re-engages it, like the tab bar.
+
+### Fixed
+- Held modified shortcuts now repeat in copy mode: holding `ctrl+u` / `ctrl+d` (and other escape-coded keys) keeps paging instead of firing once. Key-repeat events were previously dropped in every mode except terminal passthrough; they are now honored in copy mode too, while modal confirm/close keys still cannot repeat into a pane.
 
 ## [0.7.4] - 2026-07-15
 
