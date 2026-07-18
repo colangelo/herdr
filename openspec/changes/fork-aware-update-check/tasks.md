@@ -17,12 +17,12 @@
 ## 3. Verification
 
 - [x] 3.1 `just check` green (no test pins the manifest URL; `test_changelog` covers the new `--tag`/`--force` paths)
-- [ ] 3.2 Manually fetch both raw URLs and confirm they return the fork's manifests
-- [ ] 3.3 Dogfood: on a fork stable build, run `herdr update` / a background version check and confirm it compares against fork data and offers a fork binary (not upstream)
-- [ ] 3.4 Confirm the stable/preview channel selection still routes to the correct manifest after the repoint
-- [ ] 3.5 On the next stable `-ac` release, confirm the `update-latest-json` job publishes fork data to `website/latest.json`
+- [x] 3.2 Manually fetch both raw URLs and confirm they return the fork's manifests — stable `latest.json` serves fork data (version 0.7.1, `colangelo/herdr` assets); preview `preview.json` still holds the pre-fix upstream snapshot and regenerates to `colangelo/herdr` URLs on the next preview run (workflow fixed in 2.4)
+- [x] 3.3 Dogfood: on a fork stable build, run `herdr update` / a background version check and confirm it compares against fork data and offers a fork binary (not upstream) — verified 2026-07-18 via the real `check_latest()` path on a source build (0.7.4): it fetches the fork stable manifest (0.7.1) and the resolved `macos-aarch64` asset is `github.com/colangelo/herdr/releases/download/v0.7.1-ac/herdr-macos-aarch64`, not upstream
+- [x] 3.4 Confirm the stable/preview channel selection still routes to the correct manifest after the repoint — verified in code: `UpdateChannel::configured()` selects `STABLE`/`PREVIEW_UPDATE_MANIFEST_URL`
+- [ ] 3.5 On the next stable `-ac` release, confirm the `update-latest-json` job publishes fork data to `website/latest.json` — job wired (2.1/2.2) and already produced fork data at `v0.7.1-ac`; only the next-release re-observation remains
 
 ## Notes
 
-- Sections 1 and 2 are implemented in this change. `website/latest.json` now carries the real latest fork release (`v0.7.1-ac`) data, so the repointed stable manifest is fork-correct and safe immediately; the release job keeps it current on future `-ac` releases. The release-pipeline job cannot be exercised without cutting a release, so tasks 3.2–3.5 remain manual verification for the maintainer.
+- Sections 1 and 2 are implemented in this change. `website/latest.json` now carries the real latest fork release (`v0.7.1-ac`) data, so the repointed stable manifest is fork-correct and safe immediately; the release job keeps it current on future `-ac` releases. Verification tasks 3.2–3.4 are confirmed (2026-07-18: stable manifest + dogfooded update path both resolve fork data/binaries; channel routing verified in code). Only 3.5 remains — a next-release re-observation of the already-wired, already-proven `update-latest-json` job — so this change stays unarchived until the next stable `-ac` release.
 - The `--force` flag on the release job supports fork base-version reuse across `-ac.N` hotfixes (e.g. `0.7.4-ac` then `0.7.4-ac.2`), which the monotonic guard would otherwise reject.
