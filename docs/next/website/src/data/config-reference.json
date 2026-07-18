@@ -704,6 +704,24 @@
           "description": "Enter keyboard copy mode for the focused pane."
         },
         {
+          "key": "keys.copy_mode_page_up",
+          "type": "keybinding",
+          "default": "\"prefix+pageup\"",
+          "description": "Enter copy mode and scroll up one page in the same gesture (tmux copy-mode -u)."
+        },
+        {
+          "key": "keys.copy_mode_half_page_up",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+u\"",
+          "description": "Enter copy mode and scroll up half a page."
+        },
+        {
+          "key": "keys.copy_mode_line_up",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+k\"",
+          "description": "Enter copy mode and scroll the viewport up one line."
+        },
+        {
           "key": "keys.focus_pane_left",
           "type": "keybinding",
           "default": "\"prefix+h\"",
