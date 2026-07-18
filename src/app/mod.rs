@@ -594,6 +594,7 @@ impl App {
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
+                notification_hit_area: Rect::default(),
                 terminal_area: Rect::default(),
                 mobile_header_rect: Rect::default(),
                 mobile_menu_hit_area: Rect::default(),
@@ -613,6 +614,8 @@ impl App {
             update_dismissed: false,
             config_diagnostic,
             toast: None,
+            notification_log: state::NotificationLog::default(),
+            notification_center: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -1663,25 +1666,27 @@ impl App {
             self.state.config_diagnostic = None;
             self.config_diagnostic_deadline = None;
             if notify_success {
-                self.state.toast = Some(crate::app::state::ToastNotification {
-                    kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
-                    context: "using config.toml".to_string(),
-                    position: None,
-                    target: None,
-                });
+                self.state
+                    .post_notification(crate::app::state::ToastNotification {
+                        kind: crate::app::state::ToastKind::UpdateInstalled,
+                        title: "reloaded config".to_string(),
+                        context: "using config.toml".to_string(),
+                        position: None,
+                        target: None,
+                    });
             }
         } else {
             self.state.config_diagnostic = crate::config::config_diagnostic_summary(&diagnostics);
             self.config_diagnostic_deadline = None;
             if notify_success {
-                self.state.toast = Some(crate::app::state::ToastNotification {
-                    kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
-                    context: "with warnings".to_string(),
-                    position: None,
-                    target: None,
-                });
+                self.state
+                    .post_notification(crate::app::state::ToastNotification {
+                        kind: crate::app::state::ToastKind::UpdateInstalled,
+                        title: "reloaded config".to_string(),
+                        context: "with warnings".to_string(),
+                        position: None,
+                        target: None,
+                    });
             }
         }
 
@@ -1941,6 +1946,9 @@ impl App {
             }
             Mode::ConfirmRemoveWorktree => {
                 self.handle_worktree_remove_key(key_event);
+            }
+            Mode::NotificationCenter => {
+                self.handle_notification_center_key_via_api(key_event);
             }
             Mode::Resize => {
                 self.handle_resize_key_via_api(key);
@@ -2639,6 +2647,193 @@ mod tests {
             app.state.toast.as_ref().map(|toast| toast.title.as_str()),
             Some("pi needs attention")
         );
+    }
+
+    fn test_notification_toast(
+        title: &str,
+        target: Option<crate::app::state::ToastTarget>,
+    ) -> crate::app::state::ToastNotification {
+        crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::Finished,
+            title: title.to_string(),
+            context: "ctx".to_string(),
+            position: None,
+            target,
+        }
+    }
+
+    #[test]
+    fn notification_list_reports_newest_first_and_unread() {
+        let mut app = test_app();
+        app.state
+            .post_notification(test_notification_toast("one", None));
+        let _ = app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+            id: "seen".into(),
+            method: crate::api::schema::Method::NotificationMarkSeen(
+                crate::api::schema::EmptyParams::default(),
+            ),
+        });
+        app.state
+            .post_notification(test_notification_toast("two", None));
+        app.state
+            .post_notification(test_notification_toast("three", None));
+
+        let response =
+            app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                id: "list".into(),
+                method: crate::api::schema::Method::NotificationList(
+                    crate::api::schema::EmptyParams::default(),
+                ),
+            });
+
+        let parsed: crate::api::schema::SuccessResponse = serde_json::from_str(&response).unwrap();
+        let crate::api::schema::ResponseResult::NotificationList {
+            notifications,
+            unread_count,
+            last_seen_id,
+        } = parsed.result
+        else {
+            panic!("expected NotificationList result");
+        };
+        let titles: Vec<&str> = notifications
+            .iter()
+            .map(|notification| notification.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["three", "two", "one"]);
+        assert_eq!(unread_count, 2);
+        assert_eq!(last_seen_id, 1);
+    }
+
+    #[test]
+    fn notification_mark_seen_is_idempotent_via_api() {
+        let mut app = test_app();
+        app.state
+            .post_notification(test_notification_toast("one", None));
+        app.state
+            .post_notification(test_notification_toast("two", None));
+
+        let mark_seen = |app: &mut App, id: &str| {
+            let response =
+                app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                    id: id.into(),
+                    method: crate::api::schema::Method::NotificationMarkSeen(
+                        crate::api::schema::EmptyParams::default(),
+                    ),
+                });
+            let parsed: crate::api::schema::SuccessResponse =
+                serde_json::from_str(&response).unwrap();
+            match parsed.result {
+                crate::api::schema::ResponseResult::NotificationMarkSeen {
+                    last_seen_id,
+                    changed,
+                } => (last_seen_id, changed),
+                other => panic!("expected NotificationMarkSeen result, got {other:?}"),
+            }
+        };
+
+        assert_eq!(mark_seen(&mut app, "first"), (2, true));
+        assert_eq!(mark_seen(&mut app, "second"), (2, false));
+        assert_eq!(app.state.notification_log.unread_count(), 0);
+    }
+
+    #[test]
+    fn notification_list_exposes_public_target_ids() {
+        let mut app = test_app();
+        let ws = crate::workspace::Workspace::test_new("one");
+        let ws_id = ws.id.clone();
+        let pane_id = ws.tabs[0].root_pane;
+        app.state.workspaces.push(ws);
+        app.state.active = Some(0);
+        app.state.post_notification(test_notification_toast(
+            "claude finished",
+            Some(crate::app::state::ToastTarget {
+                workspace_id: ws_id.clone(),
+                pane_id,
+            }),
+        ));
+
+        let response =
+            app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                id: "list".into(),
+                method: crate::api::schema::Method::NotificationList(
+                    crate::api::schema::EmptyParams::default(),
+                ),
+            });
+
+        let parsed: crate::api::schema::SuccessResponse = serde_json::from_str(&response).unwrap();
+        let crate::api::schema::ResponseResult::NotificationList { notifications, .. } =
+            parsed.result
+        else {
+            panic!("expected NotificationList result");
+        };
+        assert_eq!(notifications[0].workspace_id.as_ref(), Some(&ws_id));
+        assert_eq!(
+            notifications[0].pane_id.as_deref(),
+            Some(crate::workspace::public_pane_id_for_number(&ws_id, 1).as_str())
+        );
+    }
+
+    #[test]
+    fn notification_show_appends_to_log_and_emits_posted_event() {
+        let mut app = test_app();
+        app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+
+        let _ = app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+            id: "notify".into(),
+            method: crate::api::schema::Method::NotificationShow(
+                crate::api::schema::NotificationShowParams {
+                    title: "build failed".into(),
+                    body: Some("api workspace".into()),
+                    position: None,
+                    sound: crate::api::schema::NotificationShowSound::None,
+                },
+            ),
+        });
+
+        let entry = app
+            .state
+            .notification_log
+            .entries_newest_first()
+            .next()
+            .expect("injection logged");
+        assert_eq!(entry.title, "build failed");
+        assert_eq!(entry.context, "api workspace");
+
+        let posted = app
+            .event_hub
+            .events_after(0)
+            .into_iter()
+            .find_map(|(_, event)| match event.data {
+                crate::api::schema::EventData::NotificationPosted { notification } => {
+                    Some(notification)
+                }
+                _ => None,
+            });
+        let posted = posted.expect("notification.posted event emitted");
+        assert_eq!(posted.title, "build failed");
+        assert_eq!(
+            posted.kind,
+            crate::api::schema::NotificationKind::UpdateInstalled
+        );
+    }
+
+    #[test]
+    fn update_ready_emits_notification_posted_event() {
+        let mut app = test_app();
+        app.state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+
+        app.handle_internal_event(AppEvent::UpdateReady {
+            version: "9.9.9".into(),
+            install_command: "brew upgrade herdr".into(),
+        });
+
+        assert!(app.event_hub.events_after(0).iter().any(|(_, event)| {
+            matches!(
+                &event.data,
+                crate::api::schema::EventData::NotificationPosted { notification }
+                    if notification.title == "v9.9.9 available"
+            )
+        }));
     }
 
     #[test]

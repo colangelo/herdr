@@ -208,6 +208,10 @@ impl ActiveSubscription {
                 event_kind: crate::api::schema::EventKind::LayoutUpdated,
                 last_sequence: 0,
             })),
+            Subscription::NotificationPosted {} => Ok(Self::Event(ActiveEventSubscription {
+                event_kind: crate::api::schema::EventKind::NotificationPosted,
+                last_sequence: 0,
+            })),
             Subscription::PaneOutputMatched {
                 pane_id,
                 source,

@@ -25,6 +25,8 @@ use super::{
     ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
 };
 
+const NOTIFICATION_PANEL_MAX_ROWS: u16 = 12;
+
 pub(super) enum MouseAction {
     NewWorkspace,
     Settings(SettingsAction),
@@ -39,6 +41,9 @@ pub(super) enum MouseAction {
         pane_id: crate::layout::PaneId,
     },
     FocusToastTarget,
+    ActivateNotificationRow {
+        index: usize,
+    },
     MoveWorkspace {
         source_ws_idx: usize,
         insert_idx: usize,
@@ -169,6 +174,46 @@ impl AppState {
                 } else {
                     leave_modal(self);
                 }
+            }
+            return None;
+        }
+
+        let notification_indicator_hit = matches!(
+            self.mode,
+            Mode::Terminal | Mode::Navigate | Mode::Resize | Mode::NotificationCenter
+        ) && self.view.notification_hit_area.width > 0
+            && rect_contains(self.view.notification_hit_area, mouse.column, mouse.row);
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && notification_indicator_hit
+        {
+            if self.mode == Mode::NotificationCenter {
+                self.close_notification_center();
+                leave_modal(self);
+            } else {
+                self.open_notification_center();
+            }
+            return None;
+        }
+
+        if self.mode == Mode::NotificationCenter {
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
+                        if let Some(center) = self.notification_center.as_mut() {
+                            center.selected = idx;
+                        }
+                    }
+                }
+                MouseEventKind::ScrollUp => self.notification_center_move_selection(-1),
+                MouseEventKind::ScrollDown => self.notification_center_move_selection(1),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
+                        return Some(MouseAction::ActivateNotificationRow { index: idx });
+                    }
+                    self.close_notification_center();
+                    leave_modal(self);
+                }
+                _ => {}
             }
             return None;
         }
@@ -1301,6 +1346,77 @@ impl AppState {
         let right = (sidebar.x + sidebar.width).max(terminal.x + terminal.width);
         let bottom = (sidebar.y + sidebar.height).max(terminal.y + terminal.height);
         Rect::new(x, y, right.saturating_sub(x), bottom.saturating_sub(y))
+    }
+
+    pub(crate) fn notification_center_rect(&self) -> Option<Rect> {
+        self.notification_center.as_ref()?;
+        let screen = self.screen_rect();
+        if screen.width == 0 || screen.height == 0 {
+            return None;
+        }
+        // Anchor under the tab bar's right edge; fall back to the screen's
+        // top-right when the tab bar is hidden.
+        let anchor = if self.view.tab_bar_rect.width > 0 {
+            self.view.tab_bar_rect
+        } else {
+            Rect::new(screen.x, screen.y, screen.width, 0)
+        };
+        let content_width = self
+            .notification_log
+            .entries_newest_first()
+            .take(NOTIFICATION_PANEL_MAX_ROWS as usize)
+            .map(|entry| {
+                let context_width = if entry.context.is_empty() {
+                    0
+                } else {
+                    crate::ui::text::display_width(&entry.context) + 3
+                };
+                crate::ui::text::display_width(&entry.title) + context_width
+            })
+            .max()
+            .unwrap_or(16);
+        // borders + kind dot block + right-aligned age column
+        let panel_w = ((content_width + 2 + 3 + 5) as u16)
+            .clamp(30, 60)
+            .min(screen.width.max(1));
+        let rows = (self.notification_log.len().max(1) as u16).min(NOTIFICATION_PANEL_MAX_ROWS);
+        let panel_h = (rows + 2).min(screen.height.max(1));
+        let right = anchor.x + anchor.width;
+        let x = right.saturating_sub(panel_w).max(screen.x);
+        let y = (anchor.y + anchor.height).min(screen.y + screen.height.saturating_sub(panel_h));
+        Some(Rect::new(x, y, panel_w, panel_h))
+    }
+
+    /// The panel's inner list rect and the first visible entry index.
+    /// Shared by render and mouse hit-testing so they always agree.
+    pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
+        let rect = self.notification_center_rect()?;
+        let inner = Rect::new(
+            rect.x + 1,
+            rect.y + 1,
+            rect.width.saturating_sub(2),
+            rect.height.saturating_sub(2),
+        );
+        let selected = self.notification_center.as_ref()?.selected;
+        let visible = inner.height as usize;
+        let start = selected.saturating_sub(visible.saturating_sub(1));
+        Some((inner, start))
+    }
+
+    fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
+        let (inner, start) = self.notification_center_list_window()?;
+        if self.notification_log.is_empty() {
+            return None;
+        }
+        if col < inner.x
+            || col >= inner.x + inner.width
+            || row < inner.y
+            || row >= inner.y + inner.height
+        {
+            return None;
+        }
+        let idx = start + (row - inner.y) as usize;
+        (idx < self.notification_log.len()).then_some(idx)
     }
 
     pub(crate) fn context_menu_rect(&self) -> Option<Rect> {

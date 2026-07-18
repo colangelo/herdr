@@ -39,6 +39,23 @@ pub(crate) fn middle_elide(text: &str, max_width: usize) -> String {
     format!("{prefix}…{suffix}")
 }
 
+/// Compact "time ago" label for notification timestamps: "now", "45s",
+/// "12m", "3h", "9d". Saturates safely when the clock moves backwards.
+pub(crate) fn relative_time_label(now_unix: u64, then_unix: u64) -> String {
+    let seconds = now_unix.saturating_sub(then_unix);
+    if seconds < 10 {
+        "now".to_string()
+    } else if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 60 * 60 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 24 * 60 * 60 {
+        format!("{}h", seconds / (60 * 60))
+    } else {
+        format!("{}d", seconds / (24 * 60 * 60))
+    }
+}
+
 fn take_prefix_width(text: &str, max_width: usize) -> String {
     let mut output = String::new();
     let mut width = 0usize;
@@ -77,6 +94,17 @@ mod tests {
 
         assert_eq!(text, "提交 herdr 的反…");
         assert!(display_width(&text) <= 16);
+    }
+
+    #[test]
+    fn relative_time_labels_scale_with_age() {
+        assert_eq!(relative_time_label(100, 95), "now");
+        assert_eq!(relative_time_label(100, 55), "45s");
+        assert_eq!(relative_time_label(1000, 100), "15m");
+        assert_eq!(relative_time_label(10_000, 100), "2h");
+        assert_eq!(relative_time_label(1_000_000, 100), "11d");
+        // Clock moved backwards: saturates to "now" instead of underflowing.
+        assert_eq!(relative_time_label(50, 100), "now");
     }
 
     #[test]

@@ -964,6 +964,42 @@ pub(super) fn apply_context_menu_action(
 }
 
 #[cfg(test)]
+pub(crate) fn handle_notification_center_key(state: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => state.notification_center_move_selection(-1),
+        KeyCode::Down | KeyCode::Char('j') => state.notification_center_move_selection(1),
+        KeyCode::Enter => activate_notification_center_selection_local(state),
+        KeyCode::Esc | KeyCode::Char('q') => {
+            state.close_notification_center();
+            leave_modal(state);
+        }
+        _ => {}
+    }
+}
+
+/// Pure-state twin of `App::activate_notification_center_selection` for
+/// tests without an API runtime.
+#[cfg(test)]
+fn activate_notification_center_selection_local(state: &mut AppState) {
+    let Some(target) = state
+        .notification_center_selected_entry()
+        .and_then(|entry| entry.target.clone())
+    else {
+        return;
+    };
+    let Some(ws_idx) = state
+        .workspaces
+        .iter()
+        .position(|workspace| workspace.id == target.workspace_id)
+    else {
+        return;
+    };
+    state.close_notification_center();
+    state.focus_pane_in_workspace(ws_idx, target.pane_id);
+    state.mode = Mode::Terminal;
+}
+
+#[cfg(test)]
 pub(crate) fn handle_context_menu_key(
     state: &mut AppState,
     terminal_runtimes: &mut crate::terminal::TerminalRuntimeRegistry,
@@ -995,6 +1031,19 @@ pub(crate) fn handle_context_menu_key(
 }
 
 impl App {
+    pub(crate) fn handle_notification_center_key_via_api(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.state.notification_center_move_selection(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.state.notification_center_move_selection(1),
+            KeyCode::Enter => self.activate_notification_center_selection(),
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.state.close_notification_center();
+                leave_modal(&mut self.state);
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn handle_rename_key_via_api(&mut self, key: KeyEvent) {
         if let Some(action) = modal_action_from_key(&key, RENAME_ACTIONS) {
             self.apply_rename_mouse_action_via_api(action);
@@ -1399,6 +1448,113 @@ mod tests {
 
     fn config_env_lock() -> &'static std::sync::Mutex<()> {
         crate::config::test_config_env_lock()
+    }
+
+    fn notification_toast(
+        title: &str,
+        target: Option<crate::app::state::ToastTarget>,
+    ) -> crate::app::state::ToastNotification {
+        crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::Finished,
+            title: title.to_string(),
+            context: "ctx".to_string(),
+            position: None,
+            target,
+        }
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    #[test]
+    fn notification_center_selection_moves_with_arrows_and_j_k() {
+        let mut state = state_with_workspaces(&["one"]);
+        for title in ["a", "b", "c"] {
+            state.post_notification(notification_toast(title, None));
+        }
+        state.open_notification_center();
+
+        let selected = |state: &AppState| state.notification_center.as_ref().map(|c| c.selected);
+        handle_notification_center_key(&mut state, key(KeyCode::Char('j')));
+        assert_eq!(selected(&state), Some(1));
+        handle_notification_center_key(&mut state, key(KeyCode::Down));
+        handle_notification_center_key(&mut state, key(KeyCode::Down));
+        assert_eq!(
+            selected(&state),
+            Some(2),
+            "selection clamps at oldest entry"
+        );
+        handle_notification_center_key(&mut state, key(KeyCode::Char('k')));
+        assert_eq!(selected(&state), Some(1));
+        handle_notification_center_key(&mut state, key(KeyCode::Up));
+        handle_notification_center_key(&mut state, key(KeyCode::Up));
+        assert_eq!(
+            selected(&state),
+            Some(0),
+            "selection clamps at newest entry"
+        );
+    }
+
+    #[test]
+    fn notification_center_enter_jumps_to_target_pane_and_closes() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        state.mode = Mode::Terminal;
+        let target_ws_id = state.workspaces[1].id.clone();
+        let target_pane = state.workspaces[1].tabs[0].root_pane;
+        state.post_notification(notification_toast(
+            "claude finished",
+            Some(crate::app::state::ToastTarget {
+                workspace_id: target_ws_id,
+                pane_id: target_pane,
+            }),
+        ));
+        state.open_notification_center();
+
+        handle_notification_center_key(&mut state, key(KeyCode::Enter));
+
+        assert_eq!(state.active, Some(1), "target workspace focused");
+        assert_eq!(state.workspaces[1].focused_pane_id(), Some(target_pane));
+        assert_eq!(state.mode, Mode::Terminal);
+        assert!(state.notification_center.is_none(), "panel closed");
+    }
+
+    #[test]
+    fn notification_center_enter_on_targetless_entry_is_inert() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.mode = Mode::Terminal;
+        state.post_notification(notification_toast("reloaded config", None));
+        state.open_notification_center();
+
+        handle_notification_center_key(&mut state, key(KeyCode::Enter));
+
+        assert_eq!(state.mode, Mode::NotificationCenter, "panel stays open");
+        assert!(state.notification_center.is_some());
+        assert_eq!(state.active, Some(0));
+    }
+
+    #[test]
+    fn notification_center_esc_and_q_close_without_jumping() {
+        for close_key in [KeyCode::Esc, KeyCode::Char('q')] {
+            let mut state = state_with_workspaces(&["one", "two"]);
+            state.mode = Mode::Terminal;
+            let target_ws_id = state.workspaces[1].id.clone();
+            let target_pane = state.workspaces[1].tabs[0].root_pane;
+            state.post_notification(notification_toast(
+                "claude finished",
+                Some(crate::app::state::ToastTarget {
+                    workspace_id: target_ws_id,
+                    pane_id: target_pane,
+                }),
+            ));
+            state.open_notification_center();
+
+            handle_notification_center_key(&mut state, key(close_key));
+
+            assert!(state.notification_center.is_none());
+            assert_eq!(state.mode, Mode::Terminal);
+            assert_eq!(state.active, Some(0), "no jump on close");
+        }
     }
 
     fn temp_config_path(name: &str) -> std::path::PathBuf {

@@ -20,6 +20,22 @@ pub(crate) struct TabBarView {
     pub scroll_left_hit_area: Rect,
     pub scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
+    pub notification_hit_area: Rect,
+}
+
+/// Width of the trailing notification indicator for the given unread count.
+pub(crate) fn notification_indicator_width(unread: usize) -> u16 {
+    display_width_u16(&notification_indicator_label(unread))
+}
+
+fn notification_indicator_label(unread: usize) -> String {
+    if unread == 0 {
+        " ◆ ".to_string()
+    } else if unread > 99 {
+        " ◆ 99+ ".to_string()
+    } else {
+        format!(" ◆ {unread} ")
+    }
 }
 
 fn tab_width(ws: &crate::workspace::Workspace, tab_idx: usize) -> u16 {
@@ -113,6 +129,34 @@ pub(crate) fn compute_tab_bar_view(
     current_scroll: usize,
     follow_active: bool,
     mouse_chrome: bool,
+    notification_width: u16,
+) -> TabBarView {
+    if area.width == 0 || area.height == 0 {
+        return TabBarView::default();
+    }
+
+    // The notification indicator claims the far right of the bar before any
+    // tab/new-tab/scroll layout so those controls shift left instead of
+    // overlapping it.
+    let notification_width = notification_width.min(area.width);
+    let notification_hit_area = Rect::new(
+        area.x + area.width - notification_width,
+        area.y,
+        notification_width,
+        1,
+    );
+    let area = Rect::new(area.x, area.y, area.width - notification_width, area.height);
+    let mut view = compute_tab_controls_view(ws, area, current_scroll, follow_active, mouse_chrome);
+    view.notification_hit_area = notification_hit_area;
+    view
+}
+
+fn compute_tab_controls_view(
+    ws: &crate::workspace::Workspace,
+    area: Rect,
+    current_scroll: usize,
+    follow_active: bool,
+    mouse_chrome: bool,
 ) -> TabBarView {
     if area.width == 0 || area.height == 0 {
         return TabBarView::default();
@@ -131,6 +175,7 @@ pub(crate) fn compute_tab_bar_view(
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
+            notification_hit_area: Rect::default(),
         };
     }
 
@@ -157,6 +202,7 @@ pub(crate) fn compute_tab_bar_view(
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area,
+            notification_hit_area: Rect::default(),
         };
     }
 
@@ -201,6 +247,7 @@ pub(crate) fn compute_tab_bar_view(
         scroll_left_hit_area: left_hit_area,
         scroll_right_hit_area: right_hit_area,
         new_tab_hit_area,
+        notification_hit_area: Rect::default(),
     }
 }
 
@@ -367,6 +414,22 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         );
     }
 
+    if app.view.notification_hit_area.width > 0 {
+        let unread = app.notification_log.unread_count();
+        let style = if unread > 0 {
+            Style::default()
+                .fg(panel_contrast_fg(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.overlay1)
+        };
+        frame.render_widget(
+            Paragraph::new(notification_indicator_label(unread)).style(style),
+            app.view.notification_hit_area,
+        );
+    }
+
     if first_visible_idx.is_some_and(|idx| idx > 0) {
         let x = if app.mouse_capture && app.view.tab_scroll_left_hit_area.width > 0 {
             app.view.tab_scroll_left_hit_area.x + app.view.tab_scroll_left_hit_area.width
@@ -419,7 +482,8 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view =
+            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -446,7 +510,8 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view =
+            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -461,6 +526,57 @@ mod tests {
         assert_eq!(style.bg, Some(app.palette.accent));
         assert!(!style.add_modifier.contains(Modifier::DIM));
         assert!(!style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn tab_bar_indicator_shows_unread_pill_at_far_right() {
+        let mut app = AppState::test_new();
+        let ws = Workspace::test_new("test");
+        app.workspaces = vec![ws];
+        app.active = Some(0);
+        for title in ["one", "two"] {
+            app.post_notification(crate::app::state::ToastNotification {
+                kind: crate::app::state::ToastKind::Finished,
+                title: title.to_string(),
+                context: String::new(),
+                position: None,
+                target: None,
+            });
+        }
+        app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            true,
+            notification_indicator_width(app.notification_log.unread_count()),
+        );
+        assert_eq!(view.notification_hit_area.width, 5);
+        assert_eq!(
+            view.notification_hit_area.x + view.notification_hit_area.width,
+            40,
+            "indicator sits at the bar's right edge"
+        );
+        app.view.tab_hit_areas = view.tab_hit_areas.clone();
+        app.view.new_tab_hit_area = view.new_tab_hit_area;
+        app.view.notification_hit_area = view.notification_hit_area;
+
+        let backend = TestBackend::new(40, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+            .unwrap();
+
+        let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
+        assert!(row.contains("◆ 2"), "tab row: {row:?}");
+    }
+
+    #[test]
+    fn tab_bar_indicator_without_unread_is_icon_only() {
+        assert_eq!(notification_indicator_width(0), 3);
+        assert_eq!(notification_indicator_label(0), " ◆ ");
+        assert_eq!(notification_indicator_label(150), " ◆ 99+ ");
     }
 
     #[test]
@@ -492,7 +608,8 @@ mod tests {
         app.active = Some(0);
         app.workspaces = vec![ws];
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view =
+            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);

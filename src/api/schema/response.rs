@@ -189,6 +189,15 @@ pub enum ResponseResult {
         shown: bool,
         reason: NotificationShowReason,
     },
+    NotificationList {
+        notifications: Vec<super::notifications::NotificationInfo>,
+        unread_count: u64,
+        last_seen_id: u64,
+    },
+    NotificationMarkSeen {
+        last_seen_id: u64,
+        changed: bool,
+    },
     ClientWindowTitle {
         changed: bool,
         reason: ClientWindowTitleReason,
