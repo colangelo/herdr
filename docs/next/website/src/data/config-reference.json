@@ -692,6 +692,12 @@
           "description": "Open the focused pane scrollback in $EDITOR."
         },
         {
+          "key": "keys.clear_scrollback",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Purge the focused pane's saved scrollback (tmux clear-history). Unset by default."
+        },
+        {
           "key": "keys.copy_mode",
           "type": "keybinding",
           "default": "\"prefix+[\"",
