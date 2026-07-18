@@ -1695,24 +1695,40 @@ impl App {
                     let key_id = repeat_key_identity(&key);
                     match key.kind {
                         crossterm::event::KeyEventKind::Press => {
-                            if self.state.popup_pane.is_some() || self.state.mode == Mode::Terminal
+                            let route_to_terminal = self.state.popup_pane.is_some()
+                                || self.state.mode == Mode::Terminal;
+                            if self.state.popup_pane.is_some()
+                                || self.state.mode.honors_key_repeat()
                             {
                                 self.suppressed_repeat_keys.remove(&key_id);
-                                self.handle_terminal_key_headless(key);
                             } else {
                                 self.suppressed_repeat_keys.insert(key_id);
+                            }
+                            if route_to_terminal {
+                                self.handle_terminal_key_headless(key);
+                            } else {
                                 self.handle_non_terminal_key_headless(key);
                             }
                         }
                         crossterm::event::KeyEventKind::Repeat => {
                             if (self.state.popup_pane.is_some()
-                                || self.state.mode == Mode::Terminal)
+                                || self.state.mode.honors_key_repeat())
                                 && !self.suppressed_repeat_keys.contains(&key_id)
                             {
-                                self.handle_terminal_key_headless(key);
+                                // Route the repeat to the same handler the mode's
+                                // presses use: copy mode drives non-terminal
+                                // motions, terminal mode forwards to the child.
+                                if self.state.popup_pane.is_some()
+                                    || self.state.mode == Mode::Terminal
+                                {
+                                    self.handle_terminal_key_headless(key);
+                                } else {
+                                    self.handle_non_terminal_key_headless(key);
+                                }
                             }
-                            // Repeats in non-terminal modes are ignored
-                            // (same as monolithic behavior).
+                            // Repeats in modes that don't honor key repeat are
+                            // ignored, so held modal confirm/close keys can't
+                            // fire multiple times.
                         }
                         crossterm::event::KeyEventKind::Release => {
                             self.suppressed_repeat_keys.remove(&key_id);
@@ -3542,6 +3558,36 @@ mod tests {
         assert!(!handled);
         assert_eq!(app.state.mode, Mode::ReleaseNotes);
         assert!(app.state.release_notes.is_some());
+    }
+
+    #[tokio::test]
+    async fn copy_mode_honors_repeat_without_suppressing() {
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Copy;
+
+        // A press in copy mode must not add the key to the repeat-suppression set...
+        let press_handled = app
+            .handle_raw_input_event(raw_key(
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Press,
+            ))
+            .await;
+        assert!(press_handled);
+        assert!(app.suppressed_repeat_keys.is_empty());
+
+        // ...so the following held repeat is dispatched instead of dropped.
+        let repeat_handled = app
+            .handle_raw_input_event(raw_key(
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Repeat,
+            ))
+            .await;
+        assert!(repeat_handled);
     }
 
     #[tokio::test]
