@@ -45,6 +45,7 @@ Panes:
 | Balance panes (equal sizes) | `prefix+=` |
 | Cycle layout preset (even-h → even-v → tiled) | `prefix+space` |
 | Copy mode | `prefix+[` |
+| Copy mode, scrolled up a page / half page / line | `prefix+PageUp` / `prefix+ctrl+u` / `prefix+ctrl+k` |
 
 Tabs:
 
@@ -71,7 +72,7 @@ The full keymap and the binding syntax live in the [keybinding reference](/docs/
 
 ## Copy mode
 
-Press `prefix+[` to enter copy mode for the focused pane. Use `h/j/k/l`, tmux-style `w/b/e`, `{`/`}`, `PageUp`/`PageDown`, `ctrl+b`/`ctrl+f`, and `ctrl+u`/`ctrl+d` to move, and `ctrl+k`/`ctrl+j` to scroll the viewport one line up or down without moving the cursor relative to the text (vim `ctrl+y`/`ctrl+e`). Held motions repeat: keeping `ctrl+u`/`ctrl+d` or `ctrl+k`/`ctrl+j` pressed keeps scrolling. Press `/` or `?` for forward or backward literal search, then `n` or `N` to repeat in the same or opposite direction. Search is case-insensitive unless the query contains an uppercase letter. Use `v` or Space to start a selection, `y` or Enter to copy it, and `q` or Esc to leave without copying. Esc clears an active selection or search before exiting. Copy mode does not pause the pane process: output remains live, follows at the bottom, and stays pinned when you navigate into history. The configured prefix keeps its normal meaning in copy mode; with the default prefix, `ctrl+b` enters prefix mode instead of paging up, so use a different prefix if you want `ctrl+b` for copy-mode page-up. Mouse drag-select copies without entering copy mode at all.
+Press `prefix+[` to enter copy mode for the focused pane. You can also enter it in one gesture, already scrolled up: `prefix+PageUp` (page), `prefix+ctrl+u` (half page), or `prefix+ctrl+k` (one line), like tmux `copy-mode -u`; repeating a gesture scrolls further, and leaving copy mode still restores the position from before the first gesture. (With a prefix other than the default `ctrl+b`, you can bind `keys.copy_mode_page_up` to `prefix+ctrl+b` too; with the default prefix that chord stays send-prefix.) Use `h/j/k/l`, tmux-style `w/b/e`, `{`/`}`, `PageUp`/`PageDown`, `ctrl+b`/`ctrl+f`, and `ctrl+u`/`ctrl+d` to move, and `ctrl+k`/`ctrl+j` to scroll the viewport one line up or down without moving the cursor relative to the text (vim `ctrl+y`/`ctrl+e`). Held motions repeat: keeping `ctrl+u`/`ctrl+d` or `ctrl+k`/`ctrl+j` pressed keeps scrolling. Press `/` or `?` for forward or backward literal search, then `n` or `N` to repeat in the same or opposite direction. Search is case-insensitive unless the query contains an uppercase letter. Use `v` or Space to start a selection, `y` or Enter to copy it, and `q` or Esc to leave without copying. Esc clears an active selection or search before exiting. Copy mode does not pause the pane process: output remains live, follows at the bottom, and stays pinned when you navigate into history. The configured prefix keeps its normal meaning in copy mode; with the default prefix, `ctrl+b` enters prefix mode instead of paging up, so use a different prefix if you want `ctrl+b` for copy-mode page-up. Mouse drag-select copies without entering copy mode at all.
 
 ## Change anything
 
