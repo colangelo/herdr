@@ -310,6 +310,11 @@ fn notification_command() -> Command {
                 .arg(json_flag()),
         )
         .subcommand(
+            Command::new("clear")
+                .about("Clear the notification log")
+                .arg(json_flag()),
+        )
+        .subcommand(
             Command::new("show")
                 .about("Show a notification")
                 .arg(required("title", "TITLE"))

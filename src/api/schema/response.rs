@@ -221,6 +221,9 @@ pub enum ResponseResult {
         last_seen_id: u64,
         changed: bool,
     },
+    NotificationCleared {
+        cleared: u64,
+    },
     ClientWindowTitle {
         changed: bool,
         reason: ClientWindowTitleReason,

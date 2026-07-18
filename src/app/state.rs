@@ -1484,6 +1484,16 @@ impl NotificationLog {
         }
     }
 
+    /// Empty the log. `last_id` stays monotonic so future entries never reuse
+    /// an id; `last_seen_id` is left as-is (an empty log has zero unread
+    /// regardless). Returns how many entries were removed.
+    pub(crate) fn clear(&mut self) -> usize {
+        let removed = self.entries.len();
+        self.entries.clear();
+        self.pending_events.clear();
+        removed
+    }
+
     pub(crate) fn take_pending_events(&mut self) -> Vec<NotificationEntry> {
         std::mem::take(&mut self.pending_events)
     }
@@ -1501,6 +1511,8 @@ fn now_unix() -> u64 {
 pub struct NotificationCenterState {
     /// Index into the newest-first entry list.
     pub selected: usize,
+    /// Whether the pointer is over the footer "Clear all" button.
+    pub clear_hovered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1847,12 +1859,26 @@ impl AppState {
     /// (same marker path as the `notification.mark_seen` API).
     pub(crate) fn open_notification_center(&mut self) {
         self.notification_log.mark_all_seen();
-        self.notification_center = Some(NotificationCenterState { selected: 0 });
+        self.notification_center = Some(NotificationCenterState {
+            selected: 0,
+            clear_hovered: false,
+        });
         self.mode = Mode::NotificationCenter;
     }
 
     pub(crate) fn close_notification_center(&mut self) {
         self.notification_center = None;
+    }
+
+    /// Empty the notification log (the panel's "Clear all" action). Mutates the
+    /// same server-owned log the `notification.clear` API clears, so the panel
+    /// and any external consumer stay in agreement.
+    pub(crate) fn clear_notifications(&mut self) {
+        self.notification_log.clear();
+        if let Some(center) = self.notification_center.as_mut() {
+            center.selected = 0;
+            center.clear_hovered = false;
+        }
     }
 
     pub(crate) fn notification_center_move_selection(&mut self, delta: isize) {
@@ -2740,6 +2766,89 @@ mod tests {
         assert!(!log.mark_all_seen(), "second mark_seen is a no-op");
         assert_eq!(log.unread_count(), 0);
         assert_eq!(log.last_seen_id(), 3);
+    }
+
+    #[test]
+    fn notification_log_clear_empties_entries_and_keeps_ids_monotonic() {
+        let mut log = NotificationLog::default();
+        log.post(&test_toast(ToastKind::Finished, "one", None), 1);
+        log.post(&test_toast(ToastKind::Finished, "two", None), 2);
+        log.mark_all_seen();
+
+        assert_eq!(log.clear(), 2, "clear reports the number removed");
+        assert!(log.is_empty());
+        assert_eq!(log.unread_count(), 0);
+        // Marker is preserved; an empty log is simply zero-unread.
+        assert_eq!(log.last_seen_id(), 2);
+
+        // Ids never rewind: the next post continues past the cleared entries.
+        let next_id = log.post(&test_toast(ToastKind::Finished, "three", None), 3);
+        assert_eq!(next_id, 3);
+        assert_eq!(log.unread_count(), 1, "the post-clear entry is unread");
+    }
+
+    #[test]
+    fn clear_notifications_empties_log_and_resets_panel_selection() {
+        let mut state = AppState::test_new();
+        for title in ["a", "b", "c"] {
+            state.post_notification(test_toast(ToastKind::Finished, title, None));
+        }
+        state.open_notification_center();
+        state.notification_center_move_selection(2);
+        assert_eq!(
+            state.notification_center.as_ref().map(|c| c.selected),
+            Some(2)
+        );
+
+        state.clear_notifications();
+
+        assert!(state.notification_log.is_empty());
+        assert_eq!(
+            state.mode,
+            Mode::NotificationCenter,
+            "clearing leaves the panel open"
+        );
+        assert_eq!(
+            state.notification_center.as_ref().map(|c| c.selected),
+            Some(0),
+            "selection resets after clear"
+        );
+    }
+
+    #[test]
+    fn notification_center_footer_splits_the_list_and_button_rows() {
+        let mut state = AppState::test_new();
+        state.view.terminal_area = Rect::new(0, 1, 80, 24);
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        for title in ["a", "b", "c"] {
+            state.post_notification(test_toast(ToastKind::Finished, title, None));
+        }
+        state.open_notification_center();
+
+        let button = state
+            .notification_center_clear_button_rect()
+            .expect("clear button present with entries");
+        let (list, _start) = state
+            .notification_center_list_window()
+            .expect("list window present");
+
+        // The button occupies the row directly below the list, and the list
+        // shows exactly the three entries.
+        assert_eq!(button.height, 1);
+        assert_eq!(list.y + list.height, button.y);
+        assert_eq!(list.height, 3);
+        assert_eq!(button.width, list.width);
+    }
+
+    #[test]
+    fn notification_center_has_no_footer_button_when_empty() {
+        let mut state = AppState::test_new();
+        state.view.terminal_area = Rect::new(0, 1, 80, 24);
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        state.open_notification_center();
+
+        assert!(state.notification_log.is_empty());
+        assert!(state.notification_center_clear_button_rect().is_none());
     }
 
     #[test]

@@ -810,6 +810,14 @@ impl App {
         )
     }
 
+    fn handle_notification_clear(&mut self, id: String) -> String {
+        let cleared = self.state.notification_log.clear() as u64;
+        responses::encode_success(
+            id,
+            crate::api::schema::ResponseResult::NotificationCleared { cleared },
+        )
+    }
+
     pub(crate) fn sync_toast_deadline(
         &mut self,
         previous_toast: Option<crate::app::state::ToastNotification>,
@@ -1086,6 +1094,9 @@ impl App {
             }
             Method::NotificationMarkSeen(_) => {
                 return self.handle_notification_mark_seen(request.id);
+            }
+            Method::NotificationClear(_) => {
+                return self.handle_notification_clear(request.id);
             }
             Method::ClientWindowTitleSet(_) | Method::ClientWindowTitleClear(_) => {
                 return responses::encode_success(
