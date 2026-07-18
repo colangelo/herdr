@@ -33,12 +33,13 @@ per-kind durations, click target) SHALL be unchanged.
 ### Requirement: Notification API, event, and CLI
 
 The server SHALL expose `notification.list` (entries newest-first plus the
-unread count and the seen marker) and `notification.mark_seen` (advance the
-marker; idempotent) over the socket API, SHALL emit a
-`NotificationPosted` subscription event when an entry is appended, and the CLI
-SHALL provide `herdr notification list [--json]`. The protocol version SHALL be
-bumped only if the source protocol is not already greater than the latest
-released protocol.
+unread count and the seen marker), `notification.mark_seen` (advance the
+marker; idempotent), and `notification.clear` (empty the log; ids stay
+monotonic) over the socket API, SHALL emit a `NotificationPosted` subscription
+event when an entry is appended, and the CLI SHALL provide `herdr notification
+list [--json]` and `herdr notification clear [--json]`. The protocol version
+SHALL be bumped only if the source protocol is not already greater than the
+latest released protocol.
 
 #### Scenario: Listing returns unread count
 
@@ -56,6 +57,13 @@ released protocol.
 
 - **WHEN** a client is subscribed to events and a notification is posted
 - **THEN** the client receives a `NotificationPosted` event for that entry
+
+#### Scenario: Clearing empties the log
+
+- **WHEN** a client calls `notification.clear` with entries present
+- **THEN** the log becomes empty and a subsequent `notification.list` returns no
+  entries with zero unread
+- **AND** the next posted notification receives an id greater than any prior id
 
 ### Requirement: Top-right unread indicator
 
@@ -88,8 +96,18 @@ Enter SHALL jump to the selected notification's target pane (focusing its
 workspace, tab, and pane via the same path as the existing toast click) and
 close the panel; Esc and `q` SHALL close without jumping; clicking a row SHALL
 jump to that row's target. Entries without a pane target SHALL not be
-actionable. The panel SHALL reuse the existing overlay/list UI language rather
-than introducing a one-off surface.
+actionable. The panel SHALL show a footer "Clear all" button (also bound to
+`c`) that empties the log through the same server operation as
+`notification.clear` and leaves the panel open on the empty state. The panel
+SHALL reuse the existing overlay/list UI language rather than introducing a
+one-off surface.
+
+#### Scenario: Clearing from the panel empties the log
+
+- **WHEN** the user presses `c` or clicks the "Clear all" button with entries
+  present
+- **THEN** the log becomes empty and the unread indicator's pill disappears
+- **AND** the panel stays open showing the empty state
 
 #### Scenario: Opening marks seen
 
