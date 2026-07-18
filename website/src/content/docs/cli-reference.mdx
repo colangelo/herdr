@@ -96,7 +96,7 @@ herdr server reload-agent-manifests
 ## Notifications
 
 ```bash
-herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]
+herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right|center] [--sound none|done|request]
 ```
 
 `notification show` uses the configured `[ui.toast]` delivery. `--position` only affects in-app Herdr toasts. `--sound` defaults to `none`; `done` and `request` play the existing finished and needs-attention sounds only when the notification is shown.
@@ -174,6 +174,7 @@ herdr pane swap --source-pane ID --target-pane ID
 herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]
 herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]
 herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]
+herdr pane clear [<pane_id>|--pane ID|--current]
 herdr pane close <pane_id>
 ```
 

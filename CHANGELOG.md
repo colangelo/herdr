@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+- Added a clear-scrollback action with tmux `clear-history` semantics: the `pane.clear` socket method and `herdr pane clear [<pane_id>|--pane ID|--current]` CLI purge a pane's saved scrollback while leaving the visible screen and running process untouched, and the `keys.clear_scrollback` binding (unset by default) clears the focused pane.
+- Added pane-to-tab keyboard controls: `break_pane` (`prefix+!`) moves the focused pane into a new tab, `move_pane_to_tab` (`prefix+m`) opens a destination picker, and `move_pane_next_tab` / `move_pane_prev_tab` (`prefix+>` / `prefix+<`) move directly without wrapping. Moves preserve the running terminal and surface unavailable or rejected moves as non-blocking feedback.
+- Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
+- Added tmux-style layout presets (`even_horizontal`, `even_vertical`, `tiled`) via the `layout.set_preset` socket API, a `next_layout` action to cycle them (`prefix+space` by default), and CLI verbs `herdr pane balance` and `herdr pane layout --set <even-h|even-v|tiled>`.
+- Added `ui.show_workspace_numbers` to show each workspace's jump number (1-9, the `keys.switch_workspace` target) on the sidebar branch line, with `ui.workspace_number_color` to set their color (same syntax as `accent`). Default off / theme color.
+- Added `ui.workspace_sort = "priority"` to live-sort the sidebar workspace list by attention priority (blocked, done, working, idle, unknown; most recent state change first within a tier). Worktree groups move as one unit. Default `"manual"` keeps the drag order; drag-reordering is disabled while `"priority"` is active.
+- Added `ui.show_agent_numbers` to show each agent's jump symbol (1-9, then a-z, the `keys.focus_agent` target) on the agent panel status line, with `ui.agent_number_color` to set their color (same syntax as `accent`). Symbols follow the panel's current order, including priority sort. Default off / theme color.
+- Indexed keybindings (`switch_tab`, `switch_workspace`, `focus_agent`) now accept an `a..z` range for entries 10-35, e.g. `focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]`. Sidebar jump labels (`ui.show_workspace_numbers`, `ui.show_agent_numbers`) continue past 9 with the matching letters.
+- Added pane border and title styling options: `ui.pane_border_active_color` and `ui.pane_border_inactive_color` set the focused/unfocused border colors (same syntax as `accent`; unset uses the theme), `ui.pane_border_active_style` sets the focused border weight (`light`, `heavy`, or `double`), and `ui.pane_title_active_color` / `ui.pane_title_inactive_color` set the border title colors (unset follows the matching border color).
+- Added `ui.sidebar_active_border` to highlight the active space and agent in the sidebar, styled by `ui.pane_border_active_color` and `ui.pane_border_active_style`. Modes: `above`, `below`, `both` (lines in the spacer rows), `left`, `right` (a vertical bar on that edge), `off` (default); booleans map to `both`/`off`.
+- Added `ui.pane_active_bg` and `ui.pane_inactive_bg` to set the default background of focused/unfocused pane cells (tmux `window-active-style` / `window-style` backgrounds); app-painted cell backgrounds are preserved.
+- Added `ui.sidebar_active_bg` to set the background of the active space and agent rows in the sidebar (unset keeps the theme's subtle highlight).
+- Added `ui.dim_inactive_panes` to dim unfocused pane content in all modes, not only while a herdr mode is active. Default off.
+- Added a `center` position for in-app toasts (`ui.toast.herdr.position` and `herdr notification show --position`), floating the toast over the pane area, centered between the panes. Added `ui.toast.herdr.size` presets (`auto`, `medium`, `large`) to widen the toast box.
+- Added per-kind in-app toast durations: `ui.toast.herdr.needs_attention_seconds` (default 8), `finished_seconds` (5), and `update_seconds` (3); `0` keeps that toast visible until clicked or replaced.
+- Added `ctrl+k` / `ctrl+j` line-wise viewport scroll in copy mode (vim `ctrl+y` / `ctrl+e`): scroll the window up or down one line without moving the cursor relative to the buffer text. Repeatable while held.
+
+### Changed
+- Bumped the client/server protocol version to 18 for the `layout.balance` and `layout.set_preset` socket API methods.
+- Sidebar workspace jump numbers (`ui.show_workspace_numbers`) and the collapsed sidebar's workspace rows now follow the visible row order, matching what `prefix+1..9` switches to when worktree grouping or priority sort reorders the list.
+- The sidebar spaces and agents lists now follow the active workspace and focused agent: the lists scroll just enough to keep the focused entry visible (nearest-edge reveal, no recentering) across any focus change (keybindings, picker, navigate mode, mouse, socket API) and any reordering (priority re-sorts, entries added or removed). Manually scrolling a list disengages its follow; the next focus change re-engages it, like the tab bar.
+
+### Fixed
+- Held modified shortcuts now repeat in copy mode: holding `ctrl+u` / `ctrl+d` (and other escape-coded keys) keeps paging instead of firing once. Key-repeat events were previously dropped in every mode except terminal passthrough; they are now honored in copy mode too, while modal confirm/close keys still cannot repeat into a pane.
+
 ## [0.7.4] - 2026-07-15
 
 ### Added
