@@ -113,7 +113,7 @@ When the current pull request head is green and both bot reviews are complete, r
 
 If the current session is already inside an isolated task worktree, keep using it. Do not create nested worktrees.
 
-Before committing, propose the commit message and get alignment.
+State the commit message(s) you are using, then commit without waiting for approval (see Commit Style).
 
 After Can confirms the change is integrated, update the shared checkout, remove the task worktree, and delete the task branch locally and remotely.
 
@@ -210,7 +210,7 @@ Use lowercase conventional commits, no emojis, and no AI co-author lines. Commit
 
 Prefer granular commits that each cover one coherent concern. When practical, separate implementation, documentation, planning artifacts, and workflow or instruction updates instead of bundling them into one commit.
 
-Before committing, propose the commit message and get alignment.
+Do not block on commit-message approval: state the messages you chose (with the granularity above) in your progress output and proceed to commit them autonomously. Only pause for alignment when the split or wording is genuinely ambiguous or the commit would be hard to reverse.
 
 When a normal feature or fix commit relates to a GitHub issue, add a commit body line `refs #<issue-number>` after the subject:
 
