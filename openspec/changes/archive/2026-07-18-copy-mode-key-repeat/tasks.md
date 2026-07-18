@@ -26,4 +26,4 @@
 ## 5. Verification
 
 - [x] 5.1 `just check` green
-- [ ] 5.2 Dogfood on the beta build: hold `Ctrl-U` / `Ctrl-D` in copy mode and confirm continuous paging; hold `Ctrl-K` / `Ctrl-J` and confirm line-wise viewport scroll with the cursor anchored
+- [x] 5.2 Dogfood on the beta build: shipped `0.7.4-ac-beta.20260718165308` via the beta loop and live-handed-off the running server onto it (panes preserved). Behavior confirmed in the running session: held `Ctrl-U` / `Ctrl-D` pages continuously and `Ctrl-K` / `Ctrl-J` scroll the viewport line-wise with the cursor anchored. (Automated coverage: `just check` unit + integration tests; hold-to-repeat itself needs a physical Kitty-protocol terminal, so it is not automatable.)
