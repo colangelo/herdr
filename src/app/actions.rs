@@ -1812,6 +1812,7 @@ impl AppState {
             self.view.tab_scroll_left_hit_area = ratatui::layout::Rect::default();
             self.view.tab_scroll_right_hit_area = ratatui::layout::Rect::default();
             self.view.new_tab_hit_area = ratatui::layout::Rect::default();
+            self.view.notification_hit_area = ratatui::layout::Rect::default();
             return;
         };
 
@@ -1821,12 +1822,14 @@ impl AppState {
             self.tab_scroll,
             self.tab_scroll_follow_active,
             self.mouse_capture,
+            crate::ui::notification_indicator_width(self.notification_log.unread_count()),
         );
         self.tab_scroll = layout.scroll;
         self.view.tab_hit_areas = layout.tab_hit_areas;
         self.view.tab_scroll_left_hit_area = layout.scroll_left_hit_area;
         self.view.tab_scroll_right_hit_area = layout.scroll_right_hit_area;
         self.view.new_tab_hit_area = layout.new_tab_hit_area;
+        self.view.notification_hit_area = layout.notification_hit_area;
     }
 }
 
@@ -2821,7 +2824,7 @@ impl AppState {
                     self.toast_config.delivery,
                     crate::config::ToastDelivery::Herdr
                 ) {
-                    self.toast = Some(ToastNotification {
+                    self.post_notification(ToastNotification {
                         kind: ToastKind::UpdateInstalled,
                         title: format!("v{version} available"),
                         context: crate::update::update_install_instruction(&install_command),
@@ -2853,7 +2856,7 @@ impl AppState {
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
-                    self.toast = Some(ToastNotification {
+                    self.post_notification(ToastNotification {
                         kind: ToastKind::UpdateInstalled,
                         title: "Agent detection rules updated".to_string(),
                         context: agent_list,
@@ -3366,7 +3369,7 @@ impl AppState {
             crate::config::ToastDelivery::Herdr
         ) {
             if let Some(toast) = delivery.toast.clone() {
-                self.toast = Some(toast);
+                self.post_notification(toast);
             }
         }
     }
@@ -3520,6 +3523,26 @@ mod tests {
             state.mode = Mode::Terminal;
         }
         state
+    }
+
+    #[test]
+    fn update_ready_toast_is_also_logged() {
+        let mut state = app_with_workspaces(&["one"]);
+        state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+
+        state.handle_app_event(AppEvent::UpdateReady {
+            version: "9.9.9".into(),
+            install_command: "brew upgrade herdr".into(),
+        });
+
+        assert!(state.toast.is_some());
+        let entry = state
+            .notification_log
+            .entries_newest_first()
+            .next()
+            .expect("update toast logged");
+        assert_eq!(entry.title, "v9.9.9 available");
+        assert_eq!(entry.kind, ToastKind::UpdateInstalled);
     }
 
     fn mark_linked_worktree(state: &mut AppState, ws_idx: usize) {

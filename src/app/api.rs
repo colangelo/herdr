@@ -732,10 +732,89 @@ impl App {
         }
     }
 
+    /// Emit `notification.posted` for log entries appended since the last
+    /// call. Every `post_notification` site is followed by
+    /// `sync_toast_deadline` (required to arm the toast timer), which calls
+    /// this, so posts cannot go unemitted.
+    pub(crate) fn emit_pending_notification_events(&mut self) {
+        for entry in self.state.notification_log.take_pending_events() {
+            let notification = self.notification_info(&entry);
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::NotificationPosted,
+                data: crate::api::schema::EventData::NotificationPosted { notification },
+            });
+        }
+    }
+
+    fn notification_info(
+        &self,
+        entry: &crate::app::state::NotificationEntry,
+    ) -> crate::api::schema::NotificationInfo {
+        let kind = match entry.kind {
+            ToastKind::NeedsAttention => crate::api::schema::NotificationKind::NeedsAttention,
+            ToastKind::Finished => crate::api::schema::NotificationKind::Finished,
+            ToastKind::UpdateInstalled => crate::api::schema::NotificationKind::UpdateInstalled,
+        };
+        let workspace_id = entry
+            .target
+            .as_ref()
+            .map(|target| target.workspace_id.clone());
+        let pane_id = entry.target.as_ref().and_then(|target| {
+            let ws_idx = self
+                .state
+                .workspaces
+                .iter()
+                .position(|workspace| workspace.id == target.workspace_id)?;
+            self.public_pane_id(ws_idx, target.pane_id)
+        });
+        crate::api::schema::NotificationInfo {
+            id: entry.id,
+            kind,
+            title: entry.title.clone(),
+            context: entry.context.clone(),
+            workspace_id,
+            pane_id,
+            posted_at_unix: entry.posted_at_unix,
+        }
+    }
+
+    fn handle_notification_list(&mut self, id: String) -> String {
+        let entries: Vec<crate::app::state::NotificationEntry> = self
+            .state
+            .notification_log
+            .entries_newest_first()
+            .cloned()
+            .collect();
+        let notifications = entries
+            .iter()
+            .map(|entry| self.notification_info(entry))
+            .collect();
+        responses::encode_success(
+            id,
+            crate::api::schema::ResponseResult::NotificationList {
+                notifications,
+                unread_count: self.state.notification_log.unread_count() as u64,
+                last_seen_id: self.state.notification_log.last_seen_id(),
+            },
+        )
+    }
+
+    fn handle_notification_mark_seen(&mut self, id: String) -> String {
+        let changed = self.state.notification_log.mark_all_seen();
+        responses::encode_success(
+            id,
+            crate::api::schema::ResponseResult::NotificationMarkSeen {
+                last_seen_id: self.state.notification_log.last_seen_id(),
+                changed,
+            },
+        )
+    }
+
     pub(crate) fn sync_toast_deadline(
         &mut self,
         previous_toast: Option<crate::app::state::ToastNotification>,
     ) {
+        self.emit_pending_notification_events();
         if self.state.toast != previous_toast {
             let durations = self.state.toast_config.herdr;
             self.toast_deadline = self.state.toast.as_ref().and_then(|toast| {
@@ -1002,6 +1081,12 @@ impl App {
             Method::NotificationShow(params) => {
                 return self.handle_notification_show(request.id, params);
             }
+            Method::NotificationList(_) => {
+                return self.handle_notification_list(request.id);
+            }
+            Method::NotificationMarkSeen(_) => {
+                return self.handle_notification_mark_seen(request.id);
+            }
             Method::ClientWindowTitleSet(_) | Method::ClientWindowTitleClear(_) => {
                 return responses::encode_success(
                     request.id,
@@ -1250,13 +1335,14 @@ impl App {
                 } else {
                     let previous_toast = self.state.toast.clone();
                     self.mark_api_notification_shown(Instant::now());
-                    self.state.toast = Some(crate::app::state::ToastNotification {
-                        kind: ToastKind::UpdateInstalled,
-                        title,
-                        context: body.unwrap_or_default(),
-                        position: params.position,
-                        target: None,
-                    });
+                    self.state
+                        .post_notification(crate::app::state::ToastNotification {
+                            kind: ToastKind::UpdateInstalled,
+                            title,
+                            context: body.unwrap_or_default(),
+                            position: params.position,
+                            target: None,
+                        });
                     self.sync_toast_deadline(previous_toast);
                     self.emit_api_notification_sound(requested_sound);
                     NotificationShowReason::Shown

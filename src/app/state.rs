@@ -876,6 +876,7 @@ pub struct ViewState {
     pub tab_scroll_left_hit_area: Rect,
     pub tab_scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
+    pub notification_hit_area: Rect,
     pub terminal_area: Rect,
     pub mobile_header_rect: Rect,
     pub mobile_menu_hit_area: Rect,
@@ -907,6 +908,7 @@ pub enum Mode {
     GlobalMenu,
     KeybindHelp,
     Navigator,
+    NotificationCenter,
 }
 
 impl Mode {
@@ -938,6 +940,7 @@ impl Mode {
                 | Mode::ContextMenu
                 | Mode::GlobalMenu
                 | Mode::KeybindHelp
+                | Mode::NotificationCenter
         )
     }
 
@@ -1396,6 +1399,110 @@ pub struct ToastNotification {
     pub target: Option<ToastTarget>,
 }
 
+/// Upper bound on retained notification log entries; older entries are
+/// evicted. Deliberately a constant, not config.
+pub const NOTIFICATION_LOG_CAPACITY: usize = 100;
+
+/// One entry in the server-owned notification log. Mirrors the toast that was
+/// shown; `target` reuses the toast's workspace/pane identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationEntry {
+    pub id: u64,
+    pub kind: ToastKind,
+    pub title: String,
+    pub context: String,
+    pub target: Option<ToastTarget>,
+    pub posted_at_unix: u64,
+}
+
+/// Server-owned bounded notification log with a `last_seen_id` high-water
+/// mark. Every herdr toast is appended here through
+/// `AppState::post_notification`, so the log cannot disagree with the toasts
+/// the user actually saw. In-memory only: empties on a cold server restart.
+#[derive(Debug, Default)]
+pub struct NotificationLog {
+    entries: std::collections::VecDeque<NotificationEntry>,
+    last_id: u64,
+    last_seen_id: u64,
+    /// Entries posted but not yet emitted as `notification.posted` events.
+    /// Drained by the App layer, which owns the event hub.
+    pending_events: Vec<NotificationEntry>,
+}
+
+impl NotificationLog {
+    pub(crate) fn post(&mut self, toast: &ToastNotification, posted_at_unix: u64) -> u64 {
+        self.last_id += 1;
+        let entry = NotificationEntry {
+            id: self.last_id,
+            kind: toast.kind,
+            title: toast.title.clone(),
+            context: toast.context.clone(),
+            target: toast.target.clone(),
+            posted_at_unix,
+        };
+        self.entries.push_back(entry.clone());
+        while self.entries.len() > NOTIFICATION_LOG_CAPACITY {
+            self.entries.pop_front();
+        }
+        self.pending_events.push(entry);
+        self.last_id
+    }
+
+    pub fn entries_newest_first(&self) -> impl Iterator<Item = &NotificationEntry> {
+        self.entries.iter().rev()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn last_seen_id(&self) -> u64 {
+        self.last_seen_id
+    }
+
+    /// Entries newer than the seen marker. Evicted entries cannot be unread.
+    pub fn unread_count(&self) -> usize {
+        self.entries
+            .iter()
+            .rev()
+            .take_while(|entry| entry.id > self.last_seen_id)
+            .count()
+    }
+
+    /// Advance the seen marker to the newest posted entry. Idempotent;
+    /// returns whether the marker moved.
+    pub fn mark_all_seen(&mut self) -> bool {
+        if self.last_seen_id < self.last_id {
+            self.last_seen_id = self.last_id;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn take_pending_events(&mut self) -> Vec<NotificationEntry> {
+        std::mem::take(&mut self.pending_events)
+    }
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+/// TUI-only state for the notification center dropdown panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationCenterState {
+    /// Index into the newest-first entry list.
+    pub selected: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingAgentNotification {
     pub pane_id: PaneId,
@@ -1553,6 +1660,10 @@ pub struct AppState {
     pub update_dismissed: bool,
     pub config_diagnostic: Option<String>,
     pub toast: Option<ToastNotification>,
+    /// Server-owned notification log fed by `post_notification`.
+    pub notification_log: NotificationLog,
+    /// TUI-only dropdown panel state; `Some` while `Mode::NotificationCenter`.
+    pub notification_center: Option<NotificationCenterState>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
     pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
@@ -1722,6 +1833,45 @@ impl AppState {
 
     pub fn toast_delivery(&self) -> ToastDelivery {
         self.toast_config.delivery
+    }
+
+    /// Post a herdr toast: shows it as the transient toast (behavior
+    /// unchanged) and appends it to the notification log. All production
+    /// toast sites go through here so the log stays complete.
+    pub(crate) fn post_notification(&mut self, toast: ToastNotification) {
+        self.notification_log.post(&toast, now_unix());
+        self.toast = Some(toast);
+    }
+
+    /// Open the notification center dropdown and mark all entries seen
+    /// (same marker path as the `notification.mark_seen` API).
+    pub(crate) fn open_notification_center(&mut self) {
+        self.notification_log.mark_all_seen();
+        self.notification_center = Some(NotificationCenterState { selected: 0 });
+        self.mode = Mode::NotificationCenter;
+    }
+
+    pub(crate) fn close_notification_center(&mut self) {
+        self.notification_center = None;
+    }
+
+    pub(crate) fn notification_center_move_selection(&mut self, delta: isize) {
+        let len = self.notification_log.len();
+        let Some(center) = self.notification_center.as_mut() else {
+            return;
+        };
+        if len == 0 {
+            center.selected = 0;
+            return;
+        }
+        center.selected = center.selected.saturating_add_signed(delta).min(len - 1);
+    }
+
+    pub(crate) fn notification_center_selected_entry(&self) -> Option<&NotificationEntry> {
+        let center = self.notification_center.as_ref()?;
+        self.notification_log
+            .entries_newest_first()
+            .nth(center.selected)
     }
 
     pub fn agent_border_labels_enabled(&self) -> bool {
@@ -2007,6 +2157,7 @@ impl AppState {
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
+                notification_hit_area: Rect::default(),
                 terminal_area: Rect::default(),
                 mobile_header_rect: Rect::default(),
                 mobile_menu_hit_area: Rect::default(),
@@ -2026,6 +2177,8 @@ impl AppState {
             update_dismissed: false,
             config_diagnostic: None,
             toast: None,
+            notification_log: NotificationLog::default(),
+            notification_center: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -2525,12 +2678,137 @@ mod tests {
             Mode::GlobalMenu,
             Mode::KeybindHelp,
             Mode::Navigator,
+            Mode::NotificationCenter,
         ] {
             assert!(
                 !mode.honors_key_repeat(),
                 "{mode:?} must not honor key repeat"
             );
         }
+    }
+
+    fn test_toast(kind: ToastKind, title: &str, target: Option<ToastTarget>) -> ToastNotification {
+        ToastNotification {
+            kind,
+            title: title.to_string(),
+            context: "ctx".to_string(),
+            position: None,
+            target,
+        }
+    }
+
+    #[test]
+    fn notification_center_mode_wants_ascii_input() {
+        assert!(Mode::NotificationCenter.wants_ascii_input());
+    }
+
+    #[test]
+    fn notification_log_assigns_monotonic_ids_and_evicts_beyond_capacity() {
+        let mut log = NotificationLog::default();
+        for i in 0..NOTIFICATION_LOG_CAPACITY + 5 {
+            log.post(
+                &test_toast(ToastKind::Finished, &format!("toast {i}"), None),
+                i as u64,
+            );
+        }
+
+        assert_eq!(log.len(), NOTIFICATION_LOG_CAPACITY);
+        let ids: Vec<u64> = log.entries_newest_first().map(|entry| entry.id).collect();
+        assert_eq!(ids.first(), Some(&(NOTIFICATION_LOG_CAPACITY as u64 + 5)));
+        assert_eq!(ids.last(), Some(&6), "oldest entries evicted");
+        assert!(
+            ids.windows(2).all(|pair| pair[0] == pair[1] + 1),
+            "ids strictly descending newest-first: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn notification_log_unread_tracks_marker_and_mark_seen_is_idempotent() {
+        let mut log = NotificationLog::default();
+        log.post(&test_toast(ToastKind::Finished, "one", None), 1);
+        assert_eq!(log.unread_count(), 1);
+        assert!(log.mark_all_seen());
+        assert_eq!(log.unread_count(), 0);
+        assert_eq!(log.last_seen_id(), 1);
+
+        log.post(&test_toast(ToastKind::NeedsAttention, "two", None), 2);
+        log.post(&test_toast(ToastKind::UpdateInstalled, "three", None), 3);
+        assert_eq!(log.unread_count(), 2);
+        assert_eq!(log.last_seen_id(), 1);
+
+        assert!(log.mark_all_seen());
+        assert!(!log.mark_all_seen(), "second mark_seen is a no-op");
+        assert_eq!(log.unread_count(), 0);
+        assert_eq!(log.last_seen_id(), 3);
+    }
+
+    #[test]
+    fn post_notification_shows_toast_and_appends_log_entry() {
+        let mut state = AppState::test_new();
+        state.post_notification(test_toast(ToastKind::Finished, "claude finished", None));
+
+        assert_eq!(
+            state.toast.as_ref().map(|toast| toast.title.as_str()),
+            Some("claude finished")
+        );
+        let entry = state
+            .notification_log
+            .entries_newest_first()
+            .next()
+            .cloned()
+            .expect("entry logged");
+        assert_eq!(entry.title, "claude finished");
+        assert_eq!(entry.kind, ToastKind::Finished);
+        let pending = state.notification_log.take_pending_events();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, entry.id);
+        assert!(state.notification_log.take_pending_events().is_empty());
+    }
+
+    #[test]
+    fn open_notification_center_marks_seen_and_clamps_selection() {
+        let mut state = AppState::test_new();
+        for title in ["one", "two", "three"] {
+            state.post_notification(test_toast(ToastKind::Finished, title, None));
+        }
+        assert_eq!(state.notification_log.unread_count(), 3);
+
+        state.open_notification_center();
+        assert_eq!(state.mode, Mode::NotificationCenter);
+        assert_eq!(state.notification_log.unread_count(), 0);
+        assert_eq!(
+            state
+                .notification_center
+                .as_ref()
+                .map(|center| center.selected),
+            Some(0)
+        );
+
+        state.notification_center_move_selection(1);
+        state.notification_center_move_selection(10);
+        assert_eq!(
+            state
+                .notification_center
+                .as_ref()
+                .map(|center| center.selected),
+            Some(2),
+            "selection clamps to newest-first list length"
+        );
+        state.notification_center_move_selection(-10);
+        assert_eq!(
+            state
+                .notification_center
+                .as_ref()
+                .map(|center| center.selected),
+            Some(0)
+        );
+        assert_eq!(
+            state
+                .notification_center_selected_entry()
+                .map(|entry| entry.title.as_str()),
+            Some("three"),
+            "selection 0 is the newest entry"
+        );
     }
 
     #[test]

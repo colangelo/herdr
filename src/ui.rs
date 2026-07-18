@@ -10,6 +10,7 @@ mod keybind_help;
 mod menus;
 mod mobile;
 mod navigator;
+mod notification_center;
 mod onboarding;
 mod panes;
 mod release_notes;
@@ -19,7 +20,8 @@ mod sidebar;
 mod status;
 mod tab_surface;
 mod tabs;
-mod text;
+// pub(crate): the CLI reuses text helpers (e.g. relative_time_label).
+pub(crate) mod text;
 mod widgets;
 
 use self::dialogs::{
@@ -38,6 +40,7 @@ use self::mobile::{
     render_mobile_toast_banner,
 };
 use self::navigator::render_navigator_overlay;
+use self::notification_center::render_notification_center;
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
 pub(crate) use self::panes::popup_pane_rects;
@@ -98,6 +101,7 @@ pub(crate) use self::{
     },
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
+    tabs::{compute_tab_bar_view, notification_indicator_width},
     tabs::{compute_tab_bar_view, tab_bar_content_area},
     widgets::{centered_popup_rect, modal_stack_areas},
 };
@@ -321,6 +325,7 @@ fn compute_view_internal(
                 app.tab_scroll,
                 app.tab_scroll_follow_active,
                 app.mouse_capture,
+                notification_indicator_width(app.notification_log.unread_count()),
             )
         })
         .unwrap_or_default();
@@ -365,6 +370,7 @@ fn compute_view_internal(
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
+        notification_hit_area: tab_bar_view.notification_hit_area,
         terminal_area,
         mobile_header_rect: Rect::default(),
         mobile_menu_hit_area: Rect::default(),
@@ -428,6 +434,7 @@ fn compute_mobile_view(
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
         new_tab_hit_area: Rect::default(),
+        notification_hit_area: Rect::default(),
         terminal_area,
         mobile_header_rect: header_rect,
         mobile_menu_hit_area: header_hits.menu,
@@ -512,6 +519,7 @@ pub fn render_with_runtime_registry(
         Mode::GlobalMenu => render_global_launcher_menu(app, frame),
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
+        Mode::NotificationCenter => render_notification_center(app, frame),
         Mode::Terminal => {}
     }
 }

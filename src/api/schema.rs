@@ -4,6 +4,7 @@ pub mod agents;
 pub mod common;
 pub mod events;
 pub mod integrations;
+pub mod notifications;
 pub mod panes;
 pub mod plugins;
 pub mod response;
@@ -17,6 +18,7 @@ pub use agents::*;
 pub use common::*;
 pub use events::*;
 pub use integrations::*;
+pub use notifications::*;
 pub use panes::*;
 pub use plugins::*;
 pub use response::*;
@@ -57,6 +59,10 @@ pub enum Method {
     ServerReloadAgentManifests(EmptyParams),
     #[serde(rename = "notification.show")]
     NotificationShow(NotificationShowParams),
+    #[serde(rename = "notification.list")]
+    NotificationList(EmptyParams),
+    #[serde(rename = "notification.mark_seen")]
+    NotificationMarkSeen(EmptyParams),
     #[serde(rename = "client.window_title.set")]
     ClientWindowTitleSet(ClientWindowTitleSetParams),
     #[serde(rename = "client.window_title.clear")]

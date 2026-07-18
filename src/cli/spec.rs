@@ -303,7 +303,12 @@ fn tab_command() -> Command {
 
 fn notification_command() -> Command {
     Command::new("notification")
-        .about("Show Herdr notifications")
+        .about("Show and list Herdr notifications")
+        .subcommand(
+            Command::new("list")
+                .about("List the notification log")
+                .arg(json_flag()),
+        )
         .subcommand(
             Command::new("show")
                 .about("Show a notification")

@@ -118,6 +118,7 @@ impl App {
                 Mode::Navigator => {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
+                Mode::NotificationCenter => self.handle_notification_center_key_via_api(key_event),
                 Mode::Terminal => unreachable!(),
             },
         }
@@ -425,6 +426,9 @@ impl App {
                         self.focus_pane_internal_via_api(ws_idx, pane_id)
                     }
                     MouseAction::FocusToastTarget => self.focus_toast_target_via_api(),
+                    MouseAction::ActivateNotificationRow { index } => {
+                        self.activate_notification_row(index)
+                    }
                     MouseAction::MoveWorkspace {
                         source_ws_idx,
                         insert_idx,
