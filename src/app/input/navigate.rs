@@ -346,6 +346,10 @@ impl App {
                 self.move_focused_pane_to_adjacent_tab_via_api(-1);
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::ClearScrollback => {
+                self.clear_focused_pane_scrollback_via_api();
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::FocusPaneLeft => {
                 self.focus_pane_direction_in_context(NavDirection::Left, context)
             }
@@ -1213,6 +1217,19 @@ impl App {
         );
     }
 
+    fn clear_focused_pane_scrollback_via_api(&mut self) {
+        let Some((_ws_idx, _tab_idx, pane_id)) = focused_pane_move_source(&self.state) else {
+            return;
+        };
+        let response = self.runtime_pane_clear_scrollback(
+            "tui.pane.clear",
+            crate::api::schema::PaneTarget { pane_id },
+        );
+        if let Ok(error) = serde_json::from_str::<crate::api::schema::ErrorResponse>(&response) {
+            self.show_pane_move_feedback("clear scrollback failed", error.error.message);
+        }
+    }
+
     fn open_pane_move_target_picker(&mut self) {
         match pane_move_target_picker_for_state(&self.state) {
             Ok(picker) => {
@@ -1641,6 +1658,7 @@ pub(crate) enum NavigateAction {
     MovePaneToTab,
     MovePaneToNextTab,
     MovePaneToPrevTab,
+    ClearScrollback,
     FocusPaneLeft,
     FocusPaneDown,
     FocusPaneUp,
@@ -1786,6 +1804,7 @@ fn non_indexed_action_for_key(
         (&kb.rename_pane, NavigateAction::RenamePane),
         (&kb.break_pane, NavigateAction::BreakPaneToNewTab),
         (&kb.move_pane_to_tab, NavigateAction::MovePaneToTab),
+        (&kb.clear_scrollback, NavigateAction::ClearScrollback),
         (&kb.move_pane_next_tab, NavigateAction::MovePaneToNextTab),
         (&kb.move_pane_prev_tab, NavigateAction::MovePaneToPrevTab),
         (&kb.edit_scrollback, NavigateAction::EditScrollback),
@@ -2032,9 +2051,9 @@ pub(super) fn execute_navigate_action_in_context(
                 leave_navigate_mode(state);
             }
         },
-        NavigateAction::MovePaneToNextTab | NavigateAction::MovePaneToPrevTab => {
-            leave_navigate_mode(state)
-        }
+        NavigateAction::MovePaneToNextTab
+        | NavigateAction::MovePaneToPrevTab
+        | NavigateAction::ClearScrollback => leave_navigate_mode(state),
         NavigateAction::FocusPaneLeft => state.navigate_pane(NavDirection::Left),
         NavigateAction::FocusPaneDown => state.navigate_pane(NavDirection::Down),
         NavigateAction::FocusPaneUp => state.navigate_pane(NavDirection::Up),
@@ -2344,6 +2363,39 @@ mod tests {
                 Some(action),
             );
         }
+    }
+
+    #[test]
+    fn clear_scrollback_is_unbound_by_default_and_maps_when_bound() {
+        let default_config = Config::default();
+        assert!(
+            default_config
+                .keybinds()
+                .clear_scrollback
+                .bindings
+                .is_empty(),
+            "clear_scrollback ships unbound by default"
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+clear_scrollback = "prefix+u"
+"#,
+        )
+        .unwrap();
+        assert!(config.collect_diagnostics().is_empty());
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds = config.keybinds();
+
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty()),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::ClearScrollback),
+        );
     }
 
     #[test]

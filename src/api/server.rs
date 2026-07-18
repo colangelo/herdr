@@ -421,6 +421,7 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::PaneReportMetadata(_) => "pane.report_metadata",
         Method::PaneClearAgentAuthority(_) => "pane.clear_agent_authority",
         Method::PaneReleaseAgent(_) => "pane.release_agent",
+        Method::PaneClearScrollback(_) => "pane.clear",
         Method::PaneClose(_) => "pane.close",
         Method::PopupClose(_) => "popup.close",
         Method::EventsSubscribe(_) => "events.subscribe",

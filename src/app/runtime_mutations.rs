@@ -142,6 +142,14 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::PaneMove(params))
     }
 
+    pub(crate) fn runtime_pane_clear_scrollback(
+        &mut self,
+        id: &'static str,
+        target: PaneTarget,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::PaneClearScrollback(target))
+    }
+
     pub(crate) fn runtime_pane_split(
         &mut self,
         id: &'static str,

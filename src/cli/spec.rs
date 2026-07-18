@@ -561,6 +561,12 @@ fn pane_command() -> Command {
                 .arg(flag("focus"))
                 .arg(flag("no-focus")),
         )
+        .subcommand(
+            Command::new("clear")
+                .about("Clear a pane's saved scrollback")
+                .arg(Arg::new("pane_id").value_name("PANE_ID"))
+                .args(current_pane_args()),
+        )
         .subcommand(id_command("close", "pane_id", "Close a pane"))
         .subcommand(
             Command::new("send-text")

@@ -1512,6 +1512,21 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
+    pub(super) fn handle_pane_clear_scrollback(
+        &mut self,
+        id: String,
+        target: PaneTarget,
+    ) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
+            return pane_not_found(id, &target.pane_id);
+        };
+        let Some((runtime, _workspace_id)) = self.lookup_runtime(ws_idx, pane_id) else {
+            return pane_not_found(id, &target.pane_id);
+        };
+        runtime.clear_scrollback();
+        encode_success(id, ResponseResult::Ok {})
+    }
+
     pub(super) fn handle_pane_close(&mut self, id: String, target: PaneTarget) -> String {
         match self.close_pane(id.clone(), &target) {
             Ok(()) => encode_success(id, ResponseResult::Ok {}),
@@ -1986,6 +2001,62 @@ mod tests {
         assert_eq!(success.result, ResponseResult::Ok {});
         assert_eq!(rx.try_recv().unwrap(), bytes::Bytes::from_static(b"\x1b[Z"));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn api_pane_clear_purges_scrollback_and_preserves_screen() {
+        let (mut app, public_pane_id, pane_id) = app_with_scrollback_runtime();
+        let (visible_before, offset_before) = {
+            let runtime = app
+                .state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane_id)
+                .expect("runtime");
+            (
+                runtime.visible_text(),
+                runtime
+                    .scroll_metrics()
+                    .expect("metrics")
+                    .max_offset_from_bottom,
+            )
+        };
+        assert!(offset_before > 0, "expected saved scrollback before clear");
+
+        let response = app.handle_pane_clear_scrollback(
+            "req".into(),
+            PaneTarget {
+                pane_id: public_pane_id,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        let runtime = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane_id)
+            .expect("runtime");
+        assert_eq!(
+            runtime
+                .scroll_metrics()
+                .expect("metrics")
+                .max_offset_from_bottom,
+            0,
+            "scrollback should be purged"
+        );
+        assert_eq!(runtime.visible_text(), visible_before);
+    }
+
+    #[tokio::test]
+    async fn api_pane_clear_unknown_pane_returns_not_found() {
+        let (mut app, _public_pane_id, _pane_id) = app_with_scrollback_runtime();
+
+        let response = app.handle_pane_clear_scrollback(
+            "req".into(),
+            PaneTarget {
+                pane_id: "w1:p99".into(),
+            },
+        );
+
+        assert_eq!(metadata_error_code(&response), "pane_not_found");
     }
 
     #[tokio::test]
