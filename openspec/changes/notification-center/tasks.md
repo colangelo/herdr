@@ -1,0 +1,37 @@
+## 1. Server-owned notification log
+
+- [ ] 1.1 Add the notification log to server state: ring buffer (cap 100) of `{id, kind, title, context, target, timestamp}` plus `last_seen_id`, with unread-count math
+- [ ] 1.2 Add `post_notification()` and replace the direct `self.toast = Some(…)` sites in `src/app/actions.rs` / `src/app/mod.rs` so every toast also appends to the log (toast behavior unchanged)
+
+## 2. API, event, CLI
+
+- [ ] 2.1 Add `notification.list` and `notification.mark_seen` socket methods (schema, server dispatch, app handlers)
+- [ ] 2.2 Emit `EventKind::NotificationPosted` on append through the existing subscription stream
+- [ ] 2.3 Add `herdr notification list [--json]` CLI verb
+- [ ] 2.4 Bump `PROTOCOL_VERSION` 18 → 19 (source equals latest released 18) and update protocol expectations/fixtures in tests
+
+## 3. Top-right indicator
+
+- [ ] 3.1 Render the indicator (icon + unread pill when unread > 0) in the tab bar trailing region with a click hit-area that toggles the panel, coexisting with the new-tab/scroll controls
+
+## 4. Panel + keyboard
+
+- [ ] 4.1 Add `Mode::NotificationCenter` (in the `wants_ascii_input` allowlist; not in `honors_key_repeat`) and the anchored dropdown panel rendering (newest-first rows: kind icon, title, context, relative time) reusing existing overlay/list styling
+- [ ] 4.2 Add the `open_notification_center` `KeysConfig` action (default `prefix+ctrl+n`, collision-verified) with config template entry and a `prefix+?` help entry next to `open_notification_target`
+- [ ] 4.3 Panel input: open marks all seen; Up/Down + `j`/`k` selection; Enter jumps to the target pane via the existing toast-click focus path and closes; Esc/`q` close; row click jumps; targetless rows not actionable
+
+## 5. Tests
+
+- [ ] 5.1 Log unit tests: append/cap eviction, monotonic ids, marker/unread math, mark-seen idempotence
+- [ ] 5.2 API tests: `notification.list` newest-first + unread count, `mark_seen`, `NotificationPosted` event emission, protocol fixture updates
+- [ ] 5.3 State/TUI tests via `AppState::test_new()`: toast sites append to the log; opening the panel marks seen; selection movement; Enter focuses the target workspace/tab/pane; targetless Enter is a no-op
+
+## 6. Docs
+
+- [ ] 6.1 Document the center, indicator, keybinding, and CLI/socket surface in `docs/next` (keyboard.mdx, cli-reference.mdx, socket-api.mdx, config reference)
+- [ ] 6.2 Add a `docs/next/CHANGELOG.md` Unreleased entry
+
+## 7. Verification
+
+- [ ] 7.1 `just check` green
+- [ ] 7.2 Dogfood on the beta build: watch notifications accrue, open via indicator click and via the keybinding, navigate and jump with Enter, confirm the unread pill clears, and confirm `herdr notification list --json` serves the same feed
