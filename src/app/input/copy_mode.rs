@@ -161,6 +161,12 @@ impl AppState {
             (KeyCode::Char('d'), mods) if mods.contains(KeyModifiers::CONTROL) => {
                 self.scroll_copy_mode_page(terminal_runtimes, 1, true)
             }
+            (KeyCode::Char('k'), mods) if mods.contains(KeyModifiers::CONTROL) => {
+                self.scroll_copy_mode_viewport_line(terminal_runtimes, -1)
+            }
+            (KeyCode::Char('j'), mods) if mods.contains(KeyModifiers::CONTROL) => {
+                self.scroll_copy_mode_viewport_line(terminal_runtimes, 1)
+            }
             _ => {}
         }
 
@@ -551,6 +557,54 @@ impl AppState {
         }
         if let Some(copy_mode) = self.copy_mode.as_mut() {
             copy_mode.cursor_row = cursor_row;
+        }
+        self.sync_copy_mode_selection(terminal_runtimes);
+    }
+
+    /// Scroll the copy-mode viewport by a single line without moving the cursor relative to the
+    /// buffer text (vim `Ctrl-Y` / `Ctrl-E`). `direction < 0` reveals older lines (window up,
+    /// `Ctrl-K`); `direction > 0` scrolls back toward the live bottom (`Ctrl-J`). The cursor stays
+    /// on the same absolute row while it remains on screen; when a scroll would push it off the
+    /// viewport, it sticks to the edge. No-op at the top of history / the live bottom.
+    fn scroll_copy_mode_viewport_line(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        direction: i16,
+    ) {
+        let Some(copy_mode) = self.copy_mode.as_ref() else {
+            return;
+        };
+        let pane_id = copy_mode.pane_id;
+        let cursor_row = copy_mode.cursor_row;
+        let Some(info) = self.pane_info_by_id(pane_id).cloned() else {
+            self.exit_copy_mode(terminal_runtimes, false);
+            return;
+        };
+        let Some(metrics) = self.pane_scroll_metrics(terminal_runtimes, pane_id) else {
+            return;
+        };
+        let bottom = info.inner_rect.height.saturating_sub(1);
+        let (new_offset, new_cursor_row) = if direction < 0 {
+            // Reveal an older line at the top: the viewport top moves up one row, so a fixed
+            // buffer row appears one row lower in the viewport (cursor_row + 1).
+            if metrics.offset_from_bottom >= metrics.max_offset_from_bottom {
+                return;
+            }
+            (
+                metrics.offset_from_bottom.saturating_add(1),
+                cursor_row.saturating_add(1).min(bottom),
+            )
+        } else {
+            // Scroll toward the bottom: the viewport top moves down one row, so a fixed buffer row
+            // appears one row higher in the viewport (cursor_row - 1).
+            if metrics.offset_from_bottom == 0 {
+                return;
+            }
+            (metrics.offset_from_bottom - 1, cursor_row.saturating_sub(1))
+        };
+        self.set_pane_scroll_offset(terminal_runtimes, pane_id, new_offset);
+        if let Some(copy_mode) = self.copy_mode.as_mut() {
+            copy_mode.cursor_row = new_cursor_row;
         }
         self.sync_copy_mode_selection(terminal_runtimes);
     }
@@ -1358,6 +1412,87 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::Copy);
         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+    }
+
+    #[tokio::test]
+    async fn copy_mode_ctrl_k_scrolls_viewport_and_anchors_cursor() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        // Place the cursor at the top of the viewport so the scroll does not clamp it.
+        app.state.copy_mode.as_mut().expect("copy mode").cursor_row = 0;
+        let top_before = copy_mode_viewport_top_row(&app, pane_id);
+        let offset_before = copy_mode_offset_from_bottom(&app, pane_id);
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        let offset_after = copy_mode_offset_from_bottom(&app, pane_id);
+        let top_after = copy_mode_viewport_top_row(&app, pane_id);
+        let cursor_after = app.state.copy_mode.as_ref().expect("copy mode").cursor_row;
+        // One older line revealed at the top of the viewport.
+        assert_eq!(offset_after, offset_before + 1);
+        assert_eq!(top_after, top_before - 1);
+        // Cursor shifted down one row to stay on the same buffer text (anchored).
+        assert_eq!(cursor_after, 1);
+        assert_eq!(top_after + usize::from(cursor_after), top_before);
+    }
+
+    #[tokio::test]
+    async fn copy_mode_ctrl_j_scrolls_back_toward_bottom() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty()));
+        let offset_before = copy_mode_offset_from_bottom(&app, pane_id);
+        assert!(offset_before > 0);
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert_eq!(
+            copy_mode_offset_from_bottom(&app, pane_id),
+            offset_before - 1
+        );
+    }
+
+    #[tokio::test]
+    async fn copy_mode_ctrl_j_at_bottom_is_noop() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+        let cursor_before = app.state.copy_mode.as_ref().expect("copy mode").cursor_row;
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 0);
+        assert_eq!(
+            app.state.copy_mode.as_ref().expect("copy mode").cursor_row,
+            cursor_before
+        );
+    }
+
+    #[tokio::test]
+    async fn copy_mode_ctrl_k_at_history_top_is_noop() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        // `g` jumps to the oldest available scrollback.
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        let metrics = copy_mode_scroll_metrics(&app, pane_id);
+        assert_eq!(metrics.offset_from_bottom, metrics.max_offset_from_bottom);
+        let cursor_before = app.state.copy_mode.as_ref().expect("copy mode").cursor_row;
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        let metrics_after = copy_mode_scroll_metrics(&app, pane_id);
+        assert_eq!(
+            metrics_after.offset_from_bottom,
+            metrics_after.max_offset_from_bottom
+        );
+        assert_eq!(
+            app.state.copy_mode.as_ref().expect("copy mode").cursor_row,
+            cursor_before
+        );
     }
 
     #[tokio::test]
