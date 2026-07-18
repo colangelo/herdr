@@ -332,6 +332,12 @@
           "description": "Focus the currently visible notification target."
         },
         {
+          "key": "keys.open_notification_center",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+n\"",
+          "description": "Open the notification center panel."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",
@@ -954,7 +960,7 @@
           "key": "ui.sidebar_active_border",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" — or a bool for backward compatibility (true = \"both\").",
+          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" \u2014 or a bool for backward compatibility (true = \"both\").",
           "values": [
             "off",
             "above",

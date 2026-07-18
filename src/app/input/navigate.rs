@@ -473,6 +473,9 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::OpenNotificationCenter => {
+                self.state.open_notification_center();
+            }
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -773,6 +776,37 @@ impl App {
         };
         self.focus_pane_internal_via_api(ws_idx, target.pane_id);
         self.state.toast = None;
+        self.state.mode = Mode::Terminal;
+    }
+
+    pub(crate) fn activate_notification_row(&mut self, index: usize) {
+        if let Some(center) = self.state.notification_center.as_mut() {
+            center.selected = index;
+        }
+        self.activate_notification_center_selection();
+    }
+
+    /// Jump to the selected notification's target pane via the same focus
+    /// path as the toast click, then close the panel. Entries without a
+    /// resolvable target are not actionable: the panel stays open.
+    pub(crate) fn activate_notification_center_selection(&mut self) {
+        let Some(target) = self
+            .state
+            .notification_center_selected_entry()
+            .and_then(|entry| entry.target.clone())
+        else {
+            return;
+        };
+        let Some(ws_idx) = self
+            .state
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == target.workspace_id)
+        else {
+            return;
+        };
+        self.state.close_notification_center();
+        self.focus_pane_internal_via_api(ws_idx, target.pane_id);
         self.state.mode = Mode::Terminal;
     }
 
@@ -1752,6 +1786,7 @@ pub(crate) enum NavigateAction {
     Settings,
     ReloadConfig,
     OpenNotificationTarget,
+    OpenNotificationCenter,
     Detach,
     OpenNavigator,
 }
@@ -1915,6 +1950,10 @@ fn non_indexed_action_for_key(
         (
             &kb.open_notification_target,
             NavigateAction::OpenNotificationTarget,
+        ),
+        (
+            &kb.open_notification_center,
+            NavigateAction::OpenNotificationCenter,
         ),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
@@ -2263,6 +2302,7 @@ pub(super) fn execute_navigate_action_in_context(
                 leave_navigate_mode(state);
             }
         }
+        NavigateAction::OpenNotificationCenter => state.open_notification_center(),
         NavigateAction::Detach => {
             super::modal::request_detach(state);
             leave_navigate_mode(state);

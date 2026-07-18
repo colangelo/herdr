@@ -723,6 +723,22 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "notification": {
+                  "$ref": "#/schemas/event/$defs/NotificationInfo"
+                },
+                "type": {
+                  "const": "notification_posted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "notification"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -753,7 +769,60 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "notification_posted"
+          ],
+          "type": "string"
+        },
+        "NotificationInfo": {
+          "description": "One entry of the server-owned notification log as exposed over the API.",
+          "properties": {
+            "context": {
+              "type": "string"
+            },
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/schemas/event/$defs/NotificationKind"
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "posted_at_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "context",
+            "posted_at_unix"
+          ],
+          "type": "object"
+        },
+        "NotificationKind": {
+          "enum": [
+            "needs_attention",
+            "finished",
+            "update_installed"
           ],
           "type": "string"
         },
@@ -4107,6 +4176,18 @@
                 "type"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "notification.posted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -4593,6 +4674,38 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/NotificationShowParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "notification.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "notification.mark_seen",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
             }
           },
           "required": [
@@ -7107,6 +7220,22 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "notification": {
+                  "$ref": "#/schemas/success_response/$defs/NotificationInfo"
+                },
+                "type": {
+                  "const": "notification_posted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "notification"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7152,7 +7281,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "notification_posted"
           ],
           "type": "string"
         },
@@ -7408,6 +7538,58 @@
               "type": "object"
             }
           ]
+        },
+        "NotificationInfo": {
+          "description": "One entry of the server-owned notification log as exposed over the API.",
+          "properties": {
+            "context": {
+              "type": "string"
+            },
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/schemas/success_response/$defs/NotificationKind"
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "posted_at_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "title": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "context",
+            "posted_at_unix"
+          ],
+          "type": "object"
+        },
+        "NotificationKind": {
+          "enum": [
+            "needs_attention",
+            "finished",
+            "update_installed"
+          ],
+          "type": "string"
         },
         "NotificationShowReason": {
           "enum": [
@@ -9580,6 +9762,59 @@
                 "type",
                 "shown",
                 "reason"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "last_seen_id": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "notifications": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/NotificationInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "notification_list",
+                  "type": "string"
+                },
+                "unread_count": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "notifications",
+                "unread_count",
+                "last_seen_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "changed": {
+                  "type": "boolean"
+                },
+                "last_seen_id": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "notification_mark_seen",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "last_seen_id",
+                "changed"
               ],
               "type": "object"
             },
