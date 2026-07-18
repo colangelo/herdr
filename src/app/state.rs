@@ -832,6 +832,18 @@ impl Mode {
                 | Mode::KeybindHelp
         )
     }
+
+    /// Whether held escape-coded keys tagged `KeyEventKind::Repeat` (under the Kitty keyboard
+    /// protocol) should be re-dispatched in this mode. `Terminal` forwards the repeat to the child
+    /// pane; `Copy` drives repeatable viewport/cursor motions (page scroll, `Ctrl-K`/`Ctrl-J`).
+    ///
+    /// This is an explicit **allowlist**: every other mode ignores repeats so that a held modal
+    /// confirm/close key (e.g. `Enter` on a dialog) cannot fire multiple times or leak repeats into
+    /// a pane. Plain character keys are unaffected — they arrive as repeated `Press` events, never
+    /// as `Repeat`, so ordinary held keys still repeat regardless of this predicate.
+    pub(crate) fn honors_key_repeat(self) -> bool {
+        matches!(self, Mode::Terminal | Mode::Copy)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2339,6 +2351,38 @@ impl AppState {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    #[test]
+    fn honors_key_repeat_allowlists_terminal_and_copy() {
+        assert!(Mode::Terminal.honors_key_repeat());
+        assert!(Mode::Copy.honors_key_repeat());
+        for mode in [
+            Mode::Onboarding,
+            Mode::ReleaseNotes,
+            Mode::ProductAnnouncement,
+            Mode::Navigate,
+            Mode::Prefix,
+            Mode::RenameWorkspace,
+            Mode::RenameTab,
+            Mode::RenamePane,
+            Mode::NewLinkedWorktree,
+            Mode::OpenExistingWorktree,
+            Mode::PaneMoveTargetPicker,
+            Mode::ConfirmRemoveWorktree,
+            Mode::Resize,
+            Mode::ConfirmClose,
+            Mode::ContextMenu,
+            Mode::Settings,
+            Mode::GlobalMenu,
+            Mode::KeybindHelp,
+            Mode::Navigator,
+        ] {
+            assert!(
+                !mode.honors_key_repeat(),
+                "{mode:?} must not honor key repeat"
+            );
+        }
+    }
 
     #[test]
     fn agent_terminal_keeps_final_child_cursor_exposed() {

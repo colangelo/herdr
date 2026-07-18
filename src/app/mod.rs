@@ -4026,6 +4026,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn copy_mode_honors_repeat_without_suppressing() {
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Copy;
+
+        // A press in copy mode must not add the key to the repeat-suppression set...
+        let press_handled = app
+            .handle_raw_input_event(raw_key(
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Press,
+            ))
+            .await;
+        assert!(press_handled);
+        assert!(app.suppressed_repeat_keys.is_empty());
+
+        // ...so the following held repeat is dispatched instead of dropped.
+        let repeat_handled = app
+            .handle_raw_input_event(raw_key(
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Repeat,
+            ))
+            .await;
+        assert!(repeat_handled);
+    }
+
+    #[tokio::test]
     async fn modal_press_does_not_leak_repeat_into_terminal_mode() {
         let mut app = test_app();
         app.state.workspaces = vec![Workspace::test_new("test")];
