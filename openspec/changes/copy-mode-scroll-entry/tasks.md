@@ -28,4 +28,4 @@
 ## 6. Verification
 
 - [x] 6.1 `just check` green
-- [ ] 6.2 Dogfood on the beta build: `prefix+PageUp` / `prefix+ctrl+u` / `prefix+ctrl+k` enter copy mode pre-scrolled; repeating scrolls further; `q` restores the live view
+- [x] 6.2 Dogfood on the beta build: shipped `0.7.4-ac-beta.20260718211457` via the beta loop and live-handed-off the running server onto it (panes preserved). Verified live in the running session (2026-07-18): `prefix+PageUp` / `prefix+ctrl+u` / `prefix+ctrl+k` enter copy mode pre-scrolled, repeating scrolls further, `q` restores the live view, and `prefix+prefix` send-prefix still passes through
