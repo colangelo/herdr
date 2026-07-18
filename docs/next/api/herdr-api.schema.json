@@ -4673,6 +4673,22 @@
         {
           "properties": {
             "method": {
+              "const": "notification.clear",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "client.window_title.set",
               "type": "string"
             },
@@ -9685,6 +9701,24 @@
                 "type",
                 "last_seen_id",
                 "changed"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "cleared": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "notification_cleared",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "cleared"
               ],
               "type": "object"
             },

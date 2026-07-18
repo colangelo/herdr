@@ -10,6 +10,7 @@ pub(super) fn run_notification_command(args: &[String]) -> std::io::Result<i32> 
     match subcommand {
         "show" => notification_show(&args[1..]),
         "list" => notification_list(&args[1..]),
+        "clear" => notification_clear(&args[1..]),
         "help" | "--help" | "-h" => {
             print_notification_help();
             Ok(0)
@@ -73,6 +74,32 @@ fn notification_list(args: &[String]) -> std::io::Result<i32> {
     if unread > 0 {
         println!("{unread} unread");
     }
+    Ok(0)
+}
+
+fn notification_clear(args: &[String]) -> std::io::Result<i32> {
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            _ => {
+                eprintln!("usage: herdr notification clear [--json]");
+                return Ok(2);
+            }
+        }
+    }
+
+    let response = super::send_request(&Request {
+        id: "cli:notification:clear".into(),
+        method: Method::NotificationClear(crate::api::schema::EmptyParams::default()),
+    })?;
+    if json || response.get("error").is_some() {
+        return super::print_response(&response);
+    }
+
+    let cleared = response["result"]["cleared"].as_u64().unwrap_or(0);
+    let suffix = if cleared == 1 { "" } else { "s" };
+    println!("cleared {cleared} notification{suffix}");
     Ok(0)
 }
 
@@ -194,6 +221,7 @@ fn print_notification_help() {
         "  herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
     );
     eprintln!("  herdr notification list [--json]");
+    eprintln!("  herdr notification clear [--json]");
 }
 
 #[cfg(test)]

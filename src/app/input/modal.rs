@@ -969,6 +969,7 @@ pub(crate) fn handle_notification_center_key(state: &mut AppState, key: KeyEvent
         KeyCode::Up | KeyCode::Char('k') => state.notification_center_move_selection(-1),
         KeyCode::Down | KeyCode::Char('j') => state.notification_center_move_selection(1),
         KeyCode::Enter => activate_notification_center_selection_local(state),
+        KeyCode::Char('c') => state.clear_notifications(),
         KeyCode::Esc | KeyCode::Char('q') => {
             state.close_notification_center();
             leave_modal(state);
@@ -1036,6 +1037,7 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.state.notification_center_move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.state.notification_center_move_selection(1),
             KeyCode::Enter => self.activate_notification_center_selection(),
+            KeyCode::Char('c') => self.state.clear_notifications(),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.state.close_notification_center();
                 leave_modal(&mut self.state);
@@ -1493,6 +1495,30 @@ mod tests {
             selected(&state),
             Some(0),
             "selection clamps at newest entry"
+        );
+    }
+
+    #[test]
+    fn notification_center_c_key_clears_log_and_keeps_panel_open() {
+        let mut state = state_with_workspaces(&["one"]);
+        for title in ["a", "b", "c"] {
+            state.post_notification(notification_toast(title, None));
+        }
+        state.open_notification_center();
+        state.notification_center_move_selection(2);
+
+        handle_notification_center_key(&mut state, key(KeyCode::Char('c')));
+
+        assert!(state.notification_log.is_empty(), "log cleared");
+        assert_eq!(
+            state.mode,
+            Mode::NotificationCenter,
+            "panel stays open after clear"
+        );
+        assert_eq!(
+            state.notification_center.as_ref().map(|c| c.selected),
+            Some(0),
+            "selection resets after clear"
         );
     }
 
