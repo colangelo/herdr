@@ -538,6 +538,13 @@ pub struct KeysConfig {
     pub clear_scrollback: BindingConfig,
     /// Enter keyboard copy mode for the focused pane. Default: "prefix+[".
     pub copy_mode: BindingConfig,
+    /// Enter copy mode and scroll up one page in the same gesture
+    /// (tmux `copy-mode -u`). Default: "prefix+pageup".
+    pub copy_mode_page_up: BindingConfig,
+    /// Enter copy mode and scroll up half a page. Default: "prefix+ctrl+u".
+    pub copy_mode_half_page_up: BindingConfig,
+    /// Enter copy mode and scroll the viewport up one line. Default: "prefix+ctrl+k".
+    pub copy_mode_line_up: BindingConfig,
     /// Focus the pane to the left. Default: "prefix+h".
     pub focus_pane_left: BindingConfig,
     /// Focus the pane below. Default: "prefix+j".
@@ -684,6 +691,12 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     copy_mode: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    copy_mode_page_up: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    copy_mode_half_page_up: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    copy_mode_line_up: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     focus_pane_left: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     focus_pane_down: Option<BindingConfig>,
@@ -791,6 +804,9 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(edit_scrollback);
         apply_field!(clear_scrollback);
         apply_field!(copy_mode);
+        apply_field!(copy_mode_page_up);
+        apply_field!(copy_mode_half_page_up);
+        apply_field!(copy_mode_line_up);
         apply_field!(focus_pane_left);
         apply_field!(focus_pane_down);
         apply_field!(focus_pane_up);
@@ -900,6 +916,9 @@ impl KeysConfig {
         copy_effective_action_field!(edit_scrollback, keybinds.edit_scrollback);
         copy_effective_action_field!(clear_scrollback, keybinds.clear_scrollback);
         copy_effective_action_field!(copy_mode, keybinds.copy_mode);
+        copy_effective_action_field!(copy_mode_page_up, keybinds.copy_mode_page_up);
+        copy_effective_action_field!(copy_mode_half_page_up, keybinds.copy_mode_half_page_up);
+        copy_effective_action_field!(copy_mode_line_up, keybinds.copy_mode_line_up);
         copy_effective_action_field!(focus_pane_left, keybinds.focus_pane_left);
         copy_effective_action_field!(focus_pane_down, keybinds.focus_pane_down);
         copy_effective_action_field!(focus_pane_up, keybinds.focus_pane_up);
@@ -1263,6 +1282,9 @@ impl Default for KeysConfig {
             edit_scrollback: BindingConfig::one("prefix+e"),
             clear_scrollback: BindingConfig::empty(),
             copy_mode: BindingConfig::one("prefix+["),
+            copy_mode_page_up: BindingConfig::one("prefix+pageup"),
+            copy_mode_half_page_up: BindingConfig::one("prefix+ctrl+u"),
+            copy_mode_line_up: BindingConfig::one("prefix+ctrl+k"),
             focus_pane_left: BindingConfig::one("prefix+h"),
             focus_pane_down: BindingConfig::one("prefix+j"),
             focus_pane_up: BindingConfig::one("prefix+k"),
