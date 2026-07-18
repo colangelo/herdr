@@ -426,6 +426,7 @@ impl App {
                     MouseAction::ActivateNotificationRow { index } => {
                         self.activate_notification_row(index)
                     }
+                    MouseAction::ClearNotifications => self.state.clear_notifications(),
                     MouseAction::MoveWorkspace {
                         source_ws_idx,
                         insert_idx,

@@ -63,6 +63,8 @@ pub enum Method {
     NotificationList(EmptyParams),
     #[serde(rename = "notification.mark_seen")]
     NotificationMarkSeen(EmptyParams),
+    #[serde(rename = "notification.clear")]
+    NotificationClear(EmptyParams),
     #[serde(rename = "client.window_title.set")]
     ClientWindowTitleSet(ClientWindowTitleSetParams),
     #[serde(rename = "client.window_title.clear")]

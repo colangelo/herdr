@@ -2827,6 +2827,31 @@ mod tests {
     }
 
     #[test]
+    fn notification_clear_empties_log_via_api() {
+        let mut app = test_app();
+        app.state
+            .post_notification(test_notification_toast("one", None));
+        app.state
+            .post_notification(test_notification_toast("two", None));
+
+        let response =
+            app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                id: "clear".into(),
+                method: crate::api::schema::Method::NotificationClear(
+                    crate::api::schema::EmptyParams::default(),
+                ),
+            });
+
+        let parsed: crate::api::schema::SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            parsed.result,
+            crate::api::schema::ResponseResult::NotificationCleared { cleared: 2 }
+        );
+        assert!(app.state.notification_log.is_empty());
+        assert_eq!(app.state.notification_log.unread_count(), 0);
+    }
+
+    #[test]
     fn notification_list_exposes_public_target_ids() {
         let mut app = test_app();
         let ws = crate::workspace::Workspace::test_new("one");

@@ -31,7 +31,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
         return;
     }
 
-    let Some((_, start)) = app.notification_center_list_window() else {
+    let Some((list, start)) = app.notification_center_list_window() else {
         return;
     };
     let selected = app
@@ -48,16 +48,16 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
         .notification_log
         .entries_newest_first()
         .skip(start)
-        .take(inner.height as usize)
+        .take(list.height as usize)
         .enumerate()
     {
         let idx = start + row;
-        let row_rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+        let row_rect = Rect::new(list.x, list.y + row as u16, list.width, 1);
         let is_selected = idx == selected;
 
         let age = relative_time_label(now_unix, entry.posted_at_unix);
         let age_width = display_width(&age);
-        let text_budget = (inner.width as usize).saturating_sub(3 + age_width + 1);
+        let text_budget = (list.width as usize).saturating_sub(3 + age_width + 1);
         let title = truncate_end(&entry.title, text_budget);
         let context_budget = text_budget.saturating_sub(display_width(&title));
         let context = if entry.context.is_empty() || context_budget < 6 {
@@ -65,7 +65,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
         } else {
             truncate_end(&format!(" · {}", entry.context), context_budget)
         };
-        let pad_width = (inner.width as usize)
+        let pad_width = (list.width as usize)
             .saturating_sub(3 + display_width(&title) + display_width(&context) + age_width + 1);
 
         let (dot_style, title_style, dim_style, row_style) = if is_selected {
@@ -100,5 +100,32 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
             Span::styled(" ", row_style),
         ]);
         frame.render_widget(Paragraph::new(line).style(row_style), row_rect);
+    }
+
+    if let Some(button_rect) = app.notification_center_clear_button_rect() {
+        let hovered = app
+            .notification_center
+            .as_ref()
+            .is_some_and(|center| center.clear_hovered);
+        let style = if hovered {
+            Style::default()
+                .fg(panel_contrast_fg(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.overlay1)
+        };
+        let label = "Clear all (c)";
+        let inner_width = button_rect.width as usize;
+        let label = truncate_end(label, inner_width);
+        let label_width = display_width(&label);
+        let left = inner_width.saturating_sub(label_width) / 2;
+        let right = inner_width.saturating_sub(label_width + left);
+        // Full-width centered text so the hover background fills the row.
+        let text = format!("{}{}{}", " ".repeat(left), label, " ".repeat(right));
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, style))),
+            button_rect,
+        );
     }
 }

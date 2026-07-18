@@ -44,6 +44,7 @@ pub(super) enum MouseAction {
     ActivateNotificationRow {
         index: usize,
     },
+    ClearNotifications,
     MoveWorkspace {
         source_ws_idx: usize,
         insert_idx: usize,
@@ -198,10 +199,16 @@ impl AppState {
         if self.mode == Mode::NotificationCenter {
             match mouse.kind {
                 MouseEventKind::Moved => {
+                    let over_clear = self
+                        .notification_center_clear_button_rect()
+                        .is_some_and(|rect| rect_contains(rect, mouse.column, mouse.row));
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         if let Some(center) = self.notification_center.as_mut() {
                             center.selected = idx;
                         }
+                    }
+                    if let Some(center) = self.notification_center.as_mut() {
+                        center.clear_hovered = over_clear;
                     }
                 }
                 MouseEventKind::ScrollUp => self.notification_center_move_selection(-1),
@@ -209,6 +216,12 @@ impl AppState {
                 MouseEventKind::Down(MouseButton::Left) => {
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         return Some(MouseAction::ActivateNotificationRow { index: idx });
+                    }
+                    if self
+                        .notification_center_clear_button_rect()
+                        .is_some_and(|rect| rect_contains(rect, mouse.column, mouse.row))
+                    {
+                        return Some(MouseAction::ClearNotifications);
                     }
                     self.close_notification_center();
                     leave_modal(self);
@@ -1384,42 +1397,81 @@ impl AppState {
             .clamp(30, 60)
             .min(screen.width.max(1));
         let rows = (self.notification_log.len().max(1) as u16).min(NOTIFICATION_PANEL_MAX_ROWS);
-        let panel_h = (rows + 2).min(screen.height.max(1));
+        // Reserve one inner row for the footer "Clear all" button when there
+        // are entries to clear.
+        let footer = if self.notification_log.is_empty() {
+            0
+        } else {
+            1
+        };
+        let panel_h = (rows + 2 + footer).min(screen.height.max(1));
         let right = anchor.x + anchor.width;
         let x = right.saturating_sub(panel_w).max(screen.x);
         let y = (anchor.y + anchor.height).min(screen.y + screen.height.saturating_sub(panel_h));
         Some(Rect::new(x, y, panel_w, panel_h))
     }
 
-    /// The panel's inner list rect and the first visible entry index.
-    /// Shared by render and mouse hit-testing so they always agree.
-    pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
+    /// Full inner rect (panel minus borders), covering both the list and the
+    /// footer button row.
+    fn notification_center_inner(&self) -> Option<Rect> {
         let rect = self.notification_center_rect()?;
-        let inner = Rect::new(
+        Some(Rect::new(
             rect.x + 1,
             rect.y + 1,
             rect.width.saturating_sub(2),
             rect.height.saturating_sub(2),
-        );
-        let selected = self.notification_center.as_ref()?.selected;
-        let visible = inner.height as usize;
-        let start = selected.saturating_sub(visible.saturating_sub(1));
-        Some((inner, start))
+        ))
     }
 
-    fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
-        let (inner, start) = self.notification_center_list_window()?;
+    /// The footer "Clear all" button row, present only when there are entries
+    /// to clear and the inner area has room for both a list row and a footer.
+    pub(crate) fn notification_center_clear_button_rect(&self) -> Option<Rect> {
         if self.notification_log.is_empty() {
             return None;
         }
-        if col < inner.x
-            || col >= inner.x + inner.width
-            || row < inner.y
-            || row >= inner.y + inner.height
+        let inner = self.notification_center_inner()?;
+        if inner.height < 2 {
+            return None;
+        }
+        Some(Rect::new(
+            inner.x,
+            inner.y + inner.height - 1,
+            inner.width,
+            1,
+        ))
+    }
+
+    /// The panel's inner list rect (footer excluded) and the first visible
+    /// entry index. Shared by render and mouse hit-testing so they agree.
+    pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
+        let inner = self.notification_center_inner()?;
+        let footer = if self.notification_center_clear_button_rect().is_some() {
+            1
+        } else {
+            0
+        };
+        let list = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(footer),
+        );
+        let selected = self.notification_center.as_ref()?.selected;
+        let visible = list.height as usize;
+        let start = selected.saturating_sub(visible.saturating_sub(1));
+        Some((list, start))
+    }
+
+    fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
+        let (list, start) = self.notification_center_list_window()?;
+        if self.notification_log.is_empty() {
+            return None;
+        }
+        if col < list.x || col >= list.x + list.width || row < list.y || row >= list.y + list.height
         {
             return None;
         }
-        let idx = start + (row - inner.y) as usize;
+        let idx = start + (row - list.y) as usize;
         (idx < self.notification_log.len()).then_some(idx)
     }
 
