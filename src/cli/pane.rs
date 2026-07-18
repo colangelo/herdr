@@ -34,6 +34,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "split" => pane_split(&args[1..]),
         "swap" => pane_swap(&args[1..]),
         "move" => pane_move(&args[1..]),
+        "clear" => pane_clear(&args[1..]),
         "close" => pane_close(&args[1..]),
         "send-text" => pane_send_text(&args[1..]),
         "send-keys" => pane_send_keys(&args[1..]),
@@ -1068,6 +1069,62 @@ fn parse_pane_direction(value: &str) -> Result<PaneDirection, String> {
     }
 }
 
+fn pane_clear(args: &[String]) -> std::io::Result<i32> {
+    let pane_id = match parse_pane_clear_args(args) {
+        Ok(pane_id) => pane_id,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+
+    super::send_ok_request(Method::PaneClearScrollback(PaneTarget { pane_id }))
+}
+
+fn parse_pane_clear_args(args: &[String]) -> Result<String, String> {
+    let mut pane_id = None;
+    let mut index = 0;
+    if args
+        .first()
+        .is_some_and(|arg| !arg.as_str().starts_with("--"))
+    {
+        pane_id = args.first().map(|arg| super::normalize_pane_id(arg));
+        index = 1;
+    }
+    while index < args.len() {
+        match args[index].as_str() {
+            "--pane" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err("missing value for --pane".into());
+                };
+                pane_id = Some(super::normalize_pane_id(value));
+                index += 2;
+            }
+            "--current" => {
+                pane_id = None;
+                index += 1;
+            }
+            other => {
+                return Err(format!(
+                "unknown option: {other}\nusage: herdr pane clear [<pane_id>|--pane ID|--current]"
+            ))
+            }
+        }
+    }
+    match pane_id {
+        Some(pane_id) => Ok(pane_id),
+        // `--current` (or no target): resolve from the pane environment.
+        None => std::env::var("HERDR_PANE_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| super::normalize_pane_id(&value))
+            .ok_or_else(|| {
+                "no pane specified: pass <pane_id>, or use --current inside a herdr pane"
+                    .to_string()
+            }),
+    }
+}
+
 fn pane_close(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_pane_id) = args.first() else {
         eprintln!("usage: herdr pane close <pane_id>");
@@ -1751,6 +1808,7 @@ fn print_pane_help() {
     eprintln!("  herdr pane move <pane_id> --tab <tab_id> --split right|down [--target-pane ID] [--ratio FLOAT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");
+    eprintln!("  herdr pane clear [<pane_id>|--pane ID|--current]");
     eprintln!("  herdr pane close <pane_id>");
     eprintln!("  herdr pane send-text <pane_id> <text>");
     eprintln!("  herdr pane send-keys <pane_id> <key> [key ...]");

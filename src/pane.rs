@@ -2650,6 +2650,12 @@ impl PaneRuntime {
         self.terminal.scroll_reset();
     }
 
+    /// Purge the pane's saved scrollback (tmux `clear-history` semantics),
+    /// leaving the visible screen and running process untouched.
+    pub fn clear_scrollback(&self) {
+        self.terminal.clear_scrollback();
+    }
+
     /// Set scrollback offset measured from the live bottom of the terminal.
     pub fn set_scroll_offset_from_bottom(&self, lines: usize) {
         self.terminal.set_scroll_offset_from_bottom(lines);

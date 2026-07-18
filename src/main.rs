@@ -220,6 +220,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # move_pane_next_tab = "prefix+>"
 # move_pane_prev_tab = "prefix+<"
 # edit_scrollback = "prefix+e"
+# clear_scrollback = ""   # optional, unset by default; purge saved scrollback (tmux clear-history)
 # focus_pane_left = "prefix+h"
 # focus_pane_down = "prefix+j"
 # focus_pane_up = "prefix+k"

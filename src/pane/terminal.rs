@@ -233,6 +233,10 @@ impl PaneTerminal {
         self.ghostty.scroll_reset();
     }
 
+    pub fn clear_scrollback(&self) {
+        self.ghostty.clear_scrollback();
+    }
+
     pub fn set_scroll_offset_from_bottom(&self, lines: usize) {
         self.ghostty.set_scroll_offset_from_bottom(lines);
     }
@@ -1635,6 +1639,17 @@ impl GhosttyPaneTerminal {
     pub fn scroll_reset(&self) {
         if let Ok(mut core) = self.core.lock() {
             core.terminal.scroll_viewport_bottom();
+        }
+    }
+
+    /// Purge the saved scrollback by feeding `CSI 3J` straight to the
+    /// emulator. This intentionally bypasses `process_pty_bytes`, so the
+    /// droid-compat `CSI 3J` strip never applies to herdr-originated clears.
+    /// The visible screen and emulator modes are untouched; a no-op when
+    /// scrollback is already empty.
+    pub fn clear_scrollback(&self) {
+        if let Ok(mut core) = self.core.lock() {
+            core.terminal.write(b"\x1b[3J");
         }
     }
 
@@ -4605,6 +4620,111 @@ mod tests {
 
         assert_ne!(before, after);
         assert_eq!(after, b"\x1b[13;6u");
+    }
+
+    #[test]
+    fn clear_scrollback_purges_saved_lines_and_preserves_screen() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(80, 5, 1_000_000).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+        let lines = (0..20)
+            .map(|i| format!("line {i:02}\r\n"))
+            .collect::<String>();
+        pane.process_pty_bytes(pane_id, 0, lines.as_bytes(), &tx);
+
+        let before = pane.scroll_metrics().expect("metrics");
+        assert!(
+            before.max_offset_from_bottom > 0,
+            "expected saved scrollback"
+        );
+        let visible_before = pane.visible_text();
+
+        pane.clear_scrollback();
+
+        let after = pane.scroll_metrics().expect("metrics");
+        assert_eq!(
+            after.max_offset_from_bottom, 0,
+            "scrollback should be purged"
+        );
+        assert_eq!(
+            pane.visible_text(),
+            visible_before,
+            "visible screen must be preserved"
+        );
+    }
+
+    #[test]
+    fn clear_scrollback_is_a_safe_noop_on_empty_scrollback_and_alt_screen() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(80, 5, 1_000_000).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+
+        // Empty scrollback: nothing to purge, nothing disturbed.
+        pane.process_pty_bytes(pane_id, 0, b"prompt", &tx);
+        let visible_before = pane.visible_text();
+        pane.clear_scrollback();
+        assert_eq!(
+            pane.scroll_metrics()
+                .expect("metrics")
+                .max_offset_from_bottom,
+            0
+        );
+        assert_eq!(pane.visible_text(), visible_before);
+
+        // Alternate screen: the visible alt content must stay intact.
+        pane.process_pty_bytes(pane_id, 0, b"\x1b[?1049halt content", &tx);
+        let alt_visible = pane.visible_text();
+        pane.clear_scrollback();
+        assert_eq!(pane.visible_text(), alt_visible);
+    }
+
+    #[test]
+    fn herdr_clear_scrollback_bypasses_droid_program_byte_strip() {
+        let droid_job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![crate::platform::ForegroundProcess {
+                pid: 42,
+                name: "droid".to_string(),
+                argv0: Some("droid".to_string()),
+                argv: Some(vec!["droid".to_string()]),
+                cmdline: Some("droid".to_string()),
+            }],
+        };
+        // The program-byte path strips CSI 3J for a droid foreground job...
+        let filtered =
+            maybe_filter_primary_screen_scrollback_clear(b"\x1b[3J", false, Some(&droid_job));
+        assert!(
+            filtered.as_ref().is_empty(),
+            "droid strip should drop program-emitted 3J"
+        );
+
+        // ...while the herdr-originated clear feeds the emulator directly and
+        // still purges the scrollback.
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(80, 5, 1_000_000).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+        let lines = (0..20)
+            .map(|i| format!("line {i:02}\r\n"))
+            .collect::<String>();
+        pane.process_pty_bytes(pane_id, 0, lines.as_bytes(), &tx);
+        assert!(
+            pane.scroll_metrics()
+                .expect("metrics")
+                .max_offset_from_bottom
+                > 0
+        );
+
+        pane.clear_scrollback();
+
+        assert_eq!(
+            pane.scroll_metrics()
+                .expect("metrics")
+                .max_offset_from_bottom,
+            0
+        );
     }
 
     #[test]
