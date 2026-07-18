@@ -9,6 +9,7 @@
 - [x] 2.2 Emit `EventKind::NotificationPosted` on append through the existing subscription stream
 - [x] 2.3 Add `herdr notification list [--json]` CLI verb
 - [x] 2.4 Bump `PROTOCOL_VERSION` 18 → 19 (source equals latest released 18) and update protocol expectations/fixtures in tests
+- [x] 2.5 Add `notification.clear` socket method + `herdr notification clear [--json]` CLI verb (no protocol bump; source 19 already exceeds released 18)
 
 ## 3. Top-right indicator
 
@@ -19,12 +20,14 @@
 - [x] 4.1 Add `Mode::NotificationCenter` (in the `wants_ascii_input` allowlist; not in `honors_key_repeat`) and the anchored dropdown panel rendering (newest-first rows: kind icon, title, context, relative time) reusing existing overlay/list styling
 - [x] 4.2 Add the `open_notification_center` `KeysConfig` action (default `prefix+ctrl+n`, collision-verified) with config template entry and a `prefix+?` help entry next to `open_notification_target`
 - [x] 4.3 Panel input: open marks all seen; Up/Down + `j`/`k` selection; Enter jumps to the target pane via the existing toast-click focus path and closes; Esc/`q` close; row click jumps; targetless rows not actionable
+- [x] 4.4 Footer "Clear all" button (also bound to `c`, hover-highlighted) that empties the log via `AppState::clear_notifications` and keeps the panel open on the empty state
 
 ## 5. Tests
 
 - [x] 5.1 Log unit tests: append/cap eviction, monotonic ids, marker/unread math, mark-seen idempotence
 - [x] 5.2 API tests: `notification.list` newest-first + unread count, `mark_seen`, `NotificationPosted` event emission, protocol fixture updates
 - [x] 5.3 State/TUI tests via `AppState::test_new()`: toast sites append to the log; opening the panel marks seen; selection movement; Enter focuses the target workspace/tab/pane; targetless Enter is a no-op
+- [x] 5.4 Clear tests: `NotificationLog::clear` empties + keeps ids monotonic; `notification.clear` API; panel `c` key clears and keeps panel open; footer/list rect split geometry
 
 ## 6. Docs
 
