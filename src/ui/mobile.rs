@@ -327,7 +327,7 @@ fn render_header_status(
     };
 
     let (state, seen) = ws.aggregate_state(&app.terminals);
-    let (dot, dot_style) = state_icon(state, seen, app.status_indicators, p);
+    let (dot, dot_style) = state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
     let tab_label = mobile_tab_status(ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
     let tab_w = display_width_u16(&tab_label)
@@ -407,7 +407,12 @@ fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
     // "tap me" without the user reading the summary row.
     if global_agent_counts(app).blocked > 0 {
         let bx = area.x + area.width.saturating_sub(1);
-        let (symbol, style) = state_icon(AgentState::Blocked, true, app.status_indicators, p);
+        let (symbol, style) = state_icon(
+            AgentState::Blocked,
+            true,
+            app.status_indicators,
+            &app.state_icon_colors(),
+        );
         frame.buffer_mut()[(bx, area.y)]
             .set_symbol(symbol)
             .set_style(style.bg(p.surface0));
@@ -534,7 +539,12 @@ fn render_mobile_switcher_content(
                 entry.ws_idx == ws_idx && entry.tab_idx == tab_idx && entry.pane_id == pane_id
             });
             let bg = mobile_item_bg(false, active, p);
-            let (icon, icon_style) = state_icon(entry.state, entry.seen, app.status_indicators, p);
+            let (icon, icon_style) = state_icon(
+                entry.state,
+                entry.seen,
+                app.status_indicators,
+                &app.state_icon_colors(),
+            );
             let title = Line::from(vec![
                 Span::styled("  ", Style::default().bg(bg)),
                 Span::styled(icon, icon_style.bg(bg)),
@@ -597,7 +607,8 @@ fn render_mobile_switcher_content(
         let selected = *ws_idx == app.selected;
         let bg = mobile_item_bg(selected, active, p);
         let (state, seen) = ws.aggregate_state(&app.terminals);
-        let (dot, dot_style) = state_icon(state, seen, app.status_indicators, p);
+        let (dot, dot_style) =
+            state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
 
         let mut title_spans = vec![Span::styled("  ", Style::default().bg(bg))];
         // Worktrees of the same space render as branches off their parent, so a

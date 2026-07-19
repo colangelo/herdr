@@ -393,6 +393,20 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # sort_motion_settle_ms = 2000
 # sort_motion_step_ms = 150
 
+# Sidebar entry composition: "default" keeps the current layout; "editorial"
+# right-aligns jump numbers on the name row, renders thin uppercase section
+# headers, and dims inactive meta lines.
+# sidebar_style = "default"
+
+# Per-state color overrides for sidebar state glyphs and state text.
+# Same syntax as accent; unset values follow the theme.
+# [ui.state_colors]
+# working = "#f9e2af"
+# idle = "#a6e3a1"
+# done = "#94e2d5"
+# blocked = "#f38ba8"
+# unknown = "#6c7086"
+
 # Notification center position: "top-right" keeps the indicator in the tab
 # bar with the dropdown under it; "bottom-right" floats the indicator in the
 # frame's bottom-right corner with the dropdown opening above it.

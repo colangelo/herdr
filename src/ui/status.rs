@@ -261,11 +261,11 @@ pub(super) fn state_icon(
     state: AgentState,
     seen: bool,
     indicator_style: StatusIndicatorStyle,
-    p: &Palette,
+    colors: &crate::app::state::StateIconColors,
 ) -> (&'static str, Style) {
     (
         state_icon_symbol(state, seen, indicator_style),
-        Style::default().fg(state_label_color(state, seen, p)),
+        Style::default().fg(state_label_color(state, seen, colors)),
     )
 }
 
@@ -279,13 +279,17 @@ pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     }
 }
 
-pub(super) fn state_label_color(state: AgentState, seen: bool, p: &Palette) -> Color {
+pub(super) fn state_label_color(
+    state: AgentState,
+    seen: bool,
+    colors: &crate::app::state::StateIconColors,
+) -> Color {
     match (state, seen) {
-        (AgentState::Blocked, _) => p.red,
-        (AgentState::Working, _) => p.yellow,
-        (AgentState::Idle, false) => p.teal,
-        (AgentState::Idle, true) => p.green,
-        (AgentState::Unknown, _) => p.overlay0,
+        (AgentState::Blocked, _) => colors.blocked,
+        (AgentState::Working, _) => colors.working,
+        (AgentState::Idle, false) => colors.done,
+        (AgentState::Idle, true) => colors.idle,
+        (AgentState::Unknown, _) => colors.unknown,
     }
 }
 
@@ -313,6 +317,13 @@ mod tests {
     #[test]
     fn state_icons_support_dot_and_distinct_symbol_styles() {
         let palette = Palette::catppuccin();
+        let colors = crate::app::state::StateIconColors {
+            working: palette.yellow,
+            idle: palette.green,
+            done: palette.teal,
+            blocked: palette.red,
+            unknown: palette.overlay0,
+        };
         for (indicator_style, expected_symbols) in [
             (StatusIndicatorStyle::Dots, ["●", "●", "●", "○", "·"]),
             (StatusIndicatorStyle::Symbols, ["×", "◐", "✓", "○", "·"]),
@@ -327,7 +338,7 @@ mod tests {
             .into_iter()
             .zip(expected_symbols)
             {
-                let (actual_symbol, style) = state_icon(state, seen, indicator_style, &palette);
+                let (actual_symbol, style) = state_icon(state, seen, indicator_style, &colors);
                 assert_eq!(actual_symbol, expected_symbol);
                 assert_eq!(display_width_u16(actual_symbol), 1);
                 assert_eq!(style.fg, Some(color));
