@@ -1221,6 +1221,28 @@
           ]
         },
         {
+          "key": "ui.sort_motion",
+          "type": "enum",
+          "default": "\"bubble\"",
+          "description": "How priority-sorted lists (spaces, agents panel) apply reorders. \"bubble\" holds a row in place for `sort_motion_settle_ms`, then moves it one position per `sort_motion_step_ms` so the list never teleports under the cursor; \"instant\" re-sorts immediately.",
+          "values": [
+            "bubble",
+            "instant"
+          ]
+        },
+        {
+          "key": "ui.sort_motion_settle_ms",
+          "type": "integer",
+          "default": "2000",
+          "description": "How long a row holds its position after its sort position changes before it starts bubbling, in milliseconds."
+        },
+        {
+          "key": "ui.sort_motion_step_ms",
+          "type": "integer",
+          "default": "150",
+          "description": "Interval between one-position bubble steps, in milliseconds."
+        },
+        {
           "key": "ui.notification_center_position",
           "type": "enum",
           "default": "\"top-right\"",
@@ -1234,7 +1256,7 @@
           "key": "ui.sidebar_active_border",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" \u2014 or a bool for backward compatibility (true = \"both\").",
+          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" — or a bool for backward compatibility (true = \"both\").",
           "values": [
             "off",
             "above",
