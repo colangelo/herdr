@@ -271,6 +271,24 @@ const SHUTDOWN_API_TIMEOUT: Duration = Duration::from_secs(5);
 /// avoid reintroducing the idle CPU spin.
 const CLIENT_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Delay between per-pane repaint nudges in the post-handoff detection sweep,
+/// so re-adopted agent TUIs repaint one at a time instead of all at once.
+/// Effective spacing is bounded below by the main loop's wake cadence
+/// (`CLIENT_ACCEPT_POLL_INTERVAL`).
+#[cfg(unix)]
+const HANDOFF_DETECTION_SWEEP_STAGGER: Duration = Duration::from_millis(150);
+
+/// Ordered background sweep over imported panes after a live handoff commit.
+///
+/// Each step nudges one pane's child to repaint (SIGWINCH shrink/restore) and
+/// forces a detection rescan, so working agents resurface in the sidebar
+/// without any client attaching or the user visiting panes.
+#[cfg(unix)]
+struct HandoffDetectionSweep {
+    queue: std::collections::VecDeque<crate::terminal::TerminalId>,
+    next_at: Instant,
+}
+
 // ---------------------------------------------------------------------------
 // Headless server
 // ---------------------------------------------------------------------------
@@ -326,9 +344,9 @@ pub struct HeadlessServer {
     shutting_down: bool,
     /// Flag set while exporting live PTYs to a replacement server.
     handoff_in_progress: bool,
-    /// Imported panes get one app-safe resize nudge after the first client attaches.
+    /// In-progress post-handoff detection sweep over imported panes.
     #[cfg(unix)]
-    pending_handoff_repaint_nudge: bool,
+    handoff_detection_sweep: Option<HandoffDetectionSweep>,
     /// Flag set by Ctrl+C or `server stop` signal.
     should_quit: Arc<AtomicBool>,
     /// Channel for receiving server events from client connection threads.
@@ -516,7 +534,7 @@ impl HeadlessServer {
             shutting_down: false,
             handoff_in_progress: false,
             #[cfg(unix)]
-            pending_handoff_repaint_nudge: false,
+            handoff_detection_sweep: None,
             should_quit,
             server_event_rx,
             server_event_tx,
@@ -644,6 +662,8 @@ impl HeadlessServer {
 
             // 6. Handle scheduled tasks.
             let now = Instant::now();
+            #[cfg(unix)]
+            self.advance_handoff_detection_sweep(now);
             if self.handle_scheduled_tasks_headless(now, needs_render) {
                 needs_render = true;
                 needs_full_render = true;
@@ -1211,14 +1231,19 @@ impl HeadlessServer {
                 continue;
             };
             let mut handoff_runtime = runtime.handoff_runtime_state(pane_id);
-            let has_agent_session = self
-                .app
-                .state
-                .terminals
-                .get(terminal_id)
-                .is_some_and(|terminal| terminal.persisted_agent_session.is_some());
+            let terminal = self.app.state.terminals.get(terminal_id);
+            let has_agent_session =
+                terminal.is_some_and(|terminal| terminal.persisted_agent_session.is_some());
             if !has_agent_session {
                 handoff_runtime.initial_history_ansi = runtime.handoff_history_ansi();
+            }
+            if let Some(terminal) = terminal {
+                if let Some(agent) = terminal.effective_known_agent() {
+                    handoff_runtime.agent = Some(crate::detect::agent_label(agent).to_string());
+                    handoff_runtime.agent_state =
+                        crate::handoff_runtime::handoff_agent_state_label(terminal.state)
+                            .map(str::to_string);
+                }
             }
             handoff_entries.push((terminal_id.clone(), handoff_runtime));
         }
@@ -1416,19 +1441,53 @@ impl HeadlessServer {
         let _ = std::fs::remove_file(socket_path);
     }
 
+    /// Queue every pane for the post-handoff detection sweep, in
+    /// workspace/tab/pane order. Runs from the main loop without requiring any
+    /// client to attach; panes without a live runtime are skipped when due.
     #[cfg(unix)]
-    fn nudge_handoff_panes_on_first_client_attach(&mut self) {
-        if !self.pending_handoff_repaint_nudge {
+    fn begin_handoff_detection_sweep(&mut self) {
+        let mut queue = std::collections::VecDeque::new();
+        for ws in &self.app.state.workspaces {
+            for tab in &ws.tabs {
+                let mut pane_ids: Vec<_> = tab.panes.keys().copied().collect();
+                pane_ids.sort_by_key(|id| id.raw());
+                for pane_id in pane_ids {
+                    queue.push_back(tab.panes[&pane_id].attached_terminal_id.clone());
+                }
+            }
+        }
+        if queue.is_empty() {
             return;
         }
-        self.pending_handoff_repaint_nudge = false;
-        self.app
-            .terminal_runtimes
-            .nudge_child_redraw_after_handoff();
+        self.handoff_detection_sweep = Some(HandoffDetectionSweep {
+            queue,
+            next_at: Instant::now(),
+        });
     }
 
-    #[cfg(not(unix))]
-    fn nudge_handoff_panes_on_first_client_attach(&mut self) {}
+    /// Process at most one due sweep step: nudge the pane's child to repaint
+    /// and force a detection rescan, then wait out the stagger interval.
+    #[cfg(unix)]
+    fn advance_handoff_detection_sweep(&mut self, now: Instant) {
+        let Some(sweep) = &mut self.handoff_detection_sweep else {
+            return;
+        };
+        if now < sweep.next_at {
+            return;
+        }
+        while let Some(terminal_id) = sweep.queue.pop_front() {
+            if let Some(runtime) = self.app.terminal_runtimes.get(&terminal_id) {
+                debug!(terminal = %terminal_id, "post-handoff detection sweep nudging pane");
+                runtime.nudge_child_redraw_after_handoff();
+                runtime.force_detection_rescan();
+                sweep.next_at = now + HANDOFF_DETECTION_SWEEP_STAGGER;
+                break;
+            }
+        }
+        if sweep.queue.is_empty() {
+            self.handoff_detection_sweep = None;
+        }
+    }
 
     fn reload_server_config(&mut self, notify_success: bool) -> crate::config::ConfigReloadReport {
         let server_keybindings = self.server_keybindings.clone();
@@ -2823,7 +2882,6 @@ impl HeadlessServer {
                 }
                 self.sync_foreground_client_state();
                 self.resize_shared_runtime_to_effective_size();
-                self.nudge_handoff_panes_on_first_client_attach();
                 true
             }
             ServerEvent::ClientAttachTerminal {
@@ -4843,7 +4901,7 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
         crate::server::handoff::wait_committed(&mut received.stream)?;
         server.app.assume_handoff_ownership();
         server.app.unpause_handoff_readers();
-        server.pending_handoff_repaint_nudge = true;
+        server.begin_handoff_detection_sweep();
         if let Err(err) = crate::server::handoff::report_owned(&mut received.stream) {
             warn!(err = %err, "failed to report handoff ownership; continuing as owner");
         }
@@ -5013,7 +5071,7 @@ mod tests {
             shutting_down: false,
             handoff_in_progress: false,
             #[cfg(unix)]
-            pending_handoff_repaint_nudge: false,
+            handoff_detection_sweep: None,
             #[cfg(unix)]
             should_quit: Arc::new(AtomicBool::new(false)),
             #[cfg(windows)]

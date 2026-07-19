@@ -528,6 +528,12 @@ fn restore_tab(
             .unwrap_or_default();
         let imported_runtime = old_pane_id.and_then(|old_id| imported_panes.remove(&old_id));
         let was_imported = imported_runtime.is_some();
+        #[cfg(unix)]
+        let imported_agent_seed = imported_runtime
+            .as_ref()
+            .and_then(|imported| imported.state.agent_seed());
+        #[cfg(not(unix))]
+        let imported_agent_seed = None;
         let pending_native_agent_restore = if was_imported {
             None
         } else {
@@ -649,11 +655,13 @@ fn restore_tab(
                     (Some(_), None) => {}
                     (None, _) => {}
                 }
-                if let Some(agent) = initial_restore_agent {
+                let (seed_agent, seed_state) =
+                    restored_agent_seed(imported_agent_seed, initial_restore_agent);
+                if let Some(agent) = seed_agent {
                     let _ = terminal.set_detected_state_with_screen_signals_at(
                         Some(agent),
-                        AgentState::Idle,
-                        false,
+                        seed_state,
+                        seed_state == AgentState::Blocked,
                         false,
                         false,
                         false,
@@ -813,6 +821,21 @@ fn restored_terminal_agent_session(
     session.and_then(persisted_agent_session_from_snapshot)
 }
 
+/// Agent identity and state to seed a restored pane's terminal with.
+///
+/// Live-handoff panes carry the pre-restart state in the handoff manifest so a
+/// working agent resurfaces immediately; everything else (cold restore,
+/// relaunched agents, old manifests without the field) keeps the Idle seeding.
+fn restored_agent_seed(
+    imported_agent_seed: Option<(crate::detect::Agent, AgentState)>,
+    initial_restore_agent: Option<crate::detect::Agent>,
+) -> (Option<crate::detect::Agent>, AgentState) {
+    match imported_agent_seed {
+        Some((agent, state)) => (Some(agent), state),
+        None => (initial_restore_agent, AgentState::Idle),
+    }
+}
+
 #[cfg(test)]
 fn take_restore_plan_for_snapshot(
     session: &PaneAgentSessionSnapshot,
@@ -916,6 +939,58 @@ fn collect_ids_inner(node: &Node, ids: &mut Vec<PaneId>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restored_agent_seed_keeps_idle_seeding_without_manifest_state() {
+        use crate::detect::Agent;
+        // Characterization of pre-change behavior: no manifest seed means the
+        // restore-plan agent (if any) is seeded Idle.
+        assert_eq!(restored_agent_seed(None, None), (None, AgentState::Idle));
+        assert_eq!(
+            restored_agent_seed(None, Some(Agent::Claude)),
+            (Some(Agent::Claude), AgentState::Idle)
+        );
+    }
+
+    #[test]
+    fn seeded_working_state_is_effective_without_any_detection_event() {
+        use crate::detect::Agent;
+        // The sidebar spinner keys off `TerminalState.state == Working`; seeding
+        // alone must produce it, with no detection task publish involved.
+        let mut terminal = crate::terminal::TerminalState::new(
+            crate::terminal::TerminalId::alloc(),
+            std::path::PathBuf::from("/"),
+        );
+        let (seed_agent, seed_state) =
+            restored_agent_seed(Some((Agent::Claude, AgentState::Working)), None);
+        let _ = terminal.set_detected_state_with_screen_signals_at(
+            seed_agent,
+            seed_state,
+            false,
+            false,
+            false,
+            false,
+            std::time::Instant::now(),
+        );
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.detected_agent, Some(Agent::Claude));
+    }
+
+    #[test]
+    fn restored_agent_seed_prefers_manifest_state() {
+        use crate::detect::Agent;
+        assert_eq!(
+            restored_agent_seed(Some((Agent::Claude, AgentState::Working)), None),
+            (Some(Agent::Claude), AgentState::Working)
+        );
+        assert_eq!(
+            restored_agent_seed(
+                Some((Agent::Codex, AgentState::Blocked)),
+                Some(Agent::Claude)
+            ),
+            (Some(Agent::Codex), AgentState::Blocked)
+        );
+    }
 
     fn test_session_path(name: &str) -> String {
         std::env::current_dir()
