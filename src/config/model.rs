@@ -151,6 +151,16 @@ pub enum WorkspaceSortConfig {
     Priority,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NotificationCenterPositionConfig {
+    /// Anchored under the tab bar's right edge.
+    #[default]
+    TopRight,
+    /// Anchored to the bottom-right of the frame.
+    BottomRight,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneBorderActiveStyleConfig {
@@ -1088,6 +1098,10 @@ pub struct UiConfig {
     /// Sidebar workspace list ordering. "manual" keeps the user's drag order,
     /// "priority" bubbles attention-needing workspaces to the top. Default: "manual".
     pub workspace_sort: WorkspaceSortConfig,
+    /// Notification center dropdown position. "top-right" anchors under the
+    /// tab bar's right edge, "bottom-right" anchors to the bottom-right of the
+    /// frame. Default: "top-right".
+    pub notification_center_position: NotificationCenterPositionConfig,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
@@ -1364,6 +1378,7 @@ impl Default for UiConfig {
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
             workspace_sort: WorkspaceSortConfig::Manual,
+            notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
             agent_number_color: None,
@@ -1746,6 +1761,34 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
+    }
+
+    #[test]
+    fn notification_center_position_config_parses_and_defaults() {
+        assert_eq!(
+            Config::default().ui.notification_center_position,
+            NotificationCenterPositionConfig::TopRight
+        );
+
+        let toml = r#"
+[ui]
+notification_center_position = "bottom-right"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.ui.notification_center_position,
+            NotificationCenterPositionConfig::BottomRight
+        );
+
+        let toml = r#"
+[ui]
+notification_center_position = "top-right"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.ui.notification_center_position,
+            NotificationCenterPositionConfig::TopRight
+        );
     }
 
     #[test]
