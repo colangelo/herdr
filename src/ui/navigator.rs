@@ -113,13 +113,14 @@ fn push_state_chip(
     label: &'static str,
     app: &AppState,
 ) {
-    let (icon, icon_style) = state_icon(state, seen, app.status_indicators, &app.palette);
+    let (icon, icon_style) =
+        state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
     spans.push(Span::styled(icon, icon_style.add_modifier(Modifier::BOLD)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         label,
         Style::default()
-            .fg(state_label_color(state, seen, &app.palette))
+            .fg(state_label_color(state, seen, &app.state_icon_colors()))
             .add_modifier(Modifier::BOLD),
     ));
 }
@@ -201,7 +202,12 @@ fn render_row(
     } else {
         Style::default().fg(p.subtext0).bg(p.panel_bg)
     };
-    let (status_icon, status_style) = state_icon(row.status, row.seen, app.status_indicators, p);
+    let (status_icon, status_style) = state_icon(
+        row.status,
+        row.seen,
+        app.status_indicators,
+        &app.state_icon_colors(),
+    );
     let status_style = if selected {
         base_style.add_modifier(Modifier::BOLD)
     } else if context_only {
@@ -261,7 +267,11 @@ fn render_row(
             Style::default().fg(p.overlay0).bg(p.panel_bg)
         } else {
             Style::default()
-                .fg(state_label_color(row.status, row.seen, p))
+                .fg(state_label_color(
+                    row.status,
+                    row.seen,
+                    &app.state_icon_colors(),
+                ))
                 .bg(p.panel_bg)
         };
         frame.render_widget(
