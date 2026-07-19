@@ -37,5 +37,5 @@
 
 ## 7. Verification
 
-- [ ] 7.1 `just check` green
-- [ ] 7.2 Dogfood on the beta build: watch notifications accrue, open via indicator click and via the keybinding, navigate and jump with Enter, confirm the unread pill clears, and confirm `herdr notification list --json` serves the same feed
+- [x] 7.1 `just check` green
+- [x] 7.2 Dogfood on the beta build: watch notifications accrue, open via indicator click and via the keybinding, navigate and jump with Enter, confirm the unread pill clears, and confirm `herdr notification list --json` serves the same feed
