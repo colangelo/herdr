@@ -423,6 +423,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # headers, and dims inactive meta lines.
 # sidebar_style = "default"
 
+# Leader glyph(s) shown before the editorial jump numbers, hinting the jump
+# chord: workspaces jump with prefix+N, agents with prefix+alt+N. Rendered in
+# the matching *_number_color. Only applies when sidebar_style = "editorial".
+# workspace_number_prefix = "₽"
+# agent_number_prefix = "₽⌥"
+
 # Per-state color overrides for sidebar state glyphs and state text.
 # Same syntax as accent; unset values follow the theme.
 # [ui.state_colors]

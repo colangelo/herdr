@@ -1444,42 +1444,53 @@ fn sidebar_header_style(editorial: bool, p: &Palette) -> Style {
     }
 }
 
-/// Columns reserved at the right edge of an editorial name row for the jump
-/// number (symbol + one-cell gap, plus the right active-bar column when that
-/// border mode is on).
-fn editorial_number_reserve(
-    applies: bool,
-    jump_number: Option<char>,
-    active_border: crate::config::SidebarActiveBorderConfig,
-) -> u16 {
-    if !applies || jump_number.is_none() {
-        return 0;
+/// The editorial right-aligned jump label: an optional leader prefix plus the
+/// jump symbol (e.g. "₽5", "₽⌥2", or bare "5"). Empty when numbers are off.
+fn editorial_number_label(jump_number: Option<char>, prefix: &str) -> String {
+    match jump_number {
+        Some(symbol) => format!("{prefix}{symbol}"),
+        None => String::new(),
     }
-    2 + u16::from(active_border == crate::config::SidebarActiveBorderConfig::Right)
 }
 
-/// Draws the editorial right-aligned jump number on an entry's name row. The
-/// number style carries no background, so the pre-filled active band (or the
+/// Columns reserved at the right edge of an editorial name row for the jump
+/// label (its display width + one-cell gap, plus the right active-bar column
+/// when that border mode is on).
+fn editorial_number_reserve(
+    applies: bool,
+    label: &str,
+    active_border: crate::config::SidebarActiveBorderConfig,
+) -> u16 {
+    if !applies || label.is_empty() {
+        return 0;
+    }
+    display_width_u16(label)
+        + 1
+        + u16::from(active_border == crate::config::SidebarActiveBorderConfig::Right)
+}
+
+/// Draws the editorial right-aligned jump label on an entry's name row. The
+/// label style carries no background, so the pre-filled active band (or the
 /// row paragraph's band) shows through untouched.
-#[allow(clippy::too_many_arguments)] // small positional draw helper
 fn draw_editorial_number(
     frame: &mut Frame,
     entry_rect: Rect,
     name_row_y: u16,
     bottom: u16,
-    symbol: char,
+    label: &str,
     style: Style,
     active_border: crate::config::SidebarActiveBorderConfig,
 ) {
-    if name_row_y >= bottom || entry_rect.width < 6 {
+    let width = display_width_u16(label);
+    if name_row_y >= bottom || label.is_empty() || entry_rect.width < width + 4 {
         return;
     }
     let right_reserve =
-        1 + u16::from(active_border == crate::config::SidebarActiveBorderConfig::Right);
+        width + u16::from(active_border == crate::config::SidebarActiveBorderConfig::Right);
     let x = entry_rect.x + entry_rect.width.saturating_sub(right_reserve);
     frame.render_widget(
-        Paragraph::new(Span::styled(symbol.to_string(), style)),
-        Rect::new(x, name_row_y, 1, 1),
+        Paragraph::new(Span::styled(label.to_string(), style)),
+        Rect::new(x, name_row_y, width, 1),
     );
 }
 
@@ -1693,6 +1704,7 @@ fn render_workspace_list(
         };
         let lead_rest: u16 = if card.indented { 5 } else { 3 };
         let has_second_row = rows.len() >= 2;
+        let number_label = editorial_number_label(jump_number, &app.workspace_number_prefix);
 
         for (row_index, resolved) in rows.iter().enumerate() {
             if row_index as u16 >= row_height || row_y + row_index as u16 >= list_bottom {
@@ -1730,10 +1742,10 @@ fn render_workspace_list(
             }
             let prefix_width = bar_reserve + if row_index == 0 { lead0 } else { lead_rest };
             // Editorial: the name row reserves the right edge for the jump
-            // number so long names truncate before reaching it.
+            // label so long names truncate before reaching it.
             let number_reserve = editorial_number_reserve(
                 editorial && row_index == 0,
-                jump_number,
+                &number_label,
                 app.sidebar_active_border,
             );
             spans.extend(resolved_token_spans(
@@ -1754,17 +1766,15 @@ fn render_workspace_list(
             );
         }
         if editorial {
-            if let Some(symbol) = jump_number {
-                draw_editorial_number(
-                    frame,
-                    card.rect,
-                    row_y,
-                    list_bottom,
-                    symbol,
-                    Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0)),
-                    app.sidebar_active_border,
-                );
-            }
+            draw_editorial_number(
+                frame,
+                card.rect,
+                row_y,
+                list_bottom,
+                &number_label,
+                Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0)),
+                app.sidebar_active_border,
+            );
         }
     }
 
@@ -1924,6 +1934,7 @@ fn render_agent_detail(
             .then(|| crate::config::jump_symbol(index))
             .flatten();
         let has_second_row = rows.len() >= 2;
+        let number_label = editorial_number_label(jump_number, &app.agent_number_prefix);
 
         let gap = agent_entry_gap(app, index, details.len());
         // Active-agent border lines live in blank spacer rows between entries,
@@ -2002,10 +2013,10 @@ fn render_agent_detail(
             }
             let prefix_width = bar_reserve + if row_index == 0 { 1 } else { 3 };
             // Editorial: the name row reserves the right edge for the jump
-            // number so long names truncate before reaching it.
+            // label so long names truncate before reaching it.
             let number_reserve = editorial_number_reserve(
                 editorial && row_index == 0,
-                jump_number,
+                &number_label,
                 app.sidebar_active_border,
             );
             spans.extend(resolved_token_spans(
@@ -2024,17 +2035,15 @@ fn render_agent_detail(
             );
         }
         if editorial {
-            if let Some(symbol) = jump_number {
-                draw_editorial_number(
-                    frame,
-                    Rect::new(body.x, row_y, body.width, height),
-                    row_y,
-                    body_bottom,
-                    symbol,
-                    Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
-                    app.sidebar_active_border,
-                );
-            }
+            draw_editorial_number(
+                frame,
+                Rect::new(body.x, row_y, body.width, height),
+                row_y,
+                body_bottom,
+                &number_label,
+                Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
+                app.sidebar_active_border,
+            );
         }
 
         // Bar modes overlay the entry's edge column after its rows render, so
@@ -2160,6 +2169,95 @@ mod tests {
             .content
             .iter()
             .all(|cell| cell.bg == app.palette.sidebar_bg));
+    }
+
+    #[test]
+    fn editorial_number_prefix_precedes_the_number() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.ensure_test_terminals();
+        app.sidebar_style = crate::config::SidebarStyleConfig::Editorial;
+        app.show_workspace_numbers = true;
+        app.workspace_number_prefix = "₽".into();
+
+        let area = Rect::new(0, 0, 26, 20);
+        let ws_rect = workspace_list_rect(area, app.sidebar_section_split);
+        app.view.workspace_card_areas = compute_workspace_card_areas(&app, ws_rect);
+        let mut terminal = Terminal::new(TestBackend::new(26, 20)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let name_y = (0..20)
+            .find(|y| row_text(buffer, *y, 25).contains("one"))
+            .expect("workspace name row rendered");
+        let name_row = row_text(buffer, name_y, 25);
+        assert!(
+            name_row.trim_end().ends_with("₽1"),
+            "prefixed number should end the name row: {name_row:?}"
+        );
+    }
+
+    #[test]
+    fn editorial_number_label_and_reserve() {
+        use crate::config::SidebarActiveBorderConfig;
+        assert_eq!(editorial_number_label(Some('3'), ""), "3");
+        assert_eq!(editorial_number_label(Some('3'), "₽"), "₽3");
+        assert_eq!(editorial_number_label(Some('2'), "₽⌥"), "₽⌥2");
+        assert_eq!(editorial_number_label(None, "₽"), "");
+
+        // Bare number reserves symbol + gap; a "₽⌥2" label reserves its full
+        // display width + gap.
+        assert_eq!(
+            editorial_number_reserve(true, "3", SidebarActiveBorderConfig::Left),
+            2
+        );
+        assert_eq!(
+            editorial_number_reserve(true, "₽⌥2", SidebarActiveBorderConfig::Left),
+            4
+        );
+        assert_eq!(
+            editorial_number_reserve(false, "₽⌥2", SidebarActiveBorderConfig::Left),
+            0
+        );
+        assert_eq!(
+            editorial_number_reserve(true, "", SidebarActiveBorderConfig::Left),
+            0
+        );
+    }
+
+    #[test]
+    fn state_icon_colors_resolve_overrides_with_theme_fallback() {
+        use ratatui::style::Color;
+        let mut app = crate::app::state::AppState::test_new();
+        let defaults = app.state_icon_colors();
+        assert_eq!(defaults.working, app.palette.yellow);
+        assert_eq!(defaults.idle, app.palette.green);
+        assert_eq!(defaults.done, app.palette.teal);
+        assert_eq!(defaults.blocked, app.palette.red);
+        assert_eq!(defaults.unknown, app.palette.overlay0);
+
+        app.state_color_overrides.working = Some(Color::Rgb(255, 200, 50));
+        app.state_color_overrides.idle = Some(Color::Rgb(74, 222, 128));
+        let resolved = app.state_icon_colors();
+        assert_eq!(resolved.working, Color::Rgb(255, 200, 50));
+        assert_eq!(resolved.idle, Color::Rgb(74, 222, 128));
+        assert_eq!(resolved.done, app.palette.teal);
+
+        let (_, working_style) = state_icon(
+            AgentState::Working,
+            true,
+            crate::config::StatusIndicatorStyle::Dots,
+            &resolved,
+        );
+        assert_eq!(working_style.fg, Some(Color::Rgb(255, 200, 50)));
+        let (_, idle_style) = state_icon(
+            AgentState::Idle,
+            true,
+            crate::config::StatusIndicatorStyle::Dots,
+            &resolved,
+        );
+        assert_eq!(idle_style.fg, Some(Color::Rgb(74, 222, 128)));
     }
 
     #[test]
