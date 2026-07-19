@@ -1679,6 +1679,10 @@ pub struct AppState {
     pub workspace_number_color: Option<Color>,
     /// Override color for `show_agent_numbers` labels; None uses the palette default.
     pub agent_number_color: Option<Color>,
+    /// Leader glyph(s) before the workspace jump number in editorial style.
+    pub workspace_number_prefix: String,
+    /// Leader glyph(s) before the agent jump number in editorial style.
+    pub agent_number_prefix: String,
     /// Override color for the focused (active) pane border; None uses the palette accent.
     pub pane_border_active_color: Option<Color>,
     /// Override color for unfocused (inactive) pane borders; None uses the palette default.
@@ -2189,6 +2193,8 @@ impl AppState {
             accent: Color::Cyan,
             workspace_number_color: None,
             agent_number_color: None,
+            workspace_number_prefix: String::new(),
+            agent_number_prefix: String::new(),
             pane_border_active_color: None,
             pane_border_inactive_color: None,
             pane_border_active_style: crate::config::PaneBorderActiveStyleConfig::Light,

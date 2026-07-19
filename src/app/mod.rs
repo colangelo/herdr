@@ -730,6 +730,8 @@ impl App {
                 .agent_number_color
                 .as_deref()
                 .map(crate::config::parse_color),
+            workspace_number_prefix: config.ui.workspace_number_prefix.clone(),
+            agent_number_prefix: config.ui.agent_number_prefix.clone(),
             pane_border_active_color: config
                 .ui
                 .pane_border_active_color
@@ -1619,6 +1621,12 @@ impl App {
                     .agent_number_color
                     .as_deref()
                     .map(crate::config::parse_color);
+                self.state
+                    .workspace_number_prefix
+                    .clone_from(&config.ui.workspace_number_prefix);
+                self.state
+                    .agent_number_prefix
+                    .clone_from(&config.ui.agent_number_prefix);
                 self.state.pane_border_active_color = config
                     .ui
                     .pane_border_active_color
