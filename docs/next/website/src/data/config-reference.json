@@ -896,6 +896,16 @@
           ]
         },
         {
+          "key": "ui.notification_center_position",
+          "type": "enum",
+          "default": "\"top-right\"",
+          "description": "Notification center dropdown position. \"top-right\" anchors under the tab bar's right edge, \"bottom-right\" anchors to the bottom-right of the frame.",
+          "values": [
+            "top-right",
+            "bottom-right"
+          ]
+        },
+        {
           "key": "ui.sidebar_active_border",
           "type": "enum",
           "default": "\"off\"",

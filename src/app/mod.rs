@@ -638,6 +638,7 @@ impl App {
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             workspace_sort,
+            notification_center_position: config.ui.notification_center_position,
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
             copy_on_select: config.ui.copy_on_select,
@@ -1522,6 +1523,7 @@ impl App {
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
                 self.state.workspace_sort = workspace_sort_from_config(config.ui.workspace_sort);
+                self.state.notification_center_position = config.ui.notification_center_position;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 self.state.workspace_number_color = config
                     .ui
