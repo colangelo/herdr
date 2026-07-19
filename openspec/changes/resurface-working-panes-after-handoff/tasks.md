@@ -35,5 +35,5 @@
 ## 7. Validation
 
 - [x] 7.1 `just check` (fmt + nextest + maintenance tests) passes
-- [ ] 7.2 Live dogfood: build, trigger a live handoff (dev server restart) with agents working in multiple background workspaces, confirm spinners resurface across all spaces within seconds without touching any pane, and a finished agent settles back to idle
-- [ ] 7.3 Update Gitea issue https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/17 with the resolution and close it after verification
+- [x] 7.2 Live dogfood: build, trigger a live handoff (dev server restart) with agents working in multiple background workspaces, confirm spinners resurface across all spaces within seconds without touching any pane, and a finished agent settles back to idle
+- [x] 7.3 Update Gitea issue https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/17 with the resolution and close it after verification
