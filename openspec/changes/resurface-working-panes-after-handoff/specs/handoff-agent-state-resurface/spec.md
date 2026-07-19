@@ -24,6 +24,10 @@ For panes imported via live handoff, restore SHALL seed the pane's terminal agen
 - **WHEN** a pane is restored without an imported handoff runtime and its agent is relaunched via the agent-resume plan
 - **THEN** the pane is seeded Idle and its state is subsequently driven by normal detection of the fresh process
 
+#### Scenario: Blank screen does not clobber the seeded state
+- **WHEN** a seeded pane's terminal grid is still blank because the re-adopted agent has not repainted yet
+- **THEN** screen detection does not downgrade the seeded state; the seed is only verified or corrected once real screen content arrives
+
 ### Requirement: Post-handoff background verification sweep
 After committing a live handoff and unpausing the imported PTY actors, the server SHALL run a background sweep over all imported agent panes in workspace/tab/pane order, without requiring any client to be attached. For each pane the sweep SHALL trigger a repaint nudge (SIGWINCH shrink/restore) and force a detection rescan that bypasses the idle-scan throttle, and SHALL wait a staggering interval before proceeding to the next pane.
 
