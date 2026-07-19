@@ -223,6 +223,10 @@ impl AppState {
                     {
                         return Some(MouseAction::ClearNotifications);
                     }
+                    // A near-miss elsewhere on the button's row is inert.
+                    if self.notification_center_footer_row_y() == Some(mouse.row) {
+                        return None;
+                    }
                     self.close_notification_center();
                     leave_modal(self);
                 }
@@ -1423,8 +1427,10 @@ impl AppState {
         ))
     }
 
-    /// The footer "Clear all" button row, present only when there are entries
-    /// to clear and the inner area has room for both a list row and a footer.
+    /// The footer "Clear all" button: a centered filled box on the last inner
+    /// row, present only when there are entries to clear and the inner area has
+    /// room for both a list row and the footer. Styled like the settings/modal
+    /// action buttons.
     pub(crate) fn notification_center_clear_button_rect(&self) -> Option<Rect> {
         if self.notification_log.is_empty() {
             return None;
@@ -1433,12 +1439,17 @@ impl AppState {
         if inner.height < 2 {
             return None;
         }
-        Some(Rect::new(
-            inner.x,
-            inner.y + inner.height - 1,
-            inner.width,
-            1,
-        ))
+        let width = crate::ui::notification_center_clear_button_width().min(inner.width);
+        let x = inner.x + inner.width.saturating_sub(width) / 2;
+        Some(Rect::new(x, inner.y + inner.height - 1, width, 1))
+    }
+
+    /// Y of the footer row that holds the button. Clicks in this row but
+    /// outside the button are inert rather than closing the panel, so a
+    /// near-miss on the button does not dismiss the center.
+    fn notification_center_footer_row_y(&self) -> Option<u16> {
+        self.notification_center_clear_button_rect()
+            .map(|button| button.y)
     }
 
     /// The panel's inner list rect (footer excluded) and the first visible
