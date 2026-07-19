@@ -947,6 +947,18 @@
           "description": "Color for `show_agent_numbers` labels. Same syntax as `accent`. Unset uses the theme's muted number color."
         },
         {
+          "key": "ui.workspace_number_prefix",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Leader glyph(s) shown before the workspace jump number when sidebar_style is \"editorial\", e.g. \"₽\" to hint the prefix+N chord. Rendered in workspace_number_color. Empty leaves the bare number."
+        },
+        {
+          "key": "ui.agent_number_prefix",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Leader glyph(s) shown before the agent jump number when sidebar_style is \"editorial\", e.g. \"₽⌥\" to hint the prefix+alt+N chord. Rendered in agent_number_color. Empty leaves the bare number."
+        },
+        {
           "key": "ui.workspace_sort",
           "type": "enum",
           "default": "\"manual\"",
