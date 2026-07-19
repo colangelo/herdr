@@ -259,6 +259,20 @@ fn workspace_sort_from_config(sort: crate::config::WorkspaceSortConfig) -> state
     }
 }
 
+fn sort_motion_bubble_from_config(motion: crate::config::SortMotionConfig) -> bool {
+    matches!(motion, crate::config::SortMotionConfig::Bubble)
+}
+
+fn sort_motion_timing_from_config(
+    settle_ms: u64,
+    step_ms: u64,
+) -> crate::ui::list_motion::ListMotionTiming {
+    crate::ui::list_motion::ListMotionTiming {
+        settle: std::time::Duration::from_millis(settle_ms),
+        step: std::time::Duration::from_millis(step_ms.max(1)),
+    }
+}
+
 /// Parse the configured agent name list into a deduplicated set of `Agent`
 /// values. Unknown agent names are silently dropped so a typo cannot disable
 /// other valid entries.
@@ -648,6 +662,13 @@ impl App {
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             workspace_sort,
+            sort_motion_bubble: sort_motion_bubble_from_config(config.ui.sort_motion),
+            sort_motion_timing: sort_motion_timing_from_config(
+                config.ui.sort_motion_settle_ms,
+                config.ui.sort_motion_step_ms,
+            ),
+            workspace_list_motion: crate::ui::list_motion::ListMotion::new(),
+            agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
             notification_center_position: config.ui.notification_center_position,
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
@@ -1558,6 +1579,16 @@ impl App {
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
                 self.state.workspace_sort = workspace_sort_from_config(config.ui.workspace_sort);
+                self.state.sort_motion_bubble =
+                    sort_motion_bubble_from_config(config.ui.sort_motion);
+                self.state.sort_motion_timing = sort_motion_timing_from_config(
+                    config.ui.sort_motion_settle_ms,
+                    config.ui.sort_motion_step_ms,
+                );
+                if !self.state.sort_motion_bubble {
+                    self.state.workspace_list_motion.reset();
+                    self.state.agent_panel_motion.reset();
+                }
                 self.state.notification_center_position = config.ui.notification_center_position;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 self.state.workspace_number_color = config

@@ -1591,6 +1591,17 @@ pub struct AppState {
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub workspace_sort: WorkspaceSort,
+    /// Whether priority re-sorts bubble (settle + stepped moves) or apply
+    /// instantly. From `ui.sort_motion`.
+    pub sort_motion_bubble: bool,
+    /// Settle/step timing for bubble motion. From `ui.sort_motion_*_ms`.
+    pub sort_motion_timing: crate::ui::list_motion::ListMotionTiming,
+    /// Display-order motion state for the sidebar workspace list (unit keys:
+    /// workspace public id or worktree-group key). Mutated only by the
+    /// scheduled motion tick.
+    pub workspace_list_motion: crate::ui::list_motion::ListMotion<String>,
+    /// Display-order motion state for the agents panel (pane-id keys).
+    pub agent_panel_motion: crate::ui::list_motion::ListMotion<PaneId>,
     /// Where the notification center dropdown anchors (TUI presentation).
     pub notification_center_position: crate::config::NotificationCenterPositionConfig,
     pub next_agent_state_change_seq: u64,
@@ -2094,6 +2105,13 @@ impl AppState {
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             workspace_sort: WorkspaceSort::Manual,
+            sort_motion_bubble: true,
+            sort_motion_timing: crate::ui::list_motion::ListMotionTiming {
+                settle: std::time::Duration::from_millis(2000),
+                step: std::time::Duration::from_millis(150),
+            },
+            workspace_list_motion: crate::ui::list_motion::ListMotion::new(),
+            agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
             notification_center_position: crate::config::NotificationCenterPositionConfig::TopRight,
             next_agent_state_change_seq: 0,
             mouse_capture: true,

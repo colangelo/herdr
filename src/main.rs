@@ -385,6 +385,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # (attention-needing workspaces bubble to the top, like agent_panel_sort).
 # workspace_sort = "manual"
 
+# How priority-sorted lists (spaces, agents panel) apply reorders: "bubble"
+# holds a row in place for sort_motion_settle_ms, then moves it one position
+# per sort_motion_step_ms so the list never teleports under the cursor;
+# "instant" re-sorts immediately.
+# sort_motion = "bubble"
+# sort_motion_settle_ms = 2000
+# sort_motion_step_ms = 150
+
 # Notification center position: "top-right" keeps the indicator in the tab
 # bar with the dropdown under it; "bottom-right" floats the indicator in the
 # frame's bottom-right corner with the dropdown opening above it.
