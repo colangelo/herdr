@@ -1243,6 +1243,46 @@
           "description": "Interval between one-position bubble steps, in milliseconds."
         },
         {
+          "key": "ui.sidebar_style",
+          "type": "enum",
+          "default": "\"default\"",
+          "description": "Sidebar entry composition. \"default\" keeps the current layout; \"editorial\" right-aligns jump numbers on the name row, renders thin uppercase section headers, and dims inactive meta lines.",
+          "values": [
+            "default",
+            "editorial"
+          ]
+        },
+        {
+          "key": "ui.state_colors.working",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for working state glyphs and state text (spinner, working dot). Same syntax as `accent`; unset follows the theme."
+        },
+        {
+          "key": "ui.state_colors.idle",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for idle (seen) state glyphs and state text (idle circle, done check). Same syntax as `accent`; unset follows the theme."
+        },
+        {
+          "key": "ui.state_colors.done",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for done (finished, unseen) state glyphs and state text. Same syntax as `accent`; unset follows the theme."
+        },
+        {
+          "key": "ui.state_colors.blocked",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for blocked state glyphs and state text. Same syntax as `accent`; unset follows the theme."
+        },
+        {
+          "key": "ui.state_colors.unknown",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for unknown state glyphs and state text. Same syntax as `accent`; unset follows the theme."
+        },
+        {
           "key": "ui.notification_center_position",
           "type": "enum",
           "default": "\"top-right\"",
