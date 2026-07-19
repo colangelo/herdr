@@ -156,6 +156,17 @@ pub enum WorkspaceSortConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SortMotionConfig {
+    /// Priority re-sorts settle for a delay, then rows bubble one position
+    /// per step interval.
+    #[default]
+    Bubble,
+    /// Priority re-sorts apply immediately (pre-motion behavior).
+    Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum NotificationCenterPositionConfig {
     /// Anchored under the tab bar's right edge.
@@ -1106,6 +1117,17 @@ pub struct UiConfig {
     /// Sidebar workspace list ordering. "manual" keeps the user's drag order,
     /// "priority" bubbles attention-needing workspaces to the top. Default: "manual".
     pub workspace_sort: WorkspaceSortConfig,
+    /// How priority-sorted lists (spaces, agents panel) apply reorders.
+    /// "bubble" holds a row in place for `sort_motion_settle_ms`, then moves
+    /// it one position per `sort_motion_step_ms` so the list never teleports
+    /// under the cursor; "instant" re-sorts immediately. Default: "bubble".
+    pub sort_motion: SortMotionConfig,
+    /// How long a row holds its position after its sort position changes
+    /// before it starts bubbling, in milliseconds. Default: 2000.
+    pub sort_motion_settle_ms: u64,
+    /// Interval between one-position bubble steps, in milliseconds.
+    /// Default: 150.
+    pub sort_motion_step_ms: u64,
     /// Notification center position. "top-right" puts the indicator in the
     /// tab bar with the dropdown under its right edge; "bottom-right" floats
     /// the indicator in the frame's bottom-right corner with the dropdown
@@ -1397,6 +1419,9 @@ impl Default for UiConfig {
             status_indicators: StatusIndicatorStyle::Dots,
             sidebar: SidebarConfig::default(),
             workspace_sort: WorkspaceSortConfig::Manual,
+            sort_motion: SortMotionConfig::Bubble,
+            sort_motion_settle_ms: 2000,
+            sort_motion_step_ms: 150,
             notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
@@ -1801,6 +1826,33 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
+    }
+
+    #[test]
+    fn sort_motion_config_parses_and_defaults() {
+        let defaults = Config::default();
+        assert_eq!(defaults.ui.sort_motion, SortMotionConfig::Bubble);
+        assert_eq!(defaults.ui.sort_motion_settle_ms, 2000);
+        assert_eq!(defaults.ui.sort_motion_step_ms, 150);
+
+        let toml = r#"
+[ui]
+sort_motion = "instant"
+sort_motion_settle_ms = 500
+sort_motion_step_ms = 80
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.sort_motion, SortMotionConfig::Instant);
+        assert_eq!(config.ui.sort_motion_settle_ms, 500);
+        assert_eq!(config.ui.sort_motion_step_ms, 80);
+
+        let toml = r#"
+[ui]
+sort_motion = "bubble"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.sort_motion, SortMotionConfig::Bubble);
+        assert_eq!(config.ui.sort_motion_settle_ms, 2000);
     }
 
     #[test]

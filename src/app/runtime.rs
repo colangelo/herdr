@@ -386,6 +386,7 @@ impl App {
 
         changed |= self.expire_due_metadata(now);
         changed |= self.handle_tab_bar_status_tasks(now);
+        changed |= self.advance_sort_motion(now);
 
         if geometry_dirty || resized {
             self.pending_agent_resume_deadline = None;
@@ -628,6 +629,7 @@ impl App {
             self.selection_autoscroll_deadline,
             self.selection_highlight_clear_deadline,
             self.next_tab_bar_status_deadline(),
+            self.sort_motion_next_due(),
             render_deadline,
         ]
         .into_iter()
@@ -635,6 +637,58 @@ impl App {
         .min()
     }
 
+    /// Earliest pending bubble-motion work across the sidebar lists, for the
+    /// loop-deadline aggregator.
+    pub(crate) fn sort_motion_next_due(&self) -> Option<Instant> {
+        if !self.state.sort_motion_bubble {
+            return None;
+        }
+        let timing = self.state.sort_motion_timing;
+        [
+            crate::ui::workspace_motion_active(&self.state)
+                .then(|| self.state.workspace_list_motion.next_due(timing))
+                .flatten(),
+            crate::ui::agent_panel_motion_active(&self.state)
+                .then(|| self.state.agent_panel_motion.next_due(timing))
+                .flatten(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    /// Advances sidebar bubble motion toward the live priority order. Returns
+    /// true when a display order changed and a render is needed. The only
+    /// place motion state mutates, keeping render and hit-testing coherent
+    /// between calls.
+    pub(crate) fn advance_sort_motion(&mut self, now: Instant) -> bool {
+        if !self.state.sort_motion_bubble {
+            return false;
+        }
+        let timing = self.state.sort_motion_timing;
+        let mut changed = false;
+        if crate::ui::workspace_motion_active(&self.state) {
+            let target = crate::ui::workspace_unit_target_keys(&self.state);
+            let before = self.state.workspace_list_motion.project(&target);
+            let after = self
+                .state
+                .workspace_list_motion
+                .tick(now, &target, timing)
+                .to_vec();
+            changed |= before != after;
+        }
+        if crate::ui::agent_panel_motion_active(&self.state) {
+            let target = crate::ui::agent_panel_target_keys(&self.state);
+            let before = self.state.agent_panel_motion.project(&target);
+            let after = self
+                .state
+                .agent_panel_motion
+                .tick(now, &target, timing)
+                .to_vec();
+            changed |= before != after;
+        }
+        changed
+    }
     pub(crate) fn drain_internal_events(&mut self) -> bool {
         self.drain_internal_events_up_to(super::APP_EVENT_DRAIN_LIMIT)
             .1

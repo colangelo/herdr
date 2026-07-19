@@ -130,6 +130,9 @@ fn agent_panel_entries_with_runtimes(
 ) -> Vec<AgentPanelEntry> {
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
+    if matches!(app.agent_panel_sort, AgentPanelSort::Priority) {
+        entries = apply_agent_panel_motion(app, entries);
+    }
     entries
 }
 
@@ -181,6 +184,48 @@ fn collect_agent_panel_entries_with_runtimes(
                 })
         })
         .collect()
+}
+
+/// Reorders priority-sorted agent entries through the panel's bubble-motion
+/// display order. Pure between motion ticks, so render and click-time
+/// hit-testing observe the same order.
+fn apply_agent_panel_motion(app: &AppState, entries: Vec<AgentPanelEntry>) -> Vec<AgentPanelEntry> {
+    if !agent_panel_motion_active(app) {
+        return entries;
+    }
+    let target: Vec<crate::layout::PaneId> = entries.iter().map(|entry| entry.pane_id).collect();
+    let order = app.agent_panel_motion.project(&target);
+    let mut by_key: std::collections::HashMap<crate::layout::PaneId, AgentPanelEntry> = entries
+        .into_iter()
+        .map(|entry| (entry.pane_id, entry))
+        .collect();
+    order
+        .into_iter()
+        .filter_map(|key| by_key.remove(&key))
+        .collect()
+}
+
+pub(crate) fn agent_panel_motion_active(app: &AppState) -> bool {
+    app.sort_motion_bubble && matches!(app.agent_panel_sort, AgentPanelSort::Priority)
+}
+
+/// Target order for the agent panel's bubble motion: the live priority-sorted
+/// pane ids, before motion is applied.
+pub(crate) fn agent_panel_target_keys(app: &AppState) -> Vec<crate::layout::PaneId> {
+    let mut keyed: Vec<(u8, Option<u64>, crate::layout::PaneId)> = app
+        .workspaces
+        .iter()
+        .flat_map(|ws| ws.pane_details(&app.terminals))
+        .map(|detail| {
+            (
+                workspace_attention_priority(detail.state, detail.seen),
+                detail.last_agent_state_change_seq,
+                detail.pane_id,
+            )
+        })
+        .collect();
+    keyed.sort_by_key(|(priority, seq, _)| (std::cmp::Reverse(*priority), std::cmp::Reverse(*seq)));
+    keyed.into_iter().map(|(_, _, pane_id)| pane_id).collect()
 }
 
 pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static str {
@@ -344,6 +389,55 @@ pub(crate) fn workspace_list_entries_expanded(app: &AppState) -> Vec<WorkspaceLi
 }
 
 fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<WorkspaceListEntry> {
+    let units = workspace_sorted_units(app, force_expanded);
+    let units = apply_workspace_motion(app, units);
+    units.into_iter().flat_map(|unit| unit.entries).collect()
+}
+
+/// Reorders sorted units through the workspace list's bubble-motion display
+/// order. Pure between motion ticks, so render, jump numbers, and hit-testing
+/// all observe the same order.
+fn apply_workspace_motion(app: &AppState, units: Vec<WorkspaceUnit>) -> Vec<WorkspaceUnit> {
+    if !workspace_motion_active(app) {
+        return units;
+    }
+    let target: Vec<String> = units.iter().map(|unit| unit.key.clone()).collect();
+    let order = app.workspace_list_motion.project(&target);
+    let mut by_key: std::collections::HashMap<String, WorkspaceUnit> = units
+        .into_iter()
+        .map(|unit| (unit.key.clone(), unit))
+        .collect();
+    order
+        .into_iter()
+        .filter_map(|key| by_key.remove(&key))
+        .collect()
+}
+
+pub(crate) fn workspace_motion_active(app: &AppState) -> bool {
+    app.sort_motion_bubble && matches!(app.workspace_sort, WorkspaceSort::Priority)
+}
+
+/// Target order for the workspace list's bubble motion: the live
+/// priority-sorted unit keys, before motion is applied.
+pub(crate) fn workspace_unit_target_keys(app: &AppState) -> Vec<String> {
+    workspace_sorted_units(app, false)
+        .into_iter()
+        .map(|unit| unit.key)
+        .collect()
+}
+
+/// A top-level unit: an ungrouped workspace, or a whole worktree group
+/// (parent + member rows). Units are what priority sort reorders; group
+/// members always stay contiguous under their parent.
+struct WorkspaceUnit {
+    /// Stable motion key: `ws:<workspace id>` or `space:<worktree space key>`.
+    key: String,
+    priority: u8,
+    last_change_seq: Option<u64>,
+    entries: Vec<WorkspaceListEntry>,
+}
+
+fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<WorkspaceUnit> {
     let mut members_by_key = std::collections::HashMap::<String, Vec<usize>>::new();
     for (ws_idx, ws) in app.workspaces.iter().enumerate() {
         if let Some(space) = ws.worktree_space() {
@@ -379,15 +473,6 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
             .map(|space| space.key.clone())
     });
 
-    // A top-level unit: an ungrouped workspace, or a whole worktree group
-    // (parent + member rows). Units are what priority sort reorders; group
-    // members always stay contiguous under their parent.
-    struct Unit {
-        priority: u8,
-        last_change_seq: Option<u64>,
-        entries: Vec<WorkspaceListEntry>,
-    }
-
     let prioritize = matches!(app.workspace_sort, WorkspaceSort::Priority);
     let workspace_rank = |ws: &crate::workspace::Workspace| {
         if !prioritize {
@@ -408,7 +493,8 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
             .filter(|space| grouped_keys.contains(&space.key))
         else {
             let (priority, last_change_seq) = workspace_rank(ws);
-            units.push(Unit {
+            units.push(WorkspaceUnit {
+                key: format!("ws:{}", ws.id),
                 priority,
                 last_change_seq,
                 entries: vec![WorkspaceListEntry::Workspace {
@@ -433,7 +519,8 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
                 .is_some_and(|member_space| !member_space.is_linked_worktree)
         }) else {
             let (priority, last_change_seq) = workspace_rank(ws);
-            units.push(Unit {
+            units.push(WorkspaceUnit {
+                key: format!("ws:{}", ws.id),
                 priority,
                 last_change_seq,
                 entries: vec![WorkspaceListEntry::Workspace {
@@ -481,7 +568,8 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
         } else {
             (0, None)
         };
-        units.push(Unit {
+        units.push(WorkspaceUnit {
+            key: format!("space:{}", space.key),
             priority,
             last_change_seq,
             entries,
@@ -499,7 +587,7 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
         });
     }
 
-    units.into_iter().flat_map(|unit| unit.entries).collect()
+    units
 }
 
 pub(crate) fn workspace_list_rect(area: Rect, split_ratio: f32) -> Rect {
@@ -1952,6 +2040,100 @@ mod tests {
             .content
             .iter()
             .all(|cell| cell.bg == app.palette.sidebar_bg));
+    }
+
+    #[test]
+    fn agent_panel_target_keys_match_priority_entries_order() {
+        // `agent_panel_target_keys` re-implements the panel's priority
+        // comparator for the motion tick; pin the two against drift.
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("one"),
+            Workspace::test_new("two"),
+            Workspace::test_new("three"),
+        ];
+        app.ensure_test_terminals();
+        app.agent_panel_sort = AgentPanelSort::Priority;
+        app.sort_motion_bubble = false;
+        let states = [
+            (AgentState::Idle, true, Some(3)),
+            (AgentState::Working, true, Some(9)),
+            (AgentState::Blocked, false, Some(5)),
+        ];
+        for (workspace, (state, seen, seq)) in app.workspaces.iter_mut().zip(states) {
+            let pane_id = workspace.tabs[0].root_pane;
+            let terminal_id = workspace.tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            workspace.tabs[0].panes.get_mut(&pane_id).unwrap().seen = seen;
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = state;
+            terminal.last_agent_state_change_seq = seq;
+        }
+
+        let entry_ids: Vec<_> = agent_panel_entries(&app)
+            .into_iter()
+            .map(|entry| entry.pane_id)
+            .collect();
+        assert_eq!(agent_panel_target_keys(&app), entry_ids);
+    }
+
+    #[test]
+    fn workspace_entries_hold_order_until_motion_ticks() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        app.workspace_sort = WorkspaceSort::Priority;
+        app.sort_motion_bubble = true;
+
+        let set_state = |app: &mut crate::app::state::AppState,
+                         ws_idx: usize,
+                         state: AgentState,
+                         seq: Option<u64>| {
+            let pane_id = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = state;
+            terminal.last_agent_state_change_seq = seq;
+        };
+        set_state(&mut app, 0, AgentState::Working, Some(1));
+        set_state(&mut app, 1, AgentState::Idle, Some(2));
+
+        let ws_order = |app: &crate::app::state::AppState| -> Vec<usize> {
+            workspace_list_entries(app)
+                .iter()
+                .map(|entry| match entry {
+                    WorkspaceListEntry::Workspace { ws_idx, .. } => *ws_idx,
+                })
+                .collect()
+        };
+
+        // Settle the motion state on the initial order: "one" (working) first.
+        let t0 = std::time::Instant::now();
+        let timing = app.sort_motion_timing;
+        let target = workspace_unit_target_keys(&app);
+        app.workspace_list_motion.tick(t0, &target, timing);
+        assert_eq!(ws_order(&app), vec![0, 1]);
+
+        // "two" starts working with a newer state change: target flips, but
+        // without a motion tick the displayed order must not move.
+        set_state(&mut app, 0, AgentState::Idle, Some(3));
+        set_state(&mut app, 1, AgentState::Working, Some(4));
+        assert_eq!(ws_order(&app), vec![0, 1]);
+
+        // Before the settle delay a tick still holds the order.
+        let target = workspace_unit_target_keys(&app);
+        app.workspace_list_motion.tick(t0, &target, timing);
+        assert_eq!(ws_order(&app), vec![0, 1]);
+
+        // After the settle delay one step resolves the two-row swap.
+        app.workspace_list_motion
+            .tick(t0 + timing.settle, &target, timing);
+        assert_eq!(ws_order(&app), vec![1, 0]);
     }
 
     #[test]
