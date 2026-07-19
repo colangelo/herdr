@@ -20,6 +20,50 @@ pub(super) struct DetectionPublishState {
     pub(super) visible_working: bool,
 }
 
+/// Initial detection-task variables derived from a handoff agent seed, so the
+/// task resumes as if it had already published the pre-handoff state instead of
+/// re-identifying the surviving agent (which would publish Idle over it).
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct BasicDetectionSeedInit {
+    pub(super) agent: Option<Agent>,
+    pub(super) state: AgentState,
+    pub(super) last_visible_idle: bool,
+    pub(super) last_visible_blocker: bool,
+    pub(super) last_visible_working: bool,
+}
+
+#[cfg(unix)]
+impl BasicDetectionSeedInit {
+    pub(super) fn from_agent_seed(seed: Option<(Agent, AgentState)>) -> Self {
+        let Some((agent, state)) = seed else {
+            return Self {
+                agent: None,
+                state: AgentState::Unknown,
+                last_visible_idle: false,
+                last_visible_blocker: false,
+                last_visible_working: false,
+            };
+        };
+        Self {
+            agent: Some(agent),
+            state,
+            last_visible_idle: state == AgentState::Idle,
+            last_visible_blocker: state == AgentState::Blocked,
+            last_visible_working: state == AgentState::Working,
+        }
+    }
+}
+
+/// While a handoff-seeded pane's screen is still blank (the re-adopted agent
+/// has not repainted into the new server's grid), screen detection has no
+/// evidence: the known-agent fallback would read blankness as plain Idle and
+/// overwrite the seeded state. Hold until real content arrives.
+#[cfg(unix)]
+pub(super) fn should_hold_seeded_detection(seeded_hold_active: bool, content: &str) -> bool {
+    seeded_hold_active && content.trim().is_empty()
+}
+
 #[derive(Debug, Default)]
 pub(super) struct PendingIdleConfirmation {
     started_at: Option<std::time::Instant>,
@@ -552,5 +596,66 @@ mod tests {
         mark_detection_content_changed(&seq);
 
         assert_eq!(seq.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seed_init_without_seed_matches_cold_start() {
+        assert_eq!(
+            BasicDetectionSeedInit::from_agent_seed(None),
+            BasicDetectionSeedInit {
+                agent: None,
+                state: AgentState::Unknown,
+                last_visible_idle: false,
+                last_visible_blocker: false,
+                last_visible_working: false,
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seed_init_mirrors_seeded_state_as_last_published() {
+        assert_eq!(
+            BasicDetectionSeedInit::from_agent_seed(Some((Agent::Claude, AgentState::Working))),
+            BasicDetectionSeedInit {
+                agent: Some(Agent::Claude),
+                state: AgentState::Working,
+                last_visible_idle: false,
+                last_visible_blocker: false,
+                last_visible_working: true,
+            }
+        );
+        assert_eq!(
+            BasicDetectionSeedInit::from_agent_seed(Some((Agent::Codex, AgentState::Blocked))),
+            BasicDetectionSeedInit {
+                agent: Some(Agent::Codex),
+                state: AgentState::Blocked,
+                last_visible_idle: false,
+                last_visible_blocker: true,
+                last_visible_working: false,
+            }
+        );
+        assert_eq!(
+            BasicDetectionSeedInit::from_agent_seed(Some((Agent::Pi, AgentState::Idle))),
+            BasicDetectionSeedInit {
+                agent: Some(Agent::Pi),
+                state: AgentState::Idle,
+                last_visible_idle: true,
+                last_visible_blocker: false,
+                last_visible_working: false,
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn seeded_hold_blocks_only_blank_screens() {
+        // A blank grid means the re-adopted agent has not repainted yet; the
+        // seeded state must survive until real content arrives.
+        assert!(should_hold_seeded_detection(true, ""));
+        assert!(should_hold_seeded_detection(true, " \n\t \n"));
+        assert!(!should_hold_seeded_detection(true, "esc to interrupt"));
+        assert!(!should_hold_seeded_detection(false, ""));
     }
 }
