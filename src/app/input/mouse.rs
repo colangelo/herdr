@@ -1434,7 +1434,17 @@ impl AppState {
             crate::config::NotificationCenterPositionConfig::TopRight => {
                 (anchor.y + anchor.height).min(bottom_y)
             }
-            crate::config::NotificationCenterPositionConfig::BottomRight => bottom_y,
+            crate::config::NotificationCenterPositionConfig::BottomRight => {
+                // Open directly above the floating indicator so the diamond
+                // stays visible as the panel's toggle (global-launcher idiom);
+                // without an indicator, sit flush at the bottom.
+                let indicator = self.view.notification_hit_area;
+                if indicator.width > 0 {
+                    indicator.y.saturating_sub(panel_h).max(screen.y)
+                } else {
+                    bottom_y
+                }
+            }
         };
         Some(Rect::new(x, y, panel_w, panel_h))
     }

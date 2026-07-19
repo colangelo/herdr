@@ -2865,11 +2865,24 @@ mod tests {
         assert_eq!(
             bottom.y + bottom.height,
             25,
-            "bottom-right sits at the screen bottom"
+            "without a floating indicator the panel sits at the screen bottom"
         );
         assert_eq!(bottom.x, top.x, "right alignment is unchanged");
         assert_eq!(bottom.width, top.width);
         assert_eq!(bottom.height, top.height);
+
+        // With the floating indicator on the frame's last row (as compute_view
+        // sets it for bottom-right), the panel opens directly above it so the
+        // diamond stays visible as the toggle.
+        state.view.notification_hit_area = Rect::new(75, 24, 5, 1);
+        let above = state
+            .notification_center_rect()
+            .expect("indicator-anchored rect");
+        assert_eq!(
+            above.y + above.height,
+            24,
+            "panel bottom sits on top of the indicator row"
+        );
     }
 
     #[test]
