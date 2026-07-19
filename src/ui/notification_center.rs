@@ -7,9 +7,19 @@ use ratatui::{
 };
 
 use super::text::{display_width, relative_time_label, truncate_end};
-use super::widgets::{panel_contrast_fg, render_panel_shell};
+use super::widgets::{panel_contrast_fg, render_action_button, render_panel_shell};
 use crate::app::state::ToastKind;
 use crate::app::AppState;
+
+/// Footer button label. `(c)` echoes the `c` keyboard shortcut.
+pub(crate) const CLEAR_BUTTON_LABEL: &str = "Clear all (c)";
+
+/// Rendered width of the footer button (label plus the one-cell pads
+/// `render_action_button` adds on each side), so the panel geometry in the
+/// mouse layer and the render here agree on the box size.
+pub(crate) fn clear_button_width() -> u16 {
+    CLEAR_BUTTON_LABEL.chars().count() as u16 + 2
+}
 
 pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
     let Some(rect) = app.notification_center_rect() else {
@@ -107,25 +117,72 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
             .notification_center
             .as_ref()
             .is_some_and(|center| center.clear_hovered);
+        // Same button language as the settings/modal action buttons: a filled
+        // box, secondary (surface) at rest and accent on hover.
         let style = if hovered {
             Style::default()
                 .fg(panel_contrast_fg(p))
                 .bg(p.accent)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(p.overlay1)
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD)
         };
-        let label = "Clear all (c)";
-        let inner_width = button_rect.width as usize;
-        let label = truncate_end(label, inner_width);
-        let label_width = display_width(&label);
-        let left = inner_width.saturating_sub(label_width) / 2;
-        let right = inner_width.saturating_sub(label_width + left);
-        // Full-width centered text so the hover background fills the row.
-        let text = format!("{}{}{}", " ".repeat(left), label, " ".repeat(right));
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(text, style))),
-            button_rect,
-        );
+        render_action_button(frame, button_rect, None, CLEAR_BUTTON_LABEL, style);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::state::{AppState, ToastKind, ToastNotification};
+    use ratatui::layout::Rect;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn toast(title: &str) -> ToastNotification {
+        ToastNotification {
+            kind: ToastKind::Finished,
+            title: title.to_string(),
+            context: String::new(),
+            position: None,
+            target: None,
+        }
+    }
+
+    #[test]
+    fn footer_renders_a_filled_clear_button_above_the_bottom_border() {
+        let mut app = AppState::test_new();
+        app.view.terminal_area = Rect::new(0, 1, 80, 24);
+        app.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        app.post_notification(toast("one"));
+        app.post_notification(toast("two"));
+        app.open_notification_center();
+
+        let panel = app.notification_center_rect().expect("panel rect");
+        let button = app
+            .notification_center_clear_button_rect()
+            .expect("clear button rect");
+
+        let backend = TestBackend::new(80, 25);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_notification_center(&app, frame))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        // The button sits on the row directly above the panel's bottom border.
+        assert_eq!(button.y, panel.y + panel.height - 2);
+
+        // Its cells carry the settings-style filled background (surface0 at
+        // rest), distinguishing it from the plain panel rows.
+        let mid = &buffer[(button.x + button.width / 2, button.y)];
+        assert_eq!(mid.style().bg, Some(app.palette.surface0));
+
+        let row: String = (button.x..button.x + button.width)
+            .map(|x| buffer[(x, button.y)].symbol())
+            .collect();
+        assert!(row.contains("Clear all (c)"), "button row: {row:?}");
     }
 }

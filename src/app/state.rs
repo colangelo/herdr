@@ -2767,12 +2767,17 @@ mod tests {
             .notification_center_list_window()
             .expect("list window present");
 
-        // The button occupies the row directly below the list, and the list
-        // shows exactly the three entries.
+        // The button is a centered box on the row directly below the list, and
+        // the list shows exactly the three entries.
         assert_eq!(button.height, 1);
         assert_eq!(list.y + list.height, button.y);
         assert_eq!(list.height, 3);
-        assert_eq!(button.width, list.width);
+        assert!(button.width <= list.width, "button fits within the panel");
+        assert!(button.x >= list.x, "button sits within the inner area");
+        assert!(
+            button.x + button.width <= list.x + list.width,
+            "button stays within the inner area"
+        );
     }
 
     #[test]
