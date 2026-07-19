@@ -263,6 +263,11 @@ impl TerminalRuntime {
         self.0.nudge_child_redraw_after_handoff();
     }
 
+    #[cfg(unix)]
+    pub fn force_detection_rescan(&self) {
+        self.0.force_detection_rescan();
+    }
+
     pub fn scroll_up(&self, lines: usize) {
         self.0.scroll_up(lines);
     }

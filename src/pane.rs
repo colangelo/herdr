@@ -40,6 +40,8 @@ use self::agent_detection::{
     DetectionScreenReadInput, PendingIdleConfirmation, ScreenDetectionPublishInput,
     AGENT_PENDING_IDLE_RECHECK, AGENT_STARTUP_GRACE_WINDOW,
 };
+#[cfg(unix)]
+use self::agent_detection::{should_hold_seeded_detection, BasicDetectionSeedInit};
 #[cfg(any(unix, test))]
 pub use self::terminal::InputState;
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
@@ -684,6 +686,7 @@ fn spawn_basic_detection_task(
     detection_content_seq: Arc<AtomicU64>,
     full_lifecycle_authority_active: Arc<AtomicBool>,
     state_events: mpsc::Sender<AppEvent>,
+    agent_seed: Option<(Agent, AgentState)>,
 ) -> (
     tokio::task::AbortHandle,
     Arc<Notify>,
@@ -695,11 +698,16 @@ fn spawn_basic_detection_task(
     let pending_release_for_task = pending_release.clone();
 
     let handle = tokio::spawn(async move {
-        let mut agent_presence = AgentDetectionPresence::from_agent(None);
-        let mut state = AgentState::Unknown;
-        let mut last_visible_idle = false;
-        let mut last_visible_blocker = false;
-        let mut last_visible_working = false;
+        // Seeding the pre-handoff agent keeps the first process probe from
+        // treating the surviving agent as newly identified, which would
+        // publish Idle over the state restored from the handoff manifest.
+        let seed = BasicDetectionSeedInit::from_agent_seed(agent_seed);
+        let mut agent_presence = AgentDetectionPresence::from_agent(seed.agent);
+        let mut state = seed.state;
+        let mut last_visible_idle = seed.last_visible_idle;
+        let mut last_visible_blocker = seed.last_visible_blocker;
+        let mut last_visible_working = seed.last_visible_working;
+        let mut seeded_hold = seed.agent.is_some();
         let mut last_visible_signal_refresh = None;
         let mut last_process_check = std::time::Instant::now();
         let mut last_foreground_pgid = None;
@@ -725,6 +733,7 @@ fn spawn_basic_detection_task(
                 _ = detect_reset.notified() => {
                     agent_presence = AgentDetectionPresence::from_agent(None);
                     state = AgentState::Unknown;
+                    seeded_hold = false;
                     last_visible_idle = false;
                     last_visible_blocker = false;
                     last_visible_working = false;
@@ -902,6 +911,13 @@ fn spawn_basic_detection_task(
             last_screen_scan_detection_content_seq = current_detection_content_seq;
             let content_changed = content != last_detection_text;
             last_detection_text.clone_from(&content);
+            if seeded_hold {
+                if !process_exited && should_hold_seeded_detection(true, &content) {
+                    pending_idle.clear();
+                    continue;
+                }
+                seeded_hold = false;
+            }
             if !process_exited && crate::detect::should_skip_state_update(agent, &content) {
                 pending_idle.clear();
                 continue;
@@ -1669,6 +1685,10 @@ impl PaneRuntime {
             input_state: self.input_state(),
             terminal_title: self.terminal_title(),
             initial_history_ansi: None,
+            // Filled in by the server from app-level terminal state; the pane
+            // runtime does not know the detected agent.
+            agent: None,
+            agent_state: None,
         }
     }
 
@@ -1867,6 +1887,7 @@ impl PaneRuntime {
         render_dirty: Arc<RenderSignal>,
     ) -> std::io::Result<Self> {
         let crate::handoff_runtime::ImportedHandoffRuntime { master_fd, state } = import;
+        let agent_seed = state.agent_seed();
         let crate::handoff_runtime::HandoffRuntimeState {
             pane_id,
             child_pid,
@@ -1879,6 +1900,8 @@ impl PaneRuntime {
             input_state,
             terminal_title,
             initial_history_ansi,
+            agent: _,
+            agent_state: _,
         } = state;
         let pane_id = PaneId::from_raw(pane_id);
         use std::os::fd::FromRawFd;
@@ -1992,6 +2015,7 @@ impl PaneRuntime {
             detection_content_seq.clone(),
             full_lifecycle_authority_active.clone(),
             events,
+            agent_seed,
         );
 
         Ok(Self {
@@ -2633,6 +2657,13 @@ impl PaneRuntime {
         let (rows, cols, cell_width_px, cell_height_px) = self.current_size.get();
         self.io
             .nudge_child_redraw_after_handoff(rows, cols, cell_width_px, cell_height_px);
+    }
+
+    /// Force the next detection tick to re-read the screen even when the
+    /// idle-scan throttle would skip it (used by the post-handoff sweep).
+    #[cfg(unix)]
+    pub fn force_detection_rescan(&self) {
+        mark_detection_content_changed(&self.detection_content_seq);
     }
 
     /// Scroll up by N lines (into scrollback history).
