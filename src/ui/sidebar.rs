@@ -952,7 +952,12 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             break;
         }
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
-        let (icon, icon_style) = state_icon(agg_state, agg_seen, app.status_indicators, p);
+        let (icon, icon_style) = state_icon(
+            agg_state,
+            agg_seen,
+            app.status_indicators,
+            &app.state_icon_colors(),
+        );
         let is_selected = visible_idx == app.selected && is_navigating;
         let is_active = Some(visible_idx) == app.active;
         let selection_bg = workspace_selection_background(p, is_active);
@@ -1029,6 +1034,13 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
                 }
             }
 
+            let position_style = Style::default().fg(p.overlay0);
+            let (icon, icon_style) = state_icon(
+                detail.state,
+                detail.seen,
+                app.status_indicators,
+                &app.state_icon_colors(),
+            );
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(format!("{position:<2}"), position_style),
@@ -1424,6 +1436,53 @@ fn draw_sidebar_active_border_bar(
     }
 }
 
+fn sidebar_header_style(editorial: bool, p: &Palette) -> Style {
+    if editorial {
+        Style::default().fg(p.overlay0).add_modifier(Modifier::DIM)
+    } else {
+        Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)
+    }
+}
+
+/// Columns reserved at the right edge of an editorial name row for the jump
+/// number (symbol + one-cell gap, plus the right active-bar column when that
+/// border mode is on).
+fn editorial_number_reserve(
+    applies: bool,
+    jump_number: Option<char>,
+    active_border: crate::config::SidebarActiveBorderConfig,
+) -> u16 {
+    if !applies || jump_number.is_none() {
+        return 0;
+    }
+    2 + u16::from(active_border == crate::config::SidebarActiveBorderConfig::Right)
+}
+
+/// Draws the editorial right-aligned jump number on an entry's name row. The
+/// number style carries no background, so the pre-filled active band (or the
+/// row paragraph's band) shows through untouched.
+#[allow(clippy::too_many_arguments)] // small positional draw helper
+fn draw_editorial_number(
+    frame: &mut Frame,
+    entry_rect: Rect,
+    name_row_y: u16,
+    bottom: u16,
+    symbol: char,
+    style: Style,
+    active_border: crate::config::SidebarActiveBorderConfig,
+) {
+    if name_row_y >= bottom || entry_rect.width < 6 {
+        return;
+    }
+    let right_reserve =
+        1 + u16::from(active_border == crate::config::SidebarActiveBorderConfig::Right);
+    let x = entry_rect.x + entry_rect.width.saturating_sub(right_reserve);
+    frame.render_widget(
+        Paragraph::new(Span::styled(symbol.to_string(), style)),
+        Rect::new(x, name_row_y, 1, 1),
+    );
+}
+
 fn render_workspace_list(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -1446,12 +1505,16 @@ fn render_workspace_list(
         _ => None,
     };
 
+    let editorial = matches!(
+        app.sidebar_style,
+        crate::config::SidebarStyleConfig::Editorial
+    );
     let list_bottom = area.y + area.height.saturating_sub(1);
     if area.height > 0 {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                " spaces",
-                Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
+                if editorial { " SPACES" } else { " spaces" },
+                sidebar_header_style(editorial, p),
             )])),
             Rect::new(area.x, area.y, area.width, 1),
         );
@@ -1579,15 +1642,33 @@ fn render_workspace_list(
             .filter(|(_, collapsed)| *collapsed)
             .map(|(key, _)| space_aggregate_state(app, key))
             .unwrap_or((agg_state, agg_seen));
-        let state_icon = state_icon(display_state, display_seen, app.status_indicators, p);
+        let state_icon = state_icon(
+            display_state,
+            display_seen,
+            app.status_indicators,
+            &app.state_icon_colors(),
+        );
         let state_text_style = Style::default()
-            .fg(state_label_color(display_state, display_seen, p))
+            .fg(state_label_color(
+                display_state,
+                display_seen,
+                &app.state_icon_colors(),
+            ))
             .add_modifier(Modifier::DIM);
-        let branch_style = Style::default().fg(if selected || is_active {
-            p.mauve
-        } else {
-            p.overlay0
-        });
+        let branch_style = {
+            let style = Style::default().fg(if selected || is_active {
+                p.mauve
+            } else {
+                p.overlay0
+            });
+            // Editorial: inactive meta lines recede; the active entry keeps
+            // its accent branch color undimmed.
+            if editorial && !(selected || is_active) {
+                style.add_modifier(Modifier::DIM)
+            } else {
+                style
+            }
+        };
         let token_values = ws.metadata_tokens.values();
         let rows = tokens::space_rows(
             &app.sidebar_spaces,
@@ -1633,7 +1714,7 @@ fn render_workspace_list(
                 } else {
                     spans.push(Span::raw(" "));
                 }
-            } else if row_index == 1 && has_second_row && jump_number.is_some() {
+            } else if !editorial && row_index == 1 && has_second_row && jump_number.is_some() {
                 // Jump number in the dot column of the second row (under the dot).
                 let symbol = jump_number.unwrap_or(' ');
                 spans.push(Span::raw(" ".repeat(lead0 as usize)));
@@ -1648,6 +1729,13 @@ fn render_workspace_list(
                 spans.push(Span::raw(" ".repeat(lead_rest as usize)));
             }
             let prefix_width = bar_reserve + if row_index == 0 { lead0 } else { lead_rest };
+            // Editorial: the name row reserves the right edge for the jump
+            // number so long names truncate before reaching it.
+            let number_reserve = editorial_number_reserve(
+                editorial && row_index == 0,
+                jump_number,
+                app.sidebar_active_border,
+            );
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1658,22 +1746,25 @@ fn render_workspace_list(
                 p,
                 card.rect
                     .width
-                    .saturating_sub(prefix_width + trailing_width) as usize,
+                    .saturating_sub(prefix_width + number_reserve) as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)),
                 Rect::new(card.rect.x, row_y + row_index as u16, card.rect.width, 1),
             );
         }
-
-        if let Some((_, collapsed)) = parent_group {
-            frame.render_widget(
-                Paragraph::new(Span::styled(
-                    if collapsed { "▸" } else { "▾" },
-                    Style::default().fg(p.accent),
-                )),
-                workspace_group_chevron_rect(card),
-            );
+        if editorial {
+            if let Some(symbol) = jump_number {
+                draw_editorial_number(
+                    frame,
+                    card.rect,
+                    row_y,
+                    list_bottom,
+                    symbol,
+                    Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0)),
+                    app.sidebar_active_border,
+                );
+            }
         }
     }
 
@@ -1760,10 +1851,14 @@ fn render_agent_detail(
         Rect::new(area.x, area.y, area.width, 1),
     );
 
+    let editorial = matches!(
+        app.sidebar_style,
+        crate::config::SidebarStyleConfig::Editorial
+    );
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
-            " agents",
-            Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
+            if editorial { " AGENTS" } else { " agents" },
+            sidebar_header_style(editorial, p),
         )])),
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
@@ -1813,7 +1908,7 @@ fn render_agent_detail(
     // spacer (only true when the previous entry left a `row_gap`).
     let mut prev_gap: u16 = 0;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
-        let label_color = state_label_color(detail.state, detail.seen, p);
+        let label_color = state_label_color(detail.state, detail.seen, &app.state_icon_colors());
         let rows = resolved_agent_rows(app, detail);
         let height = (rows.len().max(1) as u16).min(body.height);
         if row_y.saturating_add(height) > body_bottom {
@@ -1881,14 +1976,19 @@ fn render_agent_detail(
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
         };
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
-        let state_icon = state_icon(detail.state, detail.seen, app.status_indicators, p);
+        let state_icon = state_icon(
+            detail.state,
+            detail.seen,
+            app.status_indicators,
+            &app.state_icon_colors(),
+        );
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
             let mut spans = Vec::new();
             if bar_reserve > 0 {
                 spans.push(Span::raw(" "));
             }
-            if row_index == 1 && has_second_row && jump_number.is_some() {
+            if !editorial && row_index == 1 && has_second_row && jump_number.is_some() {
                 // Jump number in the dot column of the second row (under the dot).
                 let symbol = jump_number.unwrap_or(' ');
                 spans.push(Span::raw(" "));
@@ -1901,6 +2001,13 @@ fn render_agent_detail(
                 spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
             }
             let prefix_width = bar_reserve + if row_index == 0 { 1 } else { 3 };
+            // Editorial: the name row reserves the right edge for the jump
+            // number so long names truncate before reaching it.
+            let number_reserve = editorial_number_reserve(
+                editorial && row_index == 0,
+                jump_number,
+                app.sidebar_active_border,
+            );
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1909,12 +2016,25 @@ fn render_agent_detail(
                 agent_style,
                 agent_style,
                 p,
-                body.width.saturating_sub(prefix_width) as usize,
+                body.width.saturating_sub(prefix_width + number_reserve) as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
                 Rect::new(body.x, row_y + row_index as u16, body.width, 1),
             );
+        }
+        if editorial {
+            if let Some(symbol) = jump_number {
+                draw_editorial_number(
+                    frame,
+                    Rect::new(body.x, row_y, body.width, height),
+                    row_y,
+                    body_bottom,
+                    symbol,
+                    Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
+                    app.sidebar_active_border,
+                );
+            }
         }
 
         // Bar modes overlay the entry's edge column after its rows render, so

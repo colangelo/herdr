@@ -62,6 +62,27 @@ use crate::workspace::Workspace;
 // Theme palette — all UI colors in one place, ready for theming
 // ---------------------------------------------------------------------------
 
+/// Parsed `[ui.state_colors]` overrides; `None` slots fall back to the theme
+/// palette when resolved by [`AppState::state_icon_colors`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StateColorOverrides {
+    pub working: Option<Color>,
+    pub idle: Option<Color>,
+    pub done: Option<Color>,
+    pub blocked: Option<Color>,
+    pub unknown: Option<Color>,
+}
+
+/// Resolved per-state colors for sidebar state glyphs and state text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateIconColors {
+    pub working: Color,
+    pub idle: Color,
+    pub done: Color,
+    pub blocked: Color,
+    pub unknown: Color,
+}
+
 /// All colors used by the UI. Derived from a base accent color for now,
 /// but structured so a full theme system can replace it later.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1717,6 +1738,11 @@ pub struct AppState {
     pub workspace_list_motion: crate::ui::list_motion::ListMotion<String>,
     /// Display-order motion state for the agents panel (pane-id keys).
     pub agent_panel_motion: crate::ui::list_motion::ListMotion<PaneId>,
+    /// Sidebar entry composition preset. From `ui.sidebar_style`.
+    pub sidebar_style: crate::config::SidebarStyleConfig,
+    /// Parsed `[ui.state_colors]` overrides; unset slots fall back to the
+    /// theme palette in `state_icon_colors()`.
+    pub state_color_overrides: StateColorOverrides,
     /// Where the notification center dropdown anchors (TUI presentation).
     pub notification_center_position: crate::config::NotificationCenterPositionConfig,
     pub next_agent_state_change_seq: u64,
@@ -1943,6 +1969,19 @@ impl AppState {
     /// to the theme's subtle highlight when unset.
     pub fn sidebar_active_band_bg(&self) -> Color {
         self.sidebar_active_bg.unwrap_or(self.palette.surface_dim)
+    }
+
+    /// Per-state colors for sidebar state glyphs and state text:
+    /// `[ui.state_colors]` overrides resolved against the theme palette.
+    pub fn state_icon_colors(&self) -> StateIconColors {
+        let overrides = self.state_color_overrides;
+        StateIconColors {
+            working: overrides.working.unwrap_or(self.palette.yellow),
+            idle: overrides.idle.unwrap_or(self.palette.green),
+            done: overrides.done.unwrap_or(self.palette.teal),
+            blocked: overrides.blocked.unwrap_or(self.palette.red),
+            unknown: overrides.unknown.unwrap_or(self.palette.overlay0),
+        }
     }
 
     pub fn pane_history_persistence_enabled(&self) -> bool {
@@ -2251,6 +2290,8 @@ impl AppState {
             },
             workspace_list_motion: crate::ui::list_motion::ListMotion::new(),
             agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
+            sidebar_style: crate::config::SidebarStyleConfig::Default,
+            state_color_overrides: StateColorOverrides::default(),
             notification_center_position: crate::config::NotificationCenterPositionConfig::TopRight,
             next_agent_state_change_seq: 0,
             mouse_capture: true,

@@ -157,6 +157,29 @@ pub enum WorkspaceSortConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum SidebarStyleConfig {
+    /// Current layout: jump numbers lead the second row, bold headers.
+    #[default]
+    Default,
+    /// Numbers right-aligned on the name row, thin uppercase headers,
+    /// dimmed inactive meta lines.
+    Editorial,
+}
+
+/// Optional color overrides for the sidebar state glyphs and state text.
+/// Unset values fall back to the theme palette slots.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct StateColorsConfig {
+    pub working: Option<String>,
+    pub idle: Option<String>,
+    pub done: Option<String>,
+    pub blocked: Option<String>,
+    pub unknown: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum SortMotionConfig {
     /// Priority re-sorts settle for a delay, then rows bubble one position
     /// per step interval.
@@ -1128,6 +1151,13 @@ pub struct UiConfig {
     /// Interval between one-position bubble steps, in milliseconds.
     /// Default: 150.
     pub sort_motion_step_ms: u64,
+    /// Sidebar entry composition. "default" keeps the current layout;
+    /// "editorial" right-aligns jump numbers on the name row, renders thin
+    /// uppercase section headers, and dims inactive meta lines.
+    pub sidebar_style: SidebarStyleConfig,
+    /// Per-state color overrides for sidebar state glyphs and state text
+    /// (working/idle/done/blocked/unknown). Same syntax as `accent`.
+    pub state_colors: StateColorsConfig,
     /// Notification center position. "top-right" puts the indicator in the
     /// tab bar with the dropdown under its right edge; "bottom-right" floats
     /// the indicator in the frame's bottom-right corner with the dropdown
@@ -1422,6 +1452,8 @@ impl Default for UiConfig {
             sort_motion: SortMotionConfig::Bubble,
             sort_motion_settle_ms: 2000,
             sort_motion_step_ms: 150,
+            sidebar_style: SidebarStyleConfig::Default,
+            state_colors: StateColorsConfig::default(),
             notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
@@ -1826,6 +1858,27 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
+    }
+
+    #[test]
+    fn sidebar_style_and_state_colors_parse_and_default() {
+        let defaults = Config::default();
+        assert_eq!(defaults.ui.sidebar_style, SidebarStyleConfig::Default);
+        assert_eq!(defaults.ui.state_colors, StateColorsConfig::default());
+
+        let toml = r##"
+[ui]
+sidebar_style = "editorial"
+[ui.state_colors]
+working = "#ffc832"
+idle = "#4ade80"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.sidebar_style, SidebarStyleConfig::Editorial);
+        assert_eq!(config.ui.state_colors.working.as_deref(), Some("#ffc832"));
+        assert_eq!(config.ui.state_colors.idle.as_deref(), Some("#4ade80"));
+        assert_eq!(config.ui.state_colors.done, None);
+        assert_eq!(config.ui.state_colors.blocked, None);
     }
 
     #[test]

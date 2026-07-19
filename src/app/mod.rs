@@ -270,6 +270,19 @@ fn sort_motion_bubble_from_config(motion: crate::config::SortMotionConfig) -> bo
     matches!(motion, crate::config::SortMotionConfig::Bubble)
 }
 
+fn state_color_overrides_from_config(
+    colors: &crate::config::StateColorsConfig,
+) -> state::StateColorOverrides {
+    let parse = |value: &Option<String>| value.as_deref().map(crate::config::parse_color);
+    state::StateColorOverrides {
+        working: parse(&colors.working),
+        idle: parse(&colors.idle),
+        done: parse(&colors.done),
+        blocked: parse(&colors.blocked),
+        unknown: parse(&colors.unknown),
+    }
+}
+
 fn sort_motion_timing_from_config(
     settle_ms: u64,
     step_ms: u64,
@@ -693,6 +706,8 @@ impl App {
             ),
             workspace_list_motion: crate::ui::list_motion::ListMotion::new(),
             agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
+            sidebar_style: config.ui.sidebar_style,
+            state_color_overrides: state_color_overrides_from_config(&config.ui.state_colors),
             notification_center_position: config.ui.notification_center_position,
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
@@ -1632,6 +1647,9 @@ impl App {
                     self.state.workspace_list_motion.reset();
                     self.state.agent_panel_motion.reset();
                 }
+                self.state.sidebar_style = config.ui.sidebar_style;
+                self.state.state_color_overrides =
+                    state_color_overrides_from_config(&config.ui.state_colors);
                 self.state.notification_center_position = config.ui.notification_center_position;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 self.state.workspace_number_color = config
