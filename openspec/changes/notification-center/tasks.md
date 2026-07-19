@@ -21,6 +21,7 @@
 - [x] 4.2 Add the `open_notification_center` `KeysConfig` action (default `prefix+ctrl+n`, collision-verified) with config template entry and a `prefix+?` help entry next to `open_notification_target`
 - [x] 4.3 Panel input: open marks all seen; Up/Down + `j`/`k` selection; Enter jumps to the target pane via the existing toast-click focus path and closes; Esc/`q` close; row click jumps; targetless rows not actionable
 - [x] 4.4 Footer "Clear all" button (also bound to `c`, hover-highlighted) that empties the log via `AppState::clear_notifications` and keeps the panel open on the empty state
+- [x] 4.5 `ui.notification_center_position` config option (`top-right` default, `bottom-right`) wired through startup + live reload, with config template and reference entries
 
 ## 5. Tests
 
