@@ -40,11 +40,11 @@ Restore (`src/persist/restore.rs`) seeds the imported pane's terminal with the m
 
 ### 2. Server-side ordered sweep after handoff commit (approach A)
 
-After the new server commits the handoff and un-quiesces the PTY actors (`src/server/headless.rs` around `assume_handoff_ownership`/`unpause_handoff_readers`), spawn one background tokio task that iterates all imported agent panes in workspace/tab/pane order. Per pane:
+After the new server commits the handoff and un-quiesces the PTY actors (`src/server/headless.rs` around `assume_handoff_ownership`/`unpause_handoff_readers`), the server sweeps all imported agent panes in workspace/tab/pane order, driven by the main loop's scheduled-task step (one pane per due tick, no separate task — the loop wakes at least every 250ms). Per pane:
 
-1. SIGWINCH repaint nudge — reuse the existing shrink/restore mechanism (`nudge_child_redraw_after_handoff`, `src/pty/actor/unix.rs:695-739`).
-2. Forced detection rescan — bump the pane's detection content seq (`mark_detection_content_changed`) and wake the detection task (`detect_reset` notify), defeating the idle-scan skip so the detector reads the freshly repainted grid.
-3. Stagger ~150ms before the next pane to avoid a thundering herd of full-TUI repaints.
+1. SIGWINCH repaint nudge — reuse the existing shrink/restore mechanism (`nudge_child_redraw_after_handoff`, `src/pty/actor/unix.rs`).
+2. Forced detection rescan — bump the pane's detection content seq (`mark_detection_content_changed` via a new `PaneRuntime::force_detection_rescan()`), defeating the idle-scan skip so the detector re-reads the grid. Implementation note: the `detect_reset` notify considered earlier is deliberately NOT used — reset clears the detection task's agent identity, and re-identification publishes Idle plus a 3s startup grace, which would visibly flap the seeded Working state.
+3. Stagger ~150ms (named constant) before the next pane to avoid a thundering herd of full-TUI repaints.
 
 Alternatives considered:
 
@@ -54,6 +54,13 @@ Alternatives considered:
 ### 3. The sweep replaces the deferred first-attach nudge
 
 `pending_handoff_repaint_nudge` / `nudge_handoff_panes_on_first_client_attach` is subsumed: the sweep does strictly more (per-pane nudge + forced rescan, not gated on attach). Remove the deferred mechanism rather than leaving two overlapping nudge paths; the first-attach viewport resize (`resize_shared_runtime_to_effective_size`) is untouched and continues to serve attaching clients. The sweep must be idempotent per pane and harmless if the user focuses a pane mid-sweep (a nudge on an already-repainted pane is a no-op-sized resize wiggle; a forced rescan on a fresh grid just confirms the current state).
+
+### 3a. Detection task starts pre-seeded, and a blank screen cannot clobber the seed
+
+Two facts discovered during implementation make seeding the app state alone insufficient:
+
+- The imported-pane detection task (`spawn_basic_detection_task`) publishes `Idle` the moment its first process probe identifies an agent. The task therefore takes the manifest seed as its initial state (`BasicDetectionSeedInit`): the surviving agent is not "newly identified" and no Idle publish fires.
+- Manifest screen detection treats a known agent with no matching rule as plain Idle (`DEFAULT_KNOWN_AGENT_IDLE_FALLBACK`). Agent-session panes get no history replay, so their grid is blank until the agent repaints — the fallback would flip a seeded Working to Idle within ~1s. A seeded pane therefore holds its state while the screen is blank (`should_hold_seeded_detection`); the hold lifts permanently on the first non-blank read, after which normal screen detection verifies or corrects the seed. If a pane's agent TUI never repaints, the seeded state persists — correction requires real screen evidence, not the absence of it.
 
 ### 4. Hook-authority panes are covered by the same path
 
@@ -76,5 +83,8 @@ Alternatives considered:
 
 ## Open Questions
 
-- Exact insertion point for the sweep task relative to `unpause_handoff_readers()` and restore completion — must run after actors are `Running` and app state (workspace/tab/pane order) is available.
-- Whether `mark_detection_content_changed` + `detect_reset` are reachable from the server/headless layer with current visibility, or need a small `PaneRuntime` method (e.g. `force_detection_rescan()`).
+All resolved during implementation:
+
+- Sweep insertion point: queued immediately after `unpause_handoff_readers()` in the import path; steps execute from the main loop's scheduled-task phase, so app state and running actors are guaranteed.
+- Rescan reachability: added `PaneRuntime::force_detection_rescan()` (content-seq bump only), exposed through `TerminalRuntime`. `detect_reset` is intentionally not used (see Decision 3a).
+- Hook authority (Decision 4 assumption): verified — `hook_authority`/`full_lifecycle_authority_active` are runtime-only and not captured in the snapshot or manifest; imported panes start with authority inactive, so screen detection covers them until hooks re-assert.
