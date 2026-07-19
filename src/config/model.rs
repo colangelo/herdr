@@ -1122,6 +1122,16 @@ pub struct UiConfig {
     /// Unset uses the theme's muted number color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_number_color: Option<String>,
+    /// Leader glyph(s) shown before the workspace jump number in
+    /// `sidebar_style = "editorial"`, e.g. "₽" to hint the `prefix + N`
+    /// chord. Rendered in `workspace_number_color`. Default empty (bare number).
+    #[serde(default)]
+    pub workspace_number_prefix: String,
+    /// Leader glyph(s) shown before the agent jump number in
+    /// `sidebar_style = "editorial"`, e.g. "₽⌥" to hint the `prefix + alt + N`
+    /// chord. Rendered in `agent_number_color`. Default empty (bare number).
+    #[serde(default)]
+    pub agent_number_prefix: String,
     /// Override color for the focused (active) pane border. Same syntax as `accent`.
     /// Unset uses the theme accent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1387,6 +1397,8 @@ impl Default for UiConfig {
             accent: "cyan".into(),
             workspace_number_color: None,
             agent_number_color: None,
+            workspace_number_prefix: String::new(),
+            agent_number_prefix: String::new(),
             pane_border_active_color: None,
             pane_border_inactive_color: None,
             pane_border_active_style: PaneBorderActiveStyleConfig::Light,
@@ -1766,6 +1778,22 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.workspace_sort, WorkspaceSortConfig::Manual);
+    }
+
+    #[test]
+    fn number_prefixes_parse_and_default() {
+        let defaults = Config::default();
+        assert_eq!(defaults.ui.workspace_number_prefix, "");
+        assert_eq!(defaults.ui.agent_number_prefix, "");
+
+        let toml = r#"
+[ui]
+workspace_number_prefix = "₽"
+agent_number_prefix = "₽⌥"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.workspace_number_prefix, "₽");
+        assert_eq!(config.ui.agent_number_prefix, "₽⌥");
     }
 
     #[test]
