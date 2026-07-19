@@ -609,6 +609,11 @@ impl HeadlessServer {
                 needs_full_render = true;
                 crate::render_prof::event("full_render_cause.metadata_expiry");
             }
+            if self.app.advance_sort_motion(Instant::now()) {
+                needs_render = true;
+                needs_full_render = true;
+                crate::render_prof::event("full_render_cause.sort_motion");
+            }
 
             // 3. Drain API requests.
             if self.pane_graphics_runtime_active() {
