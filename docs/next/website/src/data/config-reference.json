@@ -960,7 +960,7 @@
           "key": "ui.notification_center_position",
           "type": "enum",
           "default": "\"top-right\"",
-          "description": "Notification center dropdown position. \"top-right\" anchors under the tab bar's right edge, \"bottom-right\" anchors to the bottom-right of the frame.",
+          "description": "Notification center position. \"top-right\" puts the indicator in the tab bar with the dropdown under its right edge; \"bottom-right\" floats the indicator in the frame's bottom-right corner with the dropdown opening above it.",
           "values": [
             "top-right",
             "bottom-right"

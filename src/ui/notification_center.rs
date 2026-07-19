@@ -21,6 +21,52 @@ pub(crate) fn clear_button_width() -> u16 {
     CLEAR_BUTTON_LABEL.chars().count() as u16 + 2
 }
 
+/// Hit area for the floating indicator used when
+/// `ui.notification_center_position = "bottom-right"`: the last row of the
+/// frame, right-aligned, mirroring where the dropdown opens.
+pub(super) fn floating_notification_indicator_rect(area: Rect, width: u16) -> Rect {
+    if area.width == 0 || area.height == 0 {
+        return Rect::default();
+    }
+    let width = width.min(area.width);
+    Rect::new(
+        area.x + area.width - width,
+        area.y + area.height - 1,
+        width,
+        1,
+    )
+}
+
+/// Draw the bottom-right floating indicator. A no-op for the default
+/// top-right position, where the indicator lives in the tab bar instead.
+pub(super) fn render_floating_notification_indicator(app: &AppState, frame: &mut Frame) {
+    if app.notification_center_position
+        != crate::config::NotificationCenterPositionConfig::BottomRight
+    {
+        return;
+    }
+    let rect = app.view.notification_hit_area;
+    if rect.width == 0 {
+        return;
+    }
+    let p = &app.palette;
+    let unread = app.notification_log.unread_count();
+    // Floating over pane content, so both states carry a background to read
+    // as chrome; the unread pill matches the tab-bar indicator.
+    let style = if unread > 0 {
+        Style::default()
+            .fg(panel_contrast_fg(p))
+            .bg(p.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(p.overlay1).bg(p.surface0)
+    };
+    frame.render_widget(
+        Paragraph::new(super::tabs::notification_indicator_label(unread)).style(style),
+        rect,
+    );
+}
+
 pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
     let Some(rect) = app.notification_center_rect() else {
         return;
@@ -149,6 +195,49 @@ mod tests {
             position: None,
             target: None,
         }
+    }
+
+    #[test]
+    fn floating_indicator_rect_hugs_the_bottom_right_corner() {
+        let area = Rect::new(0, 0, 80, 25);
+        let rect = floating_notification_indicator_rect(area, 5);
+        assert_eq!(rect, Rect::new(75, 24, 5, 1));
+
+        assert_eq!(
+            floating_notification_indicator_rect(Rect::default(), 5),
+            Rect::default()
+        );
+    }
+
+    #[test]
+    fn floating_indicator_renders_pill_at_bottom_right_when_configured() {
+        let mut app = AppState::test_new();
+        app.notification_center_position =
+            crate::config::NotificationCenterPositionConfig::BottomRight;
+        app.post_notification(toast("one"));
+        app.post_notification(toast("two"));
+        let area = Rect::new(0, 0, 80, 25);
+        app.view.notification_hit_area = floating_notification_indicator_rect(
+            area,
+            super::super::tabs::notification_indicator_width(app.notification_log.unread_count()),
+        );
+
+        let backend = TestBackend::new(80, 25);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_floating_notification_indicator(&app, frame))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let rect = app.view.notification_hit_area;
+        assert_eq!(rect.y, 24, "indicator sits on the frame's last row");
+        assert_eq!(rect.x + rect.width, 80, "right-aligned to the frame edge");
+        let row: String = (rect.x..rect.x + rect.width)
+            .map(|x| buffer[(x, rect.y)].symbol())
+            .collect();
+        assert!(row.contains("◆ 2"), "indicator row: {row:?}");
+        let mid = &buffer[(rect.x + 1, rect.y)];
+        assert_eq!(mid.style().bg, Some(app.palette.accent), "unread pill bg");
     }
 
     #[test]
