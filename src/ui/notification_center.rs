@@ -51,15 +51,12 @@ pub(super) fn render_floating_notification_indicator(app: &AppState, frame: &mut
     }
     let p = &app.palette;
     let unread = app.notification_log.unread_count();
-    // Floating over pane content, so both states carry a background to read
-    // as chrome; the unread pill matches the tab-bar indicator.
+    // Same quiet grammar as the sidebar's « collapse toggle: a bare glyph
+    // with no background, dim at rest and accent + bold while unread.
     let style = if unread > 0 {
-        Style::default()
-            .fg(panel_contrast_fg(p))
-            .bg(p.accent)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(p.overlay1).bg(p.surface0)
+        Style::default().fg(p.overlay0)
     };
     frame.render_widget(
         Paragraph::new(super::tabs::notification_indicator_label(unread)).style(style),
@@ -210,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn floating_indicator_renders_pill_at_bottom_right_when_configured() {
+    fn floating_indicator_renders_bare_accent_glyph_at_bottom_right() {
         let mut app = AppState::test_new();
         app.notification_center_position =
             crate::config::NotificationCenterPositionConfig::BottomRight;
@@ -237,7 +234,16 @@ mod tests {
             .collect();
         assert!(row.contains("◆ 2"), "indicator row: {row:?}");
         let mid = &buffer[(rect.x + 1, rect.y)];
-        assert_eq!(mid.style().bg, Some(app.palette.accent), "unread pill bg");
+        assert_eq!(
+            mid.style().fg,
+            Some(app.palette.accent),
+            "unread glyph uses the accent color"
+        );
+        assert_ne!(
+            mid.style().bg,
+            Some(app.palette.accent),
+            "no filled pill: the glyph stays bare like the sidebar toggle"
+        );
     }
 
     #[test]
