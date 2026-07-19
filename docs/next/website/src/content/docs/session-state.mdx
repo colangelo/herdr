@@ -97,6 +97,8 @@ This is different from snapshot restore, pane history replay, and native agent s
 
 Handoff protects long-lived server-owned session state: pane PTYs and processes, agent identity and durable metadata, and plugin/session state needed by the replacement server. It does not preserve transient coordination across the replacement boundary. In-flight CLI or API requests, waits, subscription streams, client sockets, and pane-to-pane messages may be interrupted; clients should reconnect and retry them.
 
+After a successful handoff, agent panes keep their pre-restart agent state: panes whose agents were working show the working indicator immediately, and the new server sweeps every pane in the background — nudging each agent to repaint and re-running detection — so agent states are re-verified across all workspaces within a few seconds without opening or clicking any pane.
+
 Live handoff is experimental and opt-in:
 
 ```bash
