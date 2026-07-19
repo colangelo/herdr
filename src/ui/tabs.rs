@@ -28,7 +28,7 @@ pub(crate) fn notification_indicator_width(unread: usize) -> u16 {
     display_width_u16(&notification_indicator_label(unread))
 }
 
-fn notification_indicator_label(unread: usize) -> String {
+pub(super) fn notification_indicator_label(unread: usize) -> String {
     if unread == 0 {
         " ◆ ".to_string()
     } else if unread > 99 {
@@ -414,7 +414,11 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         );
     }
 
-    if app.view.notification_hit_area.width > 0 {
+    // With the bottom-right center position the hit area is the floating
+    // bottom-of-frame indicator, drawn by the notification_center module.
+    let indicator_in_tab_bar = app.notification_center_position
+        == crate::config::NotificationCenterPositionConfig::TopRight;
+    if indicator_in_tab_bar && app.view.notification_hit_area.width > 0 {
         let unread = app.notification_log.unread_count();
         let style = if unread > 0 {
             Style::default()

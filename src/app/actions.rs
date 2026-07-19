@@ -1830,20 +1830,30 @@ impl AppState {
             return;
         };
 
+        let indicator_in_tab_bar = self.notification_center_position
+            == crate::config::NotificationCenterPositionConfig::TopRight;
         let layout = crate::ui::compute_tab_bar_view(
             ws,
             area,
             self.tab_scroll,
             self.tab_scroll_follow_active,
             self.mouse_capture,
-            crate::ui::notification_indicator_width(self.notification_log.unread_count()),
+            if indicator_in_tab_bar {
+                crate::ui::notification_indicator_width(self.notification_log.unread_count())
+            } else {
+                0
+            },
         );
         self.tab_scroll = layout.scroll;
         self.view.tab_hit_areas = layout.tab_hit_areas;
         self.view.tab_scroll_left_hit_area = layout.scroll_left_hit_area;
         self.view.tab_scroll_right_hit_area = layout.scroll_right_hit_area;
         self.view.new_tab_hit_area = layout.new_tab_hit_area;
-        self.view.notification_hit_area = layout.notification_hit_area;
+        if indicator_in_tab_bar {
+            // Bottom-right keeps the floating rect computed by compute_view;
+            // it does not depend on tab bar geometry.
+            self.view.notification_hit_area = layout.notification_hit_area;
+        }
     }
 }
 

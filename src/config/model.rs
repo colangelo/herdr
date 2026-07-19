@@ -1054,9 +1054,10 @@ pub struct UiConfig {
     /// Sidebar workspace list ordering. "manual" keeps the user's drag order,
     /// "priority" bubbles attention-needing workspaces to the top. Default: "manual".
     pub workspace_sort: WorkspaceSortConfig,
-    /// Notification center dropdown position. "top-right" anchors under the
-    /// tab bar's right edge, "bottom-right" anchors to the bottom-right of the
-    /// frame. Default: "top-right".
+    /// Notification center position. "top-right" puts the indicator in the
+    /// tab bar with the dropdown under its right edge; "bottom-right" floats
+    /// the indicator in the frame's bottom-right corner with the dropdown
+    /// opening above it. Default: "top-right".
     pub notification_center_position: NotificationCenterPositionConfig,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).

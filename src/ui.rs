@@ -41,7 +41,10 @@ use self::mobile::{
 };
 use self::navigator::render_navigator_overlay;
 pub(crate) use self::notification_center::clear_button_width as notification_center_clear_button_width;
-use self::notification_center::render_notification_center;
+use self::notification_center::{
+    floating_notification_indicator_rect, render_floating_notification_indicator,
+    render_notification_center,
+};
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
 pub(crate) use self::panes::popup_pane_rects;
@@ -315,6 +318,9 @@ fn compute_view_internal(
         compute_workspace_card_areas(app, sidebar_area)
     };
 
+    let indicator_width = notification_indicator_width(app.notification_log.unread_count());
+    let indicator_in_tab_bar = app.notification_center_position
+        == crate::config::NotificationCenterPositionConfig::TopRight;
     let tab_bar_view = app
         .active
         .and_then(|ws_idx| app.workspaces.get(ws_idx))
@@ -325,11 +331,20 @@ fn compute_view_internal(
                 app.tab_scroll,
                 app.tab_scroll_follow_active,
                 app.mouse_capture,
-                notification_indicator_width(app.notification_log.unread_count()),
+                if indicator_in_tab_bar {
+                    indicator_width
+                } else {
+                    0
+                },
             )
         })
         .unwrap_or_default();
     app.tab_scroll = tab_bar_view.scroll;
+    let notification_hit_area = if indicator_in_tab_bar {
+        tab_bar_view.notification_hit_area
+    } else {
+        floating_notification_indicator_rect(area, indicator_width)
+    };
 
     let TabSurfaceLayout {
         pane_infos,
@@ -370,7 +385,7 @@ fn compute_view_internal(
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
-        notification_hit_area: tab_bar_view.notification_hit_area,
+        notification_hit_area,
         terminal_area,
         mobile_header_rect: Rect::default(),
         mobile_menu_hit_area: Rect::default(),
@@ -472,6 +487,12 @@ pub fn render_with_runtime_registry(
         render_tab_surface(app, terminal_runtimes, app.view.tab_surface(), frame);
     } else {
         render_empty(app, frame, terminal_area);
+    }
+
+    if app.view.layout != ViewLayout::Mobile {
+        // Bottom-right notification indicator floats over pane content;
+        // transient toasts and interactive overlays still draw above it.
+        render_floating_notification_indicator(app, frame);
     }
 
     // Ambient notifications sit above panes, but below interactive overlays.
