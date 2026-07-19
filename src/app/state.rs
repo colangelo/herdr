@@ -1706,6 +1706,8 @@ pub struct AppState {
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub workspace_sort: WorkspaceSort,
+    /// Where the notification center dropdown anchors (TUI presentation).
+    pub notification_center_position: crate::config::NotificationCenterPositionConfig,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -2231,6 +2233,7 @@ impl AppState {
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             workspace_sort: WorkspaceSort::Manual,
+            notification_center_position: crate::config::NotificationCenterPositionConfig::TopRight,
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,
@@ -2843,6 +2846,30 @@ mod tests {
             button.x + button.width <= list.x + list.width,
             "button stays within the inner area"
         );
+    }
+
+    #[test]
+    fn notification_center_rect_honors_bottom_right_position() {
+        let mut state = AppState::test_new();
+        state.view.terminal_area = Rect::new(0, 1, 80, 24);
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        state.post_notification(test_toast(ToastKind::Finished, "one", None));
+        state.open_notification_center();
+
+        let top = state.notification_center_rect().expect("top-right rect");
+        assert_eq!(top.y, 1, "top-right anchors under the tab bar");
+
+        state.notification_center_position =
+            crate::config::NotificationCenterPositionConfig::BottomRight;
+        let bottom = state.notification_center_rect().expect("bottom-right rect");
+        assert_eq!(
+            bottom.y + bottom.height,
+            25,
+            "bottom-right sits at the screen bottom"
+        );
+        assert_eq!(bottom.x, top.x, "right alignment is unchanged");
+        assert_eq!(bottom.width, top.width);
+        assert_eq!(bottom.height, top.height);
     }
 
     #[test]

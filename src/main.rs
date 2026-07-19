@@ -410,6 +410,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # (attention-needing workspaces bubble to the top, like agent_panel_sort).
 # workspace_sort = "manual"
 
+# Notification center dropdown position: "top-right" (under the tab bar's
+# right edge) or "bottom-right".
+# notification_center_position = "top-right"
+
 # Show each workspace's jump symbol (1-9, then a-z; the switch_workspace
 # target) on the sidebar branch line.
 # show_workspace_numbers = false

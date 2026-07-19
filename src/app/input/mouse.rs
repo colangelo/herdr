@@ -1429,7 +1429,13 @@ impl AppState {
         let panel_h = (rows + 2 + footer).min(screen.height.max(1));
         let right = anchor.x + anchor.width;
         let x = right.saturating_sub(panel_w).max(screen.x);
-        let y = (anchor.y + anchor.height).min(screen.y + screen.height.saturating_sub(panel_h));
+        let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
+        let y = match self.notification_center_position {
+            crate::config::NotificationCenterPositionConfig::TopRight => {
+                (anchor.y + anchor.height).min(bottom_y)
+            }
+            crate::config::NotificationCenterPositionConfig::BottomRight => bottom_y,
+        };
         Some(Rect::new(x, y, panel_w, panel_h))
     }
 
