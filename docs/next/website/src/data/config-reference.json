@@ -993,7 +993,7 @@
           "key": "ui.sidebar_active_border",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" — or a bool for backward compatibility (true = \"both\").",
+          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" — or a bool for backward compatibility (true = \"both\"). \"left\"/\"right\" also apply in the collapsed sidebar, which reserves one extra edge column for the bar; \"above\"/\"below\"/\"both\" draw nothing there (no spacer rows).",
           "values": [
             "off",
             "above",
