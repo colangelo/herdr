@@ -16,4 +16,4 @@
 
 - [x] 3.1 Docs: `docs/next/CHANGELOG.md`
 - [x] 3.2 `cargo fmt` + `just check`
-- [ ] 3.3 Dogfood: beta, upgrade, user verifies collapsed sidebar live (16 agents, `sidebar_active_border = "left"`, custom `sidebar_active_bg`, number colors); then resolve+close issue #24 and archive
+- [x] 3.3 Dogfood: beta, upgrade, user verifies collapsed sidebar live (16 agents, `sidebar_active_border = "left"`, custom `sidebar_active_bg`, number colors); then resolve+close issue #24 and archive
