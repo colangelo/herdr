@@ -237,17 +237,22 @@ beta ref="master":
 # (self-update is disabled for brew, but `server live-handoff` is source-agnostic).
 # Usage: just brew-upgrade            # stable formula/binary `herdr`
 #        just brew-upgrade herdr-beta # beta formula/binary `herdr-beta`
+# Always addresses the brew binary by its full path: another `{{formula}}` earlier
+# on PATH (e.g. a hand-built ~/.local/bin/herdr) would otherwise shadow it and the
+# upgrade would silently act on the wrong binary.
 brew-upgrade formula="herdr":
+    @test -x "$(brew --prefix)/bin/{{formula}}" || { echo "$(brew --prefix)/bin/{{formula}} not installed — run: brew install colangelo/tap/{{formula}}"; exit 1; }
     brew update
     brew upgrade {{formula}}
-    {{formula}} server live-handoff --import-exe "$(brew --prefix)/bin/{{formula}}"
-    @echo "{{formula}} upgraded; running server handed off onto the new binary, panes preserved"
+    "$(brew --prefix)/bin/{{formula}}" server live-handoff --import-exe "$(brew --prefix)/bin/{{formula}}"
+    @echo "{{formula}} upgraded; running server handed off onto $(brew --prefix)/bin/{{formula}}, panes preserved"
 
 # Hands the current (stable) server off to the herdr-beta binary via live handoff
 # (source-agnostic); they share one session socket, so it takes over in place.
 # Live-switch the running server to the BETA channel, panes preserved (reattach: herdr-beta)
 switch-beta:
     @command -v herdr-beta >/dev/null || { echo "herdr-beta not installed — run: brew install colangelo/tap/herdr-beta"; exit 1; }
+    @echo "handing off onto $(command -v herdr-beta)"
     herdr server live-handoff --import-exe "$(command -v herdr-beta)"
     @echo "server is now herdr-beta — reattach with: herdr-beta"
 
@@ -255,5 +260,6 @@ switch-beta:
 # Live-switch the running server to the STABLE channel, panes preserved (reattach: herdr)
 switch-stable:
     @command -v herdr >/dev/null || { echo "herdr not installed — run: brew install colangelo/tap/herdr"; exit 1; }
+    @echo "handing off onto $(command -v herdr)"
     herdr-beta server live-handoff --import-exe "$(command -v herdr)"
     @echo "server is now herdr — reattach with: herdr"
