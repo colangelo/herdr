@@ -376,6 +376,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # sort_motion_settle_ms = 2000
 # sort_motion_step_ms = 150
 
+# Step cadence across a reshuffle: "linear" spaces every step evenly;
+# "bubble" eases in and out — slow to break away, quickest mid-flight,
+# slowing into the final slot. The curve stretches over the reshuffle, so it
+# only reads as acceleration when rows travel several positions.
+# sort_motion_easing = "linear"
+
 # Sidebar entry composition: "default" keeps the current layout; "editorial"
 # right-aligns jump numbers on the name row, renders thin uppercase section
 # headers, and dims inactive meta lines.
