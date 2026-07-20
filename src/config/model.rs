@@ -180,6 +180,17 @@ pub struct StateColorsConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum SortMotionEasingConfig {
+    /// Every bubble step is `sort_motion_step_ms` apart.
+    #[default]
+    Linear,
+    /// Ease across a reshuffle: slow to break away, quickest mid-flight,
+    /// slowing again as the list settles.
+    Bubble,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum SortMotionConfig {
     /// Priority re-sorts settle for a delay, then rows bubble one position
     /// per step interval.
@@ -1151,6 +1162,11 @@ pub struct UiConfig {
     /// Interval between one-position bubble steps, in milliseconds.
     /// Default: 150.
     pub sort_motion_step_ms: u64,
+    /// Step cadence across a reshuffle. "linear" spaces every step evenly;
+    /// "bubble" eases in and out — slow to break away, quickest mid-flight,
+    /// slowing into the final slot. Only visible on longer travels.
+    /// Default: "linear".
+    pub sort_motion_easing: SortMotionEasingConfig,
     /// Sidebar entry composition. "default" keeps the current layout;
     /// "editorial" right-aligns jump numbers on the name row, renders thin
     /// uppercase section headers, and dims inactive meta lines.
@@ -1462,6 +1478,7 @@ impl Default for UiConfig {
             sort_motion: SortMotionConfig::Bubble,
             sort_motion_settle_ms: 2000,
             sort_motion_step_ms: 150,
+            sort_motion_easing: SortMotionEasingConfig::Linear,
             sidebar_style: SidebarStyleConfig::Default,
             state_colors: StateColorsConfig::default(),
             notification_center_position: NotificationCenterPositionConfig::TopRight,
@@ -1934,6 +1951,28 @@ sort_motion = "bubble"
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.sort_motion, SortMotionConfig::Bubble);
         assert_eq!(config.ui.sort_motion_settle_ms, 2000);
+    }
+
+    #[test]
+    fn sort_motion_easing_parses_and_defaults() {
+        assert_eq!(
+            Config::default().ui.sort_motion_easing,
+            SortMotionEasingConfig::Linear
+        );
+
+        let toml = r#"
+[ui]
+sort_motion_easing = "bubble"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.sort_motion_easing, SortMotionEasingConfig::Bubble);
+
+        let toml = r#"
+[ui]
+sort_motion_easing = "linear"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.sort_motion_easing, SortMotionEasingConfig::Linear);
     }
 
     #[test]

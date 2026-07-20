@@ -1255,6 +1255,16 @@
           "description": "Interval between one-position bubble steps, in milliseconds."
         },
         {
+          "key": "ui.sort_motion_easing",
+          "type": "enum",
+          "default": "\"linear\"",
+          "description": "Step cadence across a reshuffle. \"linear\" spaces every step evenly; \"bubble\" eases in and out — slow to break away, quickest mid-flight, slowing into the final slot. The curve stretches over the reshuffle, so it only reads as acceleration when rows travel several positions.",
+          "values": [
+            "linear",
+            "bubble"
+          ]
+        },
+        {
           "key": "ui.sidebar_style",
           "type": "enum",
           "default": "\"default\"",

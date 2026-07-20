@@ -16,20 +16,55 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ListMotionEasing {
+    /// Every step is `step` apart.
+    #[default]
+    Linear,
+    /// Ease in and out across a motion burst: slow to break away, quickest
+    /// mid-flight, slowing again as the list settles — like a bubble rising.
+    Bubble,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ListMotionTiming {
     /// How long a diverged entry holds its position before it starts moving.
     pub settle: Duration,
-    /// Interval between one-position steps once an entry is moving.
+    /// Interval between one-position steps once an entry is moving. With
+    /// `Bubble` easing this is the mid-burst reference, not a fixed spacing.
     pub step: Duration,
+    pub easing: ListMotionEasing,
 }
 
-/// Returns when the next step after `now` is due. Constant interval for now;
-/// this is the single seam where an easing curve (slow start, accelerate,
-/// decelerate into the slot — like a bubble in nature) can replace the timing
-/// without touching consumers.
-fn next_step_delay(timing: ListMotionTiming) -> Duration {
-    timing.step
+/// Slowest and fastest multiples of `step` the bubble curve produces.
+const BUBBLE_SLOWEST: f32 = 2.0;
+const BUBBLE_FASTEST: f32 = 0.5;
+
+/// Delay before the next step, given how far the current burst has come.
+///
+/// The primitive keeps one global cadence (one adjacent swap per interval), so
+/// easing is applied across the burst rather than per row. Progress is
+/// `taken / (taken + remaining)`, and speed follows a sine arc: slow at both
+/// ends, fastest in the middle.
+fn next_step_delay(timing: ListMotionTiming, steps_taken: u32, steps_remaining: u32) -> Duration {
+    match timing.easing {
+        ListMotionEasing::Linear => timing.step,
+        ListMotionEasing::Bubble => {
+            let total = steps_taken.saturating_add(steps_remaining);
+            if total == 0 {
+                return timing.step;
+            }
+            let progress = f32::from(u16::try_from(steps_taken).unwrap_or(u16::MAX))
+                / f32::from(u16::try_from(total).unwrap_or(u16::MAX));
+            let speed = (std::f32::consts::PI * progress).sin();
+            let factor = BUBBLE_FASTEST + (BUBBLE_SLOWEST - BUBBLE_FASTEST) * (1.0 - speed);
+            // sin(π) lands a hair below zero in f32, so clamp rather than let
+            // rounding push a step past the configured bounds.
+            timing
+                .step
+                .mul_f32(factor.clamp(BUBBLE_FASTEST, BUBBLE_SLOWEST))
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -40,6 +75,9 @@ pub(crate) struct ListMotion<K> {
     diverged_since: HashMap<K, Instant>,
     /// Step cadence: one adjacent swap per interval while motion is running.
     next_step_at: Option<Instant>,
+    /// Steps performed in the current motion burst; drives the easing curve
+    /// and resets whenever the list reaches its target order.
+    steps_taken: u32,
 }
 
 impl<K: Eq + Hash + Clone> ListMotion<K> {
@@ -48,6 +86,7 @@ impl<K: Eq + Hash + Clone> ListMotion<K> {
             display: Vec::new(),
             diverged_since: HashMap::new(),
             next_step_at: None,
+            steps_taken: 0,
         }
     }
 
@@ -84,6 +123,7 @@ impl<K: Eq + Hash + Clone> ListMotion<K> {
         self.refresh_divergence(now, target);
         if self.diverged_since.is_empty() {
             self.next_step_at = None;
+            self.steps_taken = 0;
             return &self.display;
         }
         if self.next_step_at.is_some_and(|at| now < at) {
@@ -112,12 +152,29 @@ impl<K: Eq + Hash + Clone> ListMotion<K> {
                 continue;
             }
             self.display.swap(idx, idx + 1);
-            self.next_step_at = Some(now + next_step_delay(timing));
+            self.steps_taken = self.steps_taken.saturating_add(1);
+            self.next_step_at =
+                Some(now + next_step_delay(timing, self.steps_taken, self.remaining_steps(target)));
             self.refresh_divergence(now, target);
             break;
         }
 
         &self.display
+    }
+
+    /// Steps still owed to the furthest-travelling row — how many more swaps
+    /// the burst needs before the list is in target order.
+    fn remaining_steps(&self, target: &[K]) -> u32 {
+        self.display
+            .iter()
+            .enumerate()
+            .filter_map(|(display_idx, key)| {
+                let target_idx = target.iter().position(|other| other == key)?;
+                Some(display_idx.abs_diff(target_idx))
+            })
+            .max()
+            .map(|steps| u32::try_from(steps).unwrap_or(u32::MAX))
+            .unwrap_or(0)
     }
 
     /// Rebuilds the diverged-key set against `target`: aligned keys forget
@@ -154,6 +211,7 @@ impl<K: Eq + Hash + Clone> ListMotion<K> {
         self.display.clear();
         self.diverged_since.clear();
         self.next_step_at = None;
+        self.steps_taken = 0;
     }
 }
 
@@ -164,6 +222,13 @@ mod tests {
     const TIMING: ListMotionTiming = ListMotionTiming {
         settle: Duration::from_millis(2000),
         step: Duration::from_millis(150),
+        easing: ListMotionEasing::Linear,
+    };
+
+    const BUBBLE_TIMING: ListMotionTiming = ListMotionTiming {
+        settle: Duration::from_millis(2000),
+        step: Duration::from_millis(150),
+        easing: ListMotionEasing::Bubble,
     };
 
     fn keys(list: &[&str]) -> Vec<String> {
@@ -339,6 +404,95 @@ mod tests {
             keys(&["a", "b", "c", "d"])
         );
         assert_eq!(motion.next_due(TIMING), None);
+    }
+
+    #[test]
+    fn linear_easing_keeps_a_constant_cadence() {
+        // Every gap is exactly `step`, whatever the burst length.
+        let mut motion = ListMotion::new();
+        let t0 = Instant::now();
+        let start = keys(&["a", "b", "c", "d", "e"]);
+        let target = keys(&["e", "a", "b", "c", "d"]);
+        motion.tick(t0, &start, TIMING);
+        motion.tick(t0, &target, TIMING);
+
+        let mut at = t0 + TIMING.settle;
+        for _ in 0..4 {
+            motion.tick(at, &target, TIMING);
+            let Some(next) = motion.next_due(TIMING) else {
+                break;
+            };
+            assert_eq!(next.duration_since(at), TIMING.step);
+            at = next;
+        }
+    }
+
+    #[test]
+    fn bubble_easing_is_slow_at_the_edges_and_quick_mid_burst() {
+        // "e" travels the full list, so the burst is long enough for the curve
+        // to show: the first and last gaps are slower than `step`, and the
+        // mid-burst gap is quicker.
+        let mut motion = ListMotion::new();
+        let t0 = Instant::now();
+        let start = keys(&["a", "b", "c", "d", "e"]);
+        let target = keys(&["e", "a", "b", "c", "d"]);
+        motion.tick(t0, &start, BUBBLE_TIMING);
+        motion.tick(t0, &target, BUBBLE_TIMING);
+
+        let mut gaps = Vec::new();
+        let mut at = t0 + BUBBLE_TIMING.settle;
+        for _ in 0..4 {
+            motion.tick(at, &target, BUBBLE_TIMING);
+            let Some(next) = motion.next_due(BUBBLE_TIMING) else {
+                break;
+            };
+            gaps.push(next.duration_since(at));
+            at = next;
+        }
+
+        assert!(gaps.len() >= 3, "expected a multi-step burst: {gaps:?}");
+        let first = gaps[0];
+        let quickest = *gaps.iter().min().expect("gaps");
+        let last = *gaps.last().expect("gaps");
+        assert!(
+            first > quickest,
+            "burst should accelerate away from its first step: {gaps:?}"
+        );
+        assert!(
+            last > quickest,
+            "burst should decelerate into the slot: {gaps:?}"
+        );
+        assert!(
+            quickest < BUBBLE_TIMING.step,
+            "mid-burst should be quicker than the reference step: {gaps:?}"
+        );
+        // The curve stretches over the burst, so the edges only grow slower
+        // than the reference step once the travel is long enough — which is
+        // why short reshuffles read as "snappier" rather than "eased".
+        assert!(
+            first < BUBBLE_TIMING.step,
+            "a 4-step burst stays under the reference step at its edges: {gaps:?}"
+        );
+        let long_edge = next_step_delay(BUBBLE_TIMING, 1, 15);
+        assert!(
+            long_edge > BUBBLE_TIMING.step,
+            "a long burst should visibly hesitate at its edges: {long_edge:?}"
+        );
+    }
+
+    #[test]
+    fn bubble_easing_stays_within_its_configured_bounds() {
+        let slowest = TIMING.step.mul_f32(BUBBLE_SLOWEST);
+        let fastest = TIMING.step.mul_f32(BUBBLE_FASTEST);
+        for (taken, remaining) in [(0, 0), (1, 0), (0, 9), (1, 8), (5, 5), (9, 1), (99, 1)] {
+            let delay = next_step_delay(BUBBLE_TIMING, taken, remaining);
+            assert!(
+                delay >= fastest && delay <= slowest,
+                "delay {delay:?} out of bounds for taken={taken} remaining={remaining}"
+            );
+        }
+        // Linear ignores progress entirely.
+        assert_eq!(next_step_delay(TIMING, 3, 7), TIMING.step);
     }
 
     #[test]

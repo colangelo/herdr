@@ -25,9 +25,10 @@ pub use self::{
         ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
         NotificationCenterPositionConfig, PaneBorderActiveStyleConfig, ShellModeConfig,
         SidebarActiveBorderConfig, SidebarCollapsedModeConfig, SidebarStyleConfig,
-        SortMotionConfig, StateColorsConfig, StatusIndicatorStyle, TabBarPositionConfig,
-        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize,
-        UpdateChannelConfig, WorkspaceSortConfig, MAX_TOAST_DELAY_SECONDS,
+        SortMotionConfig, SortMotionEasingConfig, StateColorsConfig, StatusIndicatorStyle,
+        TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
+        ToastHerdrPosition, ToastHerdrSize, UpdateChannelConfig, WorkspaceSortConfig,
+        MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,

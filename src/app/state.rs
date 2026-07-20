@@ -2291,6 +2291,7 @@ impl AppState {
             sort_motion_timing: crate::ui::list_motion::ListMotionTiming {
                 settle: std::time::Duration::from_millis(2000),
                 step: std::time::Duration::from_millis(150),
+                easing: crate::ui::list_motion::ListMotionEasing::Linear,
             },
             workspace_list_motion: crate::ui::list_motion::ListMotion::new(),
             agent_panel_motion: crate::ui::list_motion::ListMotion::new(),

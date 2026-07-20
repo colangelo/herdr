@@ -286,10 +286,19 @@ fn state_color_overrides_from_config(
 fn sort_motion_timing_from_config(
     settle_ms: u64,
     step_ms: u64,
+    easing: crate::config::SortMotionEasingConfig,
 ) -> crate::ui::list_motion::ListMotionTiming {
     crate::ui::list_motion::ListMotionTiming {
         settle: std::time::Duration::from_millis(settle_ms),
         step: std::time::Duration::from_millis(step_ms.max(1)),
+        easing: match easing {
+            crate::config::SortMotionEasingConfig::Linear => {
+                crate::ui::list_motion::ListMotionEasing::Linear
+            }
+            crate::config::SortMotionEasingConfig::Bubble => {
+                crate::ui::list_motion::ListMotionEasing::Bubble
+            }
+        },
     }
 }
 
@@ -703,6 +712,7 @@ impl App {
             sort_motion_timing: sort_motion_timing_from_config(
                 config.ui.sort_motion_settle_ms,
                 config.ui.sort_motion_step_ms,
+                config.ui.sort_motion_easing,
             ),
             workspace_list_motion: crate::ui::list_motion::ListMotion::new(),
             agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
@@ -1644,6 +1654,7 @@ impl App {
                 self.state.sort_motion_timing = sort_motion_timing_from_config(
                     config.ui.sort_motion_settle_ms,
                     config.ui.sort_motion_step_ms,
+                    config.ui.sort_motion_easing,
                 );
                 if !self.state.sort_motion_bubble {
                     self.state.workspace_list_motion.reset();
