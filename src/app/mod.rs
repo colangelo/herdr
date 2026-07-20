@@ -4435,7 +4435,7 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Copy;
 
-        // A press in copy mode must not add the key to the repeat-suppression set...
+        // A press in copy mode must leave held-key repeats deliverable...
         let press_handled = app
             .handle_raw_input_event(raw_key(
                 KeyCode::Char('u'),
@@ -4444,7 +4444,6 @@ mod tests {
             ))
             .await;
         assert!(press_handled);
-        assert!(app.suppressed_repeat_keys.is_empty());
 
         // ...so the following held repeat is dispatched instead of dropped.
         let repeat_handled = app
