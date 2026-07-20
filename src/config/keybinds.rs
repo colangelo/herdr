@@ -2125,10 +2125,10 @@ focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]
 
         // Letter keys resolve to indices 9..34, continuing after digits 0..8.
         let alt_key = |c| TerminalKey::new(KeyCode::Char(c), KeyModifiers::ALT);
-        assert_eq!(kb.focus_agent[9].matched_index(alt_key('a')), Some(9));
-        assert_eq!(kb.focus_agent[10].matched_index(alt_key('b')), Some(10));
-        assert_eq!(kb.focus_agent[34].matched_index(alt_key('z')), Some(34));
-        assert_eq!(kb.focus_agent[9].matched_index(alt_key('b')), None);
+        assert_eq!(kb.focus_agent[9].matched_index(&alt_key('a')), Some(9));
+        assert_eq!(kb.focus_agent[10].matched_index(&alt_key('b')), Some(10));
+        assert_eq!(kb.focus_agent[34].matched_index(&alt_key('z')), Some(34));
+        assert_eq!(kb.focus_agent[9].matched_index(&alt_key('b')), None);
     }
 
     #[test]

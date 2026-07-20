@@ -933,8 +933,19 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         return;
     }
 
-    // Rows follow the visible list order so the numbers stay the jump targets
-    // `prefix+1..9` resolves via `workspace_at_visible_position`.
+    // `left`/`right` get a dedicated edge column for the active bar (the
+    // collapsed width grows by one) so the bar never overwrites the jump
+    // symbol or the state icon; `left` shifts all rows right by one cell.
+    let border_mode = app.sidebar_active_border;
+    let has_bar_column = matches!(
+        border_mode,
+        crate::config::SidebarActiveBorderConfig::Left
+            | crate::config::SidebarActiveBorderConfig::Right
+    );
+    let bar_reserve: u16 = u16::from(border_mode == crate::config::SidebarActiveBorderConfig::Left);
+
+    // Rows follow the visible list order so the labels stay the jump targets
+    // `prefix+1..9,a..z` resolves via `workspace_at_visible_position`.
     for (visible_idx, ws_idx) in app.visible_workspace_order().into_iter().enumerate() {
         let Some(ws) = app.workspaces.get(ws_idx) else {
             continue;
@@ -950,6 +961,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             app.status_indicators,
             &app.state_icon_colors(),
         );
+        let symbol = crate::config::jump_symbol(visible_idx).unwrap_or(' ');
         let is_selected = visible_idx == app.selected && is_navigating;
         let is_active = Some(visible_idx) == app.active;
         let row_style = if is_selected {
@@ -962,9 +974,12 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         let num_style = if is_selected {
             Style::default().fg(p.overlay1).bg(p.surface0)
         } else if is_active {
-            Style::default().fg(p.text).bg(app.sidebar_active_band_bg())
+            Style::default()
+                .fg(p.text)
+                .bg(app.sidebar_active_band_bg())
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(p.overlay0)
+            Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0))
         };
 
         if is_selected || is_active {
@@ -974,13 +989,27 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             }
         }
 
+        let mut spans = Vec::new();
+        if bar_reserve > 0 {
+            spans.push(Span::styled(" ", row_style));
+        }
+        spans.push(Span::styled(symbol.to_string(), num_style));
+        spans.push(Span::styled(" ", row_style));
+        spans.push(Span::styled(icon, icon_style));
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(format!("{:<2}", visible_idx + 1), num_style),
-                Span::styled(icon, icon_style),
-            ])),
+            Paragraph::new(Line::from(spans)),
             Rect::new(ws_area.x, y, ws_area.width, 1),
         );
+
+        // Bar draws after the row so it wins the edge cell.
+        if is_active && has_bar_column {
+            let x = if border_mode == crate::config::SidebarActiveBorderConfig::Left {
+                ws_area.x
+            } else {
+                ws_area.x + ws_area.width.saturating_sub(1)
+            };
+            draw_sidebar_active_border_bar(app, frame, x, y, 1, ws_area.y + ws_area.height);
+        }
     }
 
     if let Some(divider_y) = divider_y {
@@ -1008,21 +1037,62 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             if y >= detail_content_area.y + detail_content_area.height {
                 break;
             }
-            let position = detail_idx + 1;
-            let position_style = Style::default().fg(p.overlay0);
+            let symbol = crate::config::jump_symbol(detail_idx).unwrap_or(' ');
+            let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
+            let row_style = if is_active {
+                Style::default().bg(app.sidebar_active_band_bg())
+            } else {
+                Style::default()
+            };
+            let position_style = if is_active {
+                Style::default()
+                    .fg(p.text)
+                    .bg(app.sidebar_active_band_bg())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0))
+            };
             let (icon, icon_style) = state_icon(
                 detail.state,
                 detail.seen,
                 app.status_indicators,
                 &app.state_icon_colors(),
             );
+
+            if is_active {
+                let buf = frame.buffer_mut();
+                for x in detail_content_area.x..detail_content_area.x + detail_content_area.width {
+                    buf[(x, y)].set_style(row_style);
+                }
+            }
+
+            let mut spans = Vec::new();
+            if bar_reserve > 0 {
+                spans.push(Span::styled(" ", row_style));
+            }
+            spans.push(Span::styled(format!("{symbol:<2}"), position_style));
+            spans.push(Span::styled(icon, icon_style));
             frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(format!("{position:<2}"), position_style),
-                    Span::styled(icon, icon_style),
-                ])),
+                Paragraph::new(Line::from(spans)),
                 Rect::new(detail_content_area.x, y, detail_content_area.width, 1),
             );
+
+            // Bar draws after the row so it wins the edge cell.
+            if is_active && has_bar_column {
+                let x = if border_mode == crate::config::SidebarActiveBorderConfig::Left {
+                    detail_content_area.x
+                } else {
+                    detail_content_area.x + detail_content_area.width.saturating_sub(1)
+                };
+                draw_sidebar_active_border_bar(
+                    app,
+                    frame,
+                    x,
+                    y,
+                    1,
+                    detail_content_area.y + detail_content_area.height,
+                );
+            }
         }
     }
 
@@ -2864,7 +2934,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
-    fn collapsed_sidebar_keeps_workspace_status_visible_for_two_digit_positions() {
+    fn collapsed_sidebar_labels_tenth_entry_with_jump_letter() {
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = (1..=10)
             .map(|idx| Workspace::test_new(&format!("workspace-{idx}")))
@@ -2880,7 +2950,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         }
 
         let area = Rect::new(0, 0, 4, 25);
-        let (workspace_area, _, _) = collapsed_sidebar_sections(area);
+        let (ws_area, _, detail_area) = collapsed_sidebar_sections(area);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
             .expect("test terminal should initialize");
 
@@ -2888,28 +2958,20 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .draw(|frame| render_sidebar_collapsed(&app, frame, area))
             .expect("collapsed sidebar should render");
 
-        let tenth_row = workspace_area.y + 9;
+        // The 10th entry is jumped with `a`, not a two-digit number, in both
+        // sections; the state icon column never shifts.
+        let tenth_row = detail_area.y + 9;
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(workspace_area.x, workspace_area.y)].symbol(), "1");
-        assert_eq!(
-            buffer[(workspace_area.x + 1, workspace_area.y)].symbol(),
-            " "
-        );
-        assert_eq!(
-            buffer[(workspace_area.x + 2, workspace_area.y)].symbol(),
-            "·"
-        );
-        assert_eq!(buffer[(workspace_area.x, tenth_row)].symbol(), "1");
-        assert_eq!(buffer[(workspace_area.x + 1, tenth_row)].symbol(), "0");
-        assert_eq!(buffer[(workspace_area.x + 2, tenth_row)].symbol(), "·");
+        assert_eq!(buffer[(detail_area.x, tenth_row)].symbol(), "a");
+        assert_eq!(buffer[(detail_area.x + 1, tenth_row)].symbol(), " ");
+        assert_eq!(buffer[(detail_area.x + 2, tenth_row)].symbol(), "○");
+        assert_eq!(buffer[(ws_area.x, ws_area.y + 9)].symbol(), "a");
     }
 
     #[test]
-    fn collapsed_sidebar_keeps_status_visible_for_two_digit_positions() {
+    fn collapsed_sidebar_highlights_active_agent_row() {
         let mut app = crate::app::state::AppState::test_new();
-        app.workspaces = (1..=10)
-            .map(|idx| Workspace::test_new(&format!("workspace-{idx}")))
-            .collect();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.ensure_test_terminals();
 
         for ws_idx in 0..app.workspaces.len() {
@@ -2919,8 +2981,14 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 .clone();
             app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
         }
+        app.active = Some(1);
 
-        let area = Rect::new(0, 0, 4, 25);
+        let active_idx = agent_panel_entries(&app)
+            .iter()
+            .position(|entry| entry.ws_idx == 1)
+            .expect("active workspace agent entry");
+
+        let area = Rect::new(0, 0, 4, 12);
         let (_, _, detail_area) = collapsed_sidebar_sections(area);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
             .expect("test terminal should initialize");
@@ -2929,11 +2997,101 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .draw(|frame| render_sidebar_collapsed(&app, frame, area))
             .expect("collapsed sidebar should render");
 
-        let tenth_row = detail_area.y + 9;
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(detail_area.x, tenth_row)].symbol(), "1");
-        assert_eq!(buffer[(detail_area.x + 1, tenth_row)].symbol(), "0");
-        assert_eq!(buffer[(detail_area.x + 2, tenth_row)].symbol(), "·");
+        let active_row = detail_area.y + active_idx as u16;
+        let inactive_row = detail_area.y + (1 - active_idx) as u16;
+        let active_style = buffer[(detail_area.x, active_row)].style();
+        assert_eq!(active_style.bg, Some(app.sidebar_active_band_bg()));
+        assert!(active_style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(active_style.fg, Some(app.palette.text));
+        assert_ne!(
+            buffer[(detail_area.x, inactive_row)].style().bg,
+            Some(app.sidebar_active_band_bg())
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_honours_number_color_overrides() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        app.workspace_number_color = Some(ratatui::style::Color::Rgb(1, 2, 3));
+        app.agent_number_color = Some(ratatui::style::Color::Rgb(4, 5, 6));
+
+        for ws_idx in 0..app.workspaces.len() {
+            let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
+        }
+
+        let area = Rect::new(0, 0, 4, 12);
+        let (ws_area, _, detail_area) = collapsed_sidebar_sections(area);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+
+        terminal
+            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
+            .expect("collapsed sidebar should render");
+
+        let buffer = terminal.backend().buffer();
+        // Row 0 is the navigate-mode selection; row 1 shows the plain number color.
+        assert_eq!(
+            buffer[(ws_area.x, ws_area.y + 1)].style().fg,
+            Some(ratatui::style::Color::Rgb(1, 2, 3))
+        );
+        assert_eq!(
+            buffer[(detail_area.x, detail_area.y)].style().fg,
+            Some(ratatui::style::Color::Rgb(4, 5, 6))
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_draws_left_active_border_bar() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        app.sidebar_active_border = crate::config::SidebarActiveBorderConfig::Left;
+        app.active = Some(0);
+
+        for ws_idx in 0..app.workspaces.len() {
+            let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
+        }
+
+        let active_idx = agent_panel_entries(&app)
+            .iter()
+            .position(|entry| entry.ws_idx == 0)
+            .expect("active workspace agent entry");
+
+        // One column wider: the leftmost column is reserved for the bar.
+        let area = Rect::new(0, 0, 5, 12);
+        let (ws_area, _, detail_area) = collapsed_sidebar_sections(area);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+
+        terminal
+            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
+            .expect("collapsed sidebar should render");
+
+        let buffer = terminal.backend().buffer();
+        let accent = app.pane_border_color(true);
+
+        // Active space row: bar in the reserved column, content shifted right.
+        assert_eq!(buffer[(ws_area.x, ws_area.y)].symbol(), "│");
+        assert_eq!(buffer[(ws_area.x, ws_area.y)].style().fg, Some(accent));
+        assert_eq!(buffer[(ws_area.x + 1, ws_area.y)].symbol(), "1");
+        // Inactive space row: reserved column stays blank.
+        assert_eq!(buffer[(ws_area.x, ws_area.y + 1)].symbol(), " ");
+
+        // Active agent row gets the bar too.
+        let agent_row = detail_area.y + active_idx as u16;
+        assert_eq!(buffer[(detail_area.x, agent_row)].symbol(), "│");
+        assert_eq!(buffer[(detail_area.x, agent_row)].style().fg, Some(accent));
     }
 
     #[test]
