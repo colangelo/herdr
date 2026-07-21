@@ -192,11 +192,10 @@ pub enum ResponseResult {
     NotificationList {
         notifications: Vec<super::notifications::NotificationInfo>,
         unread_count: u64,
-        last_seen_id: u64,
     },
     NotificationMarkSeen {
-        last_seen_id: u64,
         changed: bool,
+        unread_count: u64,
     },
     NotificationCleared {
         cleared: u64,

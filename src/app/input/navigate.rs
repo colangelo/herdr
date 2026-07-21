@@ -747,13 +747,14 @@ impl App {
     }
 
     /// Jump to the selected notification's target pane via the same focus
-    /// path as the toast click, then close the panel. Entries without a
-    /// resolvable target are not actionable: the panel stays open.
+    /// path as the toast click, mark that entry read, then close the panel.
+    /// Entries without a resolvable target are not actionable: the panel
+    /// stays open and the entry stays unread.
     pub(crate) fn activate_notification_center_selection(&mut self) {
-        let Some(target) = self
+        let Some((entry_id, target)) = self
             .state
             .notification_center_selected_entry()
-            .and_then(|entry| entry.target.clone())
+            .and_then(|entry| Some((entry.id, entry.target.clone()?)))
         else {
             return;
         };
@@ -765,6 +766,7 @@ impl App {
         else {
             return;
         };
+        self.state.notification_log.mark_read(entry_id);
         self.state.close_notification_center();
         self.focus_pane_internal_via_api(ws_idx, target.pane_id);
         self.state.mode = Mode::Terminal;

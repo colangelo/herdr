@@ -799,6 +799,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "read": {
+              "default": false,
+              "type": "boolean"
+            },
             "title": {
               "type": "string"
             },
@@ -2423,6 +2427,20 @@
             "path",
             "ratio"
           ],
+          "type": "object"
+        },
+        "NotificationMarkSeenParams": {
+          "description": "Params for `notification.mark_seen`: an `id` marks that one entry read,\nno `id` marks every entry read.",
+          "properties": {
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         },
         "NotificationShowParams": {
@@ -4661,7 +4679,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/EmptyParams"
+              "$ref": "#/schemas/request/$defs/NotificationMarkSeenParams"
             }
           },
           "required": [
@@ -7520,6 +7538,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "read": {
+              "default": false,
+              "type": "boolean"
+            },
             "title": {
               "type": "string"
             },
@@ -9653,11 +9675,6 @@
             },
             {
               "properties": {
-                "last_seen_id": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                },
                 "notifications": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/NotificationInfo"
@@ -9677,8 +9694,7 @@
               "required": [
                 "type",
                 "notifications",
-                "unread_count",
-                "last_seen_id"
+                "unread_count"
               ],
               "type": "object"
             },
@@ -9687,20 +9703,20 @@
                 "changed": {
                   "type": "boolean"
                 },
-                "last_seen_id": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                },
                 "type": {
                   "const": "notification_mark_seen",
                   "type": "string"
+                },
+                "unread_count": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
                 }
               },
               "required": [
                 "type",
-                "last_seen_id",
-                "changed"
+                "changed",
+                "unread_count"
               ],
               "type": "object"
             },
