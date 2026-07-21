@@ -27,4 +27,4 @@
 
 - [x] 5.1 Docs: amend the unreleased notification-center entry in `docs/next/CHANGELOG.md`
 - [x] 5.2 `cargo fmt` + `just check`
-- [ ] 5.3 Dogfood: beta, upgrade, user verifies (badge stays on open, decrements per click, `r` silences, dim read rows, new buttons); then resolve+close issue #25 and archive
+- [x] 5.3 Dogfood: beta, upgrade, user verifies (badge stays on open, decrements per click, `r` silences, dim read rows, new buttons); then resolve+close issue #25 and archive
