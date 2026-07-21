@@ -198,12 +198,14 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
         let (dot_style, title_style, dim_style, row_style) = if is_selected {
             let fg = panel_contrast_fg(p);
             let selected_base = Style::default().fg(fg).bg(p.accent);
-            (
-                selected_base,
-                selected_base.add_modifier(Modifier::BOLD),
-                selected_base,
-                selected_base,
-            )
+            // The band alone marks selection; dot and bold keep signalling
+            // read state so a selected row stays distinguishable.
+            let selected_title = if entry.read {
+                selected_base
+            } else {
+                selected_base.add_modifier(Modifier::BOLD)
+            };
+            (selected_base, selected_title, selected_base, selected_base)
         } else if !entry.read {
             // Unread: kind-colored dot, bold title.
             let dot_color = match entry.kind {
@@ -226,11 +228,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
                 Style::default(),
             )
         };
-        let dot = if is_selected || !entry.read {
-            " ● "
-        } else {
-            "   "
-        };
+        let dot = if !entry.read { " ● " } else { "   " };
 
         let line = Line::from(vec![
             Span::styled(dot, dot_style),
@@ -441,13 +439,39 @@ mod tests {
             .contains(ratatui::style::Modifier::BOLD));
         assert_eq!(title_cell.style().fg, Some(app.palette.text));
 
-        // Read row is selected here; verify its blank-dot/dim rendering with
-        // the selection moved back to the unread row.
+        // The read row is selected here: the band marks the selection, but
+        // the dot stays absent and the title stays regular-weight so read
+        // state remains visible on the selected row.
+        let selected_read_dot = &buffer[(list.x + 1, list.y + 1)];
+        assert_eq!(
+            selected_read_dot.symbol(),
+            " ",
+            "selected read rows still drop the dot"
+        );
+        assert_eq!(selected_read_dot.style().bg, Some(app.palette.accent));
+        let selected_read_title = &buffer[(list.x + 3, list.y + 1)];
+        assert!(
+            !selected_read_title
+                .style()
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "selected read rows stay regular-weight"
+        );
+
+        // With the selection moved back to the unread row, the read row keeps
+        // its blank-dot/dim rendering and the selected unread row keeps its
+        // dot and bold on the band.
         app.notification_center_move_selection(-1);
         terminal
             .draw(|frame| render_notification_center(&app, frame))
             .unwrap();
         let buffer = terminal.backend().buffer();
+        let selected_unread_dot = &buffer[(list.x + 1, list.y)];
+        assert_eq!(
+            selected_unread_dot.symbol(),
+            "●",
+            "selected unread rows keep the dot"
+        );
         let read_dot = &buffer[(list.x + 1, list.y + 1)];
         assert_eq!(read_dot.symbol(), " ", "read rows drop the dot");
         let read_title = &buffer[(list.x + 3, list.y + 1)];
