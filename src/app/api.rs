@@ -767,6 +767,7 @@ impl App {
             workspace_id,
             pane_id,
             posted_at_unix: entry.posted_at_unix,
+            read: entry.read,
         }
     }
 
@@ -786,18 +787,24 @@ impl App {
             crate::api::schema::ResponseResult::NotificationList {
                 notifications,
                 unread_count: self.state.notification_log.unread_count() as u64,
-                last_seen_id: self.state.notification_log.last_seen_id(),
             },
         )
     }
 
-    fn handle_notification_mark_seen(&mut self, id: String) -> String {
-        let changed = self.state.notification_log.mark_all_seen();
+    fn handle_notification_mark_seen(
+        &mut self,
+        id: String,
+        params: crate::api::schema::NotificationMarkSeenParams,
+    ) -> String {
+        let changed = match params.id {
+            Some(entry_id) => self.state.notification_log.mark_read(entry_id),
+            None => self.state.notification_log.mark_all_seen(),
+        };
         responses::encode_success(
             id,
             crate::api::schema::ResponseResult::NotificationMarkSeen {
-                last_seen_id: self.state.notification_log.last_seen_id(),
                 changed,
+                unread_count: self.state.notification_log.unread_count() as u64,
             },
         )
     }
@@ -1084,8 +1091,8 @@ impl App {
             Method::NotificationList(_) => {
                 return self.handle_notification_list(request.id);
             }
-            Method::NotificationMarkSeen(_) => {
-                return self.handle_notification_mark_seen(request.id);
+            Method::NotificationMarkSeen(params) => {
+                return self.handle_notification_mark_seen(request.id, params);
             }
             Method::NotificationClear(_) => {
                 return self.handle_notification_clear(request.id);

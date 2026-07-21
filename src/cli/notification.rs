@@ -43,7 +43,6 @@ fn notification_list(args: &[String]) -> std::io::Result<i32> {
     }
 
     let result = &response["result"];
-    let last_seen_id = result["last_seen_id"].as_u64().unwrap_or(0);
     let notifications = result["notifications"].as_array();
     let Some(notifications) = notifications.filter(|list| !list.is_empty()) else {
         println!("no notifications");
@@ -56,7 +55,8 @@ fn notification_list(args: &[String]) -> std::io::Result<i32> {
         .unwrap_or(0);
     for notification in notifications {
         let id = notification["id"].as_u64().unwrap_or(0);
-        let marker = if id > last_seen_id { "*" } else { " " };
+        let read = notification["read"].as_bool().unwrap_or(false);
+        let marker = if read { " " } else { "*" };
         let age = crate::ui::text::relative_time_label(
             now_unix,
             notification["posted_at_unix"].as_u64().unwrap_or(now_unix),

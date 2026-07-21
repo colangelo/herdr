@@ -199,16 +199,16 @@ impl AppState {
         if self.mode == Mode::NotificationCenter {
             match mouse.kind {
                 MouseEventKind::Moved => {
-                    let over_clear = self
-                        .notification_center_clear_button_rect()
-                        .is_some_and(|rect| rect_contains(rect, mouse.column, mouse.row));
+                    let over_button = self
+                        .notification_center_buttons()
+                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row));
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         if let Some(center) = self.notification_center.as_mut() {
                             center.selected = idx;
                         }
                     }
                     if let Some(center) = self.notification_center.as_mut() {
-                        center.clear_hovered = over_clear;
+                        center.hovered_button = over_button;
                     }
                 }
                 MouseEventKind::ScrollUp => self.notification_center_move_selection(-1),
@@ -217,13 +217,25 @@ impl AppState {
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         return Some(MouseAction::ActivateNotificationRow { index: idx });
                     }
-                    if self
-                        .notification_center_clear_button_rect()
-                        .is_some_and(|rect| rect_contains(rect, mouse.column, mouse.row))
+                    match self
+                        .notification_center_buttons()
+                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
                     {
-                        return Some(MouseAction::ClearNotifications);
+                        Some(crate::app::state::NotificationCenterButton::MarkRead) => {
+                            self.mark_all_notifications_read();
+                            return None;
+                        }
+                        Some(crate::app::state::NotificationCenterButton::Clear) => {
+                            return Some(MouseAction::ClearNotifications);
+                        }
+                        Some(crate::app::state::NotificationCenterButton::Close) => {
+                            self.close_notification_center();
+                            leave_modal(self);
+                            return None;
+                        }
+                        None => {}
                     }
-                    // A near-miss elsewhere on the button's row is inert.
+                    // A near-miss elsewhere on the buttons' row is inert.
                     if self.notification_center_footer_row_y() == Some(mouse.row) {
                         return None;
                     }
@@ -1443,36 +1455,31 @@ impl AppState {
         ))
     }
 
-    /// The footer "Clear all" button: a centered filled box on the last inner
-    /// row, present only when there are entries to clear and the inner area has
-    /// room for both a list row and the footer. Styled like the settings/modal
-    /// action buttons.
-    pub(crate) fn notification_center_clear_button_rect(&self) -> Option<Rect> {
+    /// The footer button row (settings-style filled boxes on the last inner
+    /// row), present only when there are entries and the inner area has room
+    /// for both a list row and the footer.
+    pub(crate) fn notification_center_buttons(
+        &self,
+    ) -> Option<crate::ui::NotificationCenterButtonRects> {
         if self.notification_log.is_empty() {
             return None;
         }
-        let inner = self.notification_center_inner()?;
-        if inner.height < 2 {
-            return None;
-        }
-        let width = crate::ui::notification_center_clear_button_width().min(inner.width);
-        let x = inner.x + inner.width.saturating_sub(width) / 2;
-        Some(Rect::new(x, inner.y + inner.height - 1, width, 1))
+        crate::ui::notification_center_button_rects(self.notification_center_inner()?)
     }
 
-    /// Y of the footer row that holds the button. Clicks in this row but
-    /// outside the button are inert rather than closing the panel, so a
-    /// near-miss on the button does not dismiss the center.
+    /// Y of the footer row that holds the buttons. Clicks in this row but
+    /// outside a button are inert rather than closing the panel, so a
+    /// near-miss on a button does not dismiss the center.
     fn notification_center_footer_row_y(&self) -> Option<u16> {
-        self.notification_center_clear_button_rect()
-            .map(|button| button.y)
+        self.notification_center_buttons()
+            .map(|buttons| buttons.row_y())
     }
 
     /// The panel's inner list rect (footer excluded) and the first visible
     /// entry index. Shared by render and mouse hit-testing so they agree.
     pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
         let inner = self.notification_center_inner()?;
-        let footer = if self.notification_center_clear_button_rect().is_some() {
+        let footer = if self.notification_center_buttons().is_some() {
             1
         } else {
             0

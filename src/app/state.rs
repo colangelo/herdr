@@ -1324,17 +1324,20 @@ pub struct NotificationEntry {
     pub context: String,
     pub target: Option<ToastTarget>,
     pub posted_at_unix: u64,
+    /// Per-entry read flag: false when posted, set when the user activates
+    /// the entry (or marks all read). Unread is counted from this, not from
+    /// a high-water mark, so visiting one notification quiets exactly one.
+    pub read: bool,
 }
 
-/// Server-owned bounded notification log with a `last_seen_id` high-water
-/// mark. Every herdr toast is appended here through
-/// `AppState::post_notification`, so the log cannot disagree with the toasts
-/// the user actually saw. In-memory only: empties on a cold server restart.
+/// Server-owned bounded notification log with per-entry read flags. Every
+/// herdr toast is appended here through `AppState::post_notification`, so the
+/// log cannot disagree with the toasts the user actually saw. In-memory
+/// only: empties on a cold server restart.
 #[derive(Debug, Default)]
 pub struct NotificationLog {
     entries: std::collections::VecDeque<NotificationEntry>,
     last_id: u64,
-    last_seen_id: u64,
     /// Entries posted but not yet emitted as `notification.posted` events.
     /// Drained by the App layer, which owns the event hub.
     pending_events: Vec<NotificationEntry>,
@@ -1350,6 +1353,7 @@ impl NotificationLog {
             context: toast.context.clone(),
             target: toast.target.clone(),
             posted_at_unix,
+            read: false,
         };
         self.entries.push_back(entry.clone());
         while self.entries.len() > NOTIFICATION_LOG_CAPACITY {
@@ -1371,33 +1375,37 @@ impl NotificationLog {
         self.entries.is_empty()
     }
 
-    pub fn last_seen_id(&self) -> u64 {
-        self.last_seen_id
-    }
-
-    /// Entries newer than the seen marker. Evicted entries cannot be unread.
+    /// Entries not yet read. Evicted entries cannot be unread.
     pub fn unread_count(&self) -> usize {
-        self.entries
-            .iter()
-            .rev()
-            .take_while(|entry| entry.id > self.last_seen_id)
-            .count()
+        self.entries.iter().filter(|entry| !entry.read).count()
     }
 
-    /// Advance the seen marker to the newest posted entry. Idempotent;
-    /// returns whether the marker moved.
+    /// Mark one entry read. Idempotent; returns whether the flag changed
+    /// (false for unknown ids and already-read entries).
+    pub fn mark_read(&mut self, id: u64) -> bool {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.id == id && !entry.read)
+            .map(|entry| {
+                entry.read = true;
+            })
+            .is_some()
+    }
+
+    /// Mark every entry read, keeping the log. Idempotent; returns whether
+    /// any entry changed.
     pub fn mark_all_seen(&mut self) -> bool {
-        if self.last_seen_id < self.last_id {
-            self.last_seen_id = self.last_id;
-            true
-        } else {
-            false
+        let mut changed = false;
+        for entry in self.entries.iter_mut() {
+            changed |= !entry.read;
+            entry.read = true;
         }
+        changed
     }
 
     /// Empty the log. `last_id` stays monotonic so future entries never reuse
-    /// an id; `last_seen_id` is left as-is (an empty log has zero unread
-    /// regardless). Returns how many entries were removed.
+    /// an id; an empty log has zero unread. Returns how many entries were
+    /// removed.
     pub(crate) fn clear(&mut self) -> usize {
         let removed = self.entries.len();
         self.entries.clear();
@@ -1417,13 +1425,21 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// Footer buttons of the notification center panel, in render order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationCenterButton {
+    MarkRead,
+    Clear,
+    Close,
+}
+
 /// TUI-only state for the notification center dropdown panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationCenterState {
     /// Index into the newest-first entry list.
     pub selected: usize,
-    /// Whether the pointer is over the footer "Clear all" button.
-    pub clear_hovered: bool,
+    /// Which footer button the pointer is over, if any.
+    pub hovered_button: Option<NotificationCenterButton>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1785,11 +1801,13 @@ impl AppState {
 
     /// Open the notification center dropdown and mark all entries seen
     /// (same marker path as the `notification.mark_seen` API).
+    /// Open the panel. Deliberately leaves read state alone: entries only
+    /// quiet down when activated (or via mark-all-read), so the unread badge
+    /// tracks what the user actually visited.
     pub(crate) fn open_notification_center(&mut self) {
-        self.notification_log.mark_all_seen();
         self.notification_center = Some(NotificationCenterState {
             selected: 0,
-            clear_hovered: false,
+            hovered_button: None,
         });
         self.mode = Mode::NotificationCenter;
     }
@@ -1805,8 +1823,14 @@ impl AppState {
         self.notification_log.clear();
         if let Some(center) = self.notification_center.as_mut() {
             center.selected = 0;
-            center.clear_hovered = false;
+            center.hovered_button = None;
         }
+    }
+
+    /// Mark every notification read without emptying the log (the panel's
+    /// `r` action): the badge quiets, the history stays.
+    pub(crate) fn mark_all_notifications_read(&mut self) {
+        self.notification_log.mark_all_seen();
     }
 
     pub(crate) fn notification_center_move_selection(&mut self, delta: isize) {
@@ -2669,23 +2693,44 @@ mod tests {
     }
 
     #[test]
-    fn notification_log_unread_tracks_marker_and_mark_seen_is_idempotent() {
+    fn notification_log_unread_tracks_read_flags_and_mark_seen_is_idempotent() {
         let mut log = NotificationLog::default();
         log.post(&test_toast(ToastKind::Finished, "one", None), 1);
         assert_eq!(log.unread_count(), 1);
         assert!(log.mark_all_seen());
         assert_eq!(log.unread_count(), 0);
-        assert_eq!(log.last_seen_id(), 1);
 
         log.post(&test_toast(ToastKind::NeedsAttention, "two", None), 2);
         log.post(&test_toast(ToastKind::UpdateInstalled, "three", None), 3);
         assert_eq!(log.unread_count(), 2);
-        assert_eq!(log.last_seen_id(), 1);
 
         assert!(log.mark_all_seen());
         assert!(!log.mark_all_seen(), "second mark_seen is a no-op");
         assert_eq!(log.unread_count(), 0);
-        assert_eq!(log.last_seen_id(), 3);
+    }
+
+    #[test]
+    fn notification_log_mark_read_quiets_exactly_one_entry() {
+        let mut log = NotificationLog::default();
+        let one = log.post(&test_toast(ToastKind::Finished, "one", None), 1);
+        let two = log.post(&test_toast(ToastKind::NeedsAttention, "two", None), 2);
+        log.post(&test_toast(ToastKind::UpdateInstalled, "three", None), 3);
+        assert_eq!(log.unread_count(), 3);
+
+        assert!(log.mark_read(two));
+        assert_eq!(log.unread_count(), 2);
+        assert!(!log.mark_read(two), "second mark_read is a no-op");
+        assert!(!log.mark_read(9999), "unknown ids change nothing");
+        assert_eq!(log.unread_count(), 2);
+
+        let read_flags: Vec<(u64, bool)> = log
+            .entries_newest_first()
+            .map(|entry| (entry.id, entry.read))
+            .collect();
+        assert!(
+            read_flags.contains(&(two, true)) && read_flags.contains(&(one, false)),
+            "only the marked entry is read: {read_flags:?}"
+        );
     }
 
     #[test]
@@ -2698,8 +2743,6 @@ mod tests {
         assert_eq!(log.clear(), 2, "clear reports the number removed");
         assert!(log.is_empty());
         assert_eq!(log.unread_count(), 0);
-        // Marker is preserved; an empty log is simply zero-unread.
-        assert_eq!(log.last_seen_id(), 2);
 
         // Ids never rewind: the next post continues past the cleared entries.
         let next_id = log.post(&test_toast(ToastKind::Finished, "three", None), 3);
@@ -2745,23 +2788,25 @@ mod tests {
         }
         state.open_notification_center();
 
-        let button = state
-            .notification_center_clear_button_rect()
-            .expect("clear button present with entries");
+        let buttons = state
+            .notification_center_buttons()
+            .expect("footer buttons present with entries");
+        let button = buttons.clear;
         let (list, _start) = state
             .notification_center_list_window()
             .expect("list window present");
 
-        // The button is a centered box on the row directly below the list, and
-        // the list shows exactly the three entries.
+        // The buttons sit on the row directly below the list, and the list
+        // shows exactly the three entries.
         assert_eq!(button.height, 1);
         assert_eq!(list.y + list.height, button.y);
+        assert_eq!(buttons.close.y, button.y, "buttons share the footer row");
         assert_eq!(list.height, 3);
         assert!(button.width <= list.width, "button fits within the panel");
         assert!(button.x >= list.x, "button sits within the inner area");
         assert!(
-            button.x + button.width <= list.x + list.width,
-            "button stays within the inner area"
+            buttons.close.x + buttons.close.width <= list.x + list.width,
+            "buttons stay within the inner area"
         );
     }
 
@@ -2810,7 +2855,7 @@ mod tests {
         state.open_notification_center();
 
         assert!(state.notification_log.is_empty());
-        assert!(state.notification_center_clear_button_rect().is_none());
+        assert!(state.notification_center_buttons().is_none());
     }
 
     #[test]
@@ -2837,7 +2882,7 @@ mod tests {
     }
 
     #[test]
-    fn open_notification_center_marks_seen_and_clamps_selection() {
+    fn open_notification_center_keeps_unread_and_clamps_selection() {
         let mut state = AppState::test_new();
         for title in ["one", "two", "three"] {
             state.post_notification(test_toast(ToastKind::Finished, title, None));
@@ -2846,7 +2891,11 @@ mod tests {
 
         state.open_notification_center();
         assert_eq!(state.mode, Mode::NotificationCenter);
-        assert_eq!(state.notification_log.unread_count(), 0);
+        assert_eq!(
+            state.notification_log.unread_count(),
+            3,
+            "opening the panel leaves read state alone"
+        );
         assert_eq!(
             state
                 .notification_center

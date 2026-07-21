@@ -2830,7 +2830,7 @@ mod tests {
         let _ = app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
             id: "seen".into(),
             method: crate::api::schema::Method::NotificationMarkSeen(
-                crate::api::schema::EmptyParams::default(),
+                crate::api::schema::NotificationMarkSeenParams::default(),
             ),
         });
         app.state
@@ -2850,7 +2850,6 @@ mod tests {
         let crate::api::schema::ResponseResult::NotificationList {
             notifications,
             unread_count,
-            last_seen_id,
         } = parsed.result
         else {
             panic!("expected NotificationList result");
@@ -2861,7 +2860,15 @@ mod tests {
             .collect();
         assert_eq!(titles, vec!["three", "two", "one"]);
         assert_eq!(unread_count, 2);
-        assert_eq!(last_seen_id, 1);
+        let read_flags: Vec<bool> = notifications
+            .iter()
+            .map(|notification| notification.read)
+            .collect();
+        assert_eq!(
+            read_flags,
+            vec![false, false, true],
+            "only the marked-seen entry is read"
+        );
     }
 
     #[test]
@@ -2872,27 +2879,31 @@ mod tests {
         app.state
             .post_notification(test_notification_toast("two", None));
 
-        let mark_seen = |app: &mut App, id: &str| {
+        let mark_seen = |app: &mut App, id: &str, entry_id: Option<u64>| {
             let response =
                 app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
                     id: id.into(),
                     method: crate::api::schema::Method::NotificationMarkSeen(
-                        crate::api::schema::EmptyParams::default(),
+                        crate::api::schema::NotificationMarkSeenParams { id: entry_id },
                     ),
                 });
             let parsed: crate::api::schema::SuccessResponse =
                 serde_json::from_str(&response).unwrap();
             match parsed.result {
                 crate::api::schema::ResponseResult::NotificationMarkSeen {
-                    last_seen_id,
                     changed,
-                } => (last_seen_id, changed),
+                    unread_count,
+                } => (changed, unread_count),
                 other => panic!("expected NotificationMarkSeen result, got {other:?}"),
             }
         };
 
-        assert_eq!(mark_seen(&mut app, "first"), (2, true));
-        assert_eq!(mark_seen(&mut app, "second"), (2, false));
+        // Marking one entry read decrements unread by one; repeating it is a
+        // no-op. Marking all reads the rest, and repeating that is a no-op too.
+        assert_eq!(mark_seen(&mut app, "one", Some(1)), (true, 1));
+        assert_eq!(mark_seen(&mut app, "one-again", Some(1)), (false, 1));
+        assert_eq!(mark_seen(&mut app, "all", None), (true, 0));
+        assert_eq!(mark_seen(&mut app, "all-again", None), (false, 0));
         assert_eq!(app.state.notification_log.unread_count(), 0);
     }
 
