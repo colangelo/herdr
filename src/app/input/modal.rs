@@ -974,6 +974,7 @@ pub(crate) fn handle_notification_center_key(state: &mut AppState, key: KeyEvent
         KeyCode::Down | KeyCode::Char('j') => state.notification_center_move_selection(1),
         KeyCode::Enter => activate_notification_center_selection_local(state),
         KeyCode::Char('c') => state.clear_notifications(),
+        KeyCode::Char('r') => state.mark_all_notifications_read(),
         KeyCode::Esc | KeyCode::Char('q') => {
             state.close_notification_center();
             leave_modal(state);
@@ -986,9 +987,9 @@ pub(crate) fn handle_notification_center_key(state: &mut AppState, key: KeyEvent
 /// tests without an API runtime.
 #[cfg(test)]
 fn activate_notification_center_selection_local(state: &mut AppState) {
-    let Some(target) = state
+    let Some((entry_id, target)) = state
         .notification_center_selected_entry()
-        .and_then(|entry| entry.target.clone())
+        .and_then(|entry| Some((entry.id, entry.target.clone()?)))
     else {
         return;
     };
@@ -999,6 +1000,7 @@ fn activate_notification_center_selection_local(state: &mut AppState) {
     else {
         return;
     };
+    state.notification_log.mark_read(entry_id);
     state.close_notification_center();
     state.focus_pane_in_workspace(ws_idx, target.pane_id);
     state.mode = Mode::Terminal;
@@ -1042,6 +1044,7 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.state.notification_center_move_selection(1),
             KeyCode::Enter => self.activate_notification_center_selection(),
             KeyCode::Char('c') => self.state.clear_notifications(),
+            KeyCode::Char('r') => self.state.mark_all_notifications_read(),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.state.close_notification_center();
                 leave_modal(&mut self.state);
@@ -1567,6 +1570,65 @@ mod tests {
         assert_eq!(state.workspaces[1].focused_pane_id(), Some(target_pane));
         assert_eq!(state.mode, Mode::Terminal);
         assert!(state.notification_center.is_none(), "panel closed");
+        assert_eq!(
+            state.notification_log.unread_count(),
+            0,
+            "the activated entry is marked read"
+        );
+    }
+
+    #[test]
+    fn notification_center_enter_marks_only_the_activated_entry_read() {
+        let mut state = state_with_workspaces(&["one", "two"]);
+        state.mode = Mode::Terminal;
+        let target_ws_id = state.workspaces[1].id.clone();
+        let target_pane = state.workspaces[1].tabs[0].root_pane;
+        state.post_notification(notification_toast("older, stays unread", None));
+        state.post_notification(notification_toast(
+            "claude finished",
+            Some(crate::app::state::ToastTarget {
+                workspace_id: target_ws_id,
+                pane_id: target_pane,
+            }),
+        ));
+        state.open_notification_center();
+
+        // Selection starts on the newest entry (the targeted one).
+        handle_notification_center_key(&mut state, key(KeyCode::Enter));
+
+        assert_eq!(state.notification_log.unread_count(), 1);
+        let read_by_title: Vec<(String, bool)> = state
+            .notification_log
+            .entries_newest_first()
+            .map(|entry| (entry.title.clone(), entry.read))
+            .collect();
+        assert_eq!(
+            read_by_title,
+            vec![
+                ("claude finished".to_string(), true),
+                ("older, stays unread".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn notification_center_r_key_marks_all_read_and_keeps_panel_and_log() {
+        let mut state = state_with_workspaces(&["one"]);
+        for title in ["a", "b", "c"] {
+            state.post_notification(notification_toast(title, None));
+        }
+        state.open_notification_center();
+        assert_eq!(state.notification_log.unread_count(), 3);
+
+        handle_notification_center_key(&mut state, key(KeyCode::Char('r')));
+
+        assert_eq!(state.notification_log.unread_count(), 0);
+        assert_eq!(state.notification_log.len(), 3, "history kept");
+        assert_eq!(
+            state.mode,
+            Mode::NotificationCenter,
+            "panel stays open after mark-all-read"
+        );
     }
 
     #[test]
@@ -1581,6 +1643,11 @@ mod tests {
         assert_eq!(state.mode, Mode::NotificationCenter, "panel stays open");
         assert!(state.notification_center.is_some());
         assert_eq!(state.active, Some(0));
+        assert_eq!(
+            state.notification_log.unread_count(),
+            1,
+            "targetless entries stay unread"
+        );
     }
 
     #[test]
