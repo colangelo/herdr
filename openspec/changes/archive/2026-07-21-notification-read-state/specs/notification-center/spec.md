@@ -63,7 +63,7 @@ latest released protocol.
 - **THEN** only that entry becomes read and the unread count decreases by at
   most one
 
-#### Scenario: Marking all seen zeroes unread
+#### Scenario: Marking seen zeroes unread
 
 - **WHEN** a client calls `notification.mark_seen` without an `id` and unread
   entries are present
@@ -82,7 +82,17 @@ latest released protocol.
   entries with zero unread
 - **AND** the next posted notification receives an id greater than any prior id
 
+## REMOVED Requirements
+
 ### Requirement: Notification panel with keyboard navigation
+
+Replaced by "Notification panel with keyboard navigation and read tracking":
+the open-marks-all-seen model is gone and most scenarios changed meaning, so
+the requirement is rewritten wholesale rather than scenario-patched.
+
+## ADDED Requirements
+
+### Requirement: Notification panel with keyboard navigation and read tracking
 
 The TUI SHALL provide a notification panel listing the log newest-first,
 opened by the indicator or by a configurable `open_notification_center`
