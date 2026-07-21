@@ -90,8 +90,10 @@ keybinding registered in `KeysConfig` and listed in the `prefix+?` help
 panel. Opening the panel SHALL NOT change any entry's read state. Unread
 entries SHALL render with their kind-colored icon and a bold title; read
 entries SHALL render with a blank icon column and a regular-weight title in
-the muted (dim) foreground, keeping column alignment. The selected row's
-highlight styling SHALL be unchanged. Up/Down and `j`/`k` SHALL move the
+the muted (dim) foreground, keeping column alignment. The selected row
+SHALL keep its accent highlight band while its icon column and title weight
+continue to reflect read state, so a selected row stays distinguishable as
+read or unread. Up/Down and `j`/`k` SHALL move the
 selection; Enter SHALL mark the selected entry read, jump to its target pane
 (focusing its workspace, tab, and pane via the same path as the existing
 toast click), and close the panel; clicking a row SHALL do the same for that
