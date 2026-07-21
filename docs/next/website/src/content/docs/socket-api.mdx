@@ -401,9 +401,10 @@ Possible reasons are `shown`, `disabled`, `rate_limited`, `no_foreground_client`
 
 The server also keeps a bounded in-memory notification log (the newest 100
 entries) of every in-app toast it showed: agent needs-attention and finished
-notifications, update notifications, and `notification.show` injections. The
-log carries one `last_seen_id` marker; entries newer than the marker are
-unread. The log is in-memory only and empties on a cold server restart.
+notifications, update notifications, and `notification.show` injections. Each
+entry carries a `read` flag, false when posted; the unread count is the
+number of unread entries. The log is in-memory only and empties on a cold
+server restart.
 
 List the log newest-first:
 
@@ -412,21 +413,22 @@ List the log newest-first:
 ```
 
 ```json
-{"id":"req_nlist","result":{"type":"notification_list","notifications":[{"id":3,"kind":"finished","title":"claude finished","context":"api · 2","workspace_id":"w1","pane_id":"w1:p2","posted_at_unix":1789000000}],"unread_count":1,"last_seen_id":2}}
+{"id":"req_nlist","result":{"type":"notification_list","notifications":[{"id":3,"kind":"finished","title":"claude finished","context":"api · 2","workspace_id":"w1","pane_id":"w1:p2","posted_at_unix":1789000000,"read":false}],"unread_count":1}}
 ```
 
 `kind` is `needs_attention`, `finished`, or `update_installed`. `workspace_id`
 and `pane_id` are present when the notification targets a pane; `pane_id` is
 omitted when the pane no longer resolves.
 
-Advance the seen marker to the newest entry (idempotent):
+Mark one entry read by `id`, or every entry read with no `id` (idempotent
+either way):
 
 ```json
-{"id":"req_nseen","method":"notification.mark_seen","params":{}}
+{"id":"req_nseen","method":"notification.mark_seen","params":{"id":3}}
 ```
 
 ```json
-{"id":"req_nseen","result":{"type":"notification_mark_seen","last_seen_id":3,"changed":true}}
+{"id":"req_nseen","result":{"type":"notification_mark_seen","changed":true,"unread_count":0}}
 ```
 
 Empty the log entirely (the notification center's "Clear all" action):
@@ -442,9 +444,10 @@ Empty the log entirely (the notification center's "Clear all" action):
 `cleared` is how many entries were removed. Ids stay monotonic across a clear,
 so a later entry never reuses an id.
 
-Opening the notification center panel in the Herdr TUI advances the same
-marker, so external consumers and the built-in unread indicator always agree.
-Subscribe to `notification.posted` for a push feed of new entries.
+Activating a notification in the Herdr TUI's notification center marks that
+same entry read, so external consumers and the built-in unread indicator
+always agree. Subscribe to `notification.posted` for a push feed of new
+entries.
 
 Set or clear the foreground client's outer terminal window title:
 
