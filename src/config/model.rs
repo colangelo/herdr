@@ -772,6 +772,10 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     resize_mode: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    balance_panes: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_layout: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     toggle_sidebar: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     indexed: Option<IndexedKeysConfig>,
@@ -857,6 +861,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(close_pane);
         apply_field!(zoom);
         apply_field!(resize_mode);
+        apply_field!(balance_panes);
+        apply_field!(next_layout);
         apply_field!(toggle_sidebar);
         apply_field!(indexed);
         apply_field!(command);
@@ -964,6 +970,8 @@ impl KeysConfig {
         copy_effective_action_field!(close_pane, keybinds.close_pane);
         copy_effective_action_field!(zoom, keybinds.zoom);
         copy_effective_action_field!(resize_mode, keybinds.resize_mode);
+        copy_effective_action_field!(balance_panes, keybinds.balance_panes);
+        copy_effective_action_field!(next_layout, keybinds.next_layout);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
         copy_user_field!(indexed);
 
