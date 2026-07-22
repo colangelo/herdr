@@ -49,7 +49,7 @@ git push origin master && git push internal master
 just beta                         # dispatches beta.yml from pushed origin/master
 command gh run watch <run-id> --repo colangelo/herdr --exit-status
 just brew-upgrade herdr-beta      # brew upgrade + live handoff; panes preserved
-herdr-beta --version              # X.Y.Z-ac-beta.<timestamp> = the new build
+herdr-beta --version              # X.Y.Z-ac-beta.<run>-<codename> = the new build
 ```
 
 If master CI is red for unrelated reasons, fix or backlog before shipping —
