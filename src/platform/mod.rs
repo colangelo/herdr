@@ -74,6 +74,50 @@ pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std:
     command.spawn().map(|child| child.id())
 }
 
+/// Best-effort short host name of the machine running this process, e.g.
+/// `mbm5` for a host reported as `mbm5.local`. Returns `None` when the OS
+/// lookup fails or yields an empty name. The short form drops everything from
+/// the first `.` so an FQDN or `.local` suffix never leaks into the UI. Casing
+/// is preserved; callers style it to taste.
+pub fn hostname() -> Option<String> {
+    short_host_label(&raw_hostname()?)
+}
+
+/// Reduce a raw host name to its short display label: the segment before the
+/// first `.`, trimmed. Returns `None` when nothing usable is left. Kept pure
+/// and separate from the OS read so the truncation policy is unit-testable.
+fn short_host_label(raw: &str) -> Option<String> {
+    let short = raw.split('.').next().unwrap_or(raw).trim();
+    (!short.is_empty()).then(|| short.to_string())
+}
+
+/// Reads the raw host name from the OS. Unix uses `gethostname(2)`.
+#[cfg(unix)]
+fn raw_hostname() -> Option<String> {
+    // POSIX caps host names at `HOST_NAME_MAX` (255); 256 leaves room for the
+    // trailing NUL. gethostname truncates rather than failing on overflow.
+    let mut buffer = [0_u8; 256];
+    let result =
+        unsafe { libc::gethostname(buffer.as_mut_ptr().cast::<libc::c_char>(), buffer.len()) };
+    if result != 0 {
+        return None;
+    }
+    // gethostname may omit the NUL when the name fills the buffer, so fall back
+    // to the whole buffer length in that case.
+    let end = buffer
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(buffer.len());
+    let name = std::str::from_utf8(&buffer[..end]).ok()?.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Fallback for exotic targets that are neither Unix nor Windows.
+#[cfg(not(any(unix, windows)))]
+fn raw_hostname() -> Option<String> {
+    None
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn detach_server_daemon_command(command: &mut std::process::Command) {
     use std::os::unix::process::CommandExt;
@@ -393,6 +437,35 @@ mod tests {
         for program in ["vim", "nvim", "cargo", "test-runner", "opencode"] {
             assert!(!is_pane_shell_process_name(program), "{program}");
         }
+    }
+
+    #[test]
+    fn short_host_label_strips_domain_and_trims() {
+        assert_eq!(short_host_label("mbm5.local").as_deref(), Some("mbm5"));
+        assert_eq!(
+            short_host_label("host.sub.example.com").as_deref(),
+            Some("host")
+        );
+        assert_eq!(short_host_label("  bare  ").as_deref(), Some("bare"));
+        assert_eq!(short_host_label("plain").as_deref(), Some("plain"));
+    }
+
+    #[test]
+    fn short_host_label_rejects_empty_or_leading_dot() {
+        assert_eq!(short_host_label(""), None);
+        assert_eq!(short_host_label("   "), None);
+        assert_eq!(short_host_label(".local"), None);
+    }
+
+    #[test]
+    fn hostname_returns_short_dotless_label() {
+        // A real host always has a name; assert the label is short and clean.
+        let host = hostname().expect("host name available");
+        assert!(!host.is_empty());
+        assert!(
+            !host.contains('.'),
+            "expected a short host label, got {host:?}"
+        );
     }
 
     #[test]

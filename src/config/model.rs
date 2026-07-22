@@ -1138,6 +1138,9 @@ pub struct UiConfig {
     /// Show each agent's jump symbol (1-9, then a-z; the `focus_agent`
     /// target) on the agent panel status line. Default: false.
     pub show_agent_numbers: bool,
+    /// Show the Herdr server's short host name, right-aligned on the sidebar
+    /// "SPACES" header row. Default: true.
+    pub show_host: bool,
     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Retired setting that Herdr wrote before the workspace filter was removed.
@@ -1459,6 +1462,7 @@ impl Default for UiConfig {
             tab_bar_right_separator: " ".into(),
             show_workspace_numbers: false,
             show_agent_numbers: false,
+            show_host: true,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             _legacy_agent_panel_scope: None,
             status_indicators: StatusIndicatorStyle::Dots,
@@ -1603,6 +1607,19 @@ manifest_check = false
         assert_eq!(config.update.channel.as_str(), "preview");
         assert!(!config.update.version_check);
         assert!(!config.update.manifest_check);
+    }
+
+    #[test]
+    fn ui_show_host_defaults_true_and_parses_override() {
+        assert!(Config::default().ui.show_host);
+
+        // A `[ui]` table without the key inherits the default.
+        let inherited: Config = toml::from_str("[ui]\nsidebar_width = 30\n").unwrap();
+        assert!(inherited.ui.show_host);
+
+        // An explicit override wins.
+        let overridden: Config = toml::from_str("[ui]\nshow_host = false\n").unwrap();
+        assert!(!overridden.ui.show_host);
     }
 
     #[cfg(windows)]
