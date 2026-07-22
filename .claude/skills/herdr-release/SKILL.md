@@ -34,21 +34,31 @@ What it does: builds the **two macOS targets only** (fast; no Linux beta), then
 replaces the single rolling **`beta` GitHub prerelease** (tag `beta`, deleted +
 recreated each run) and rewrites `Formula/herdr-beta.rb` in
 colangelo/homebrew-tap. A `prep` job stamps **one** shared
-`HERDR_BUILD_ID=<UTC timestamp>`, so the binary's `herdr --version` and the
-formula `version` are both exactly `X.Y.Z-ac-beta.<timestamp>` (channel
-`HERDR_BUILD_CHANNEL=ac-beta`; Cargo.toml still plain `X.Y.Z`). The timestamp
-makes `brew upgrade` monotonic.
+`HERDR_BUILD_ID=<run-number>-<codename>` — the workflow run number plus the
+surname of a Juventus player (2012→today), picked deterministically from the
+run number by indexing the hardcoded `NAMES=(...)` array in `beta.yml`. So the
+binary's `herdr --version` and the formula `version` are both exactly
+`X.Y.Z-ac-beta.<run>-<codename>` (e.g. `0.7.5-ac-beta.45-zakaria`; channel
+`HERDR_BUILD_CHANNEL=ac-beta`; Cargo.toml still plain `X.Y.Z`). The run number
+keeps `brew upgrade` monotonic — Homebrew compares the leading number first, so
+the codename is purely cosmetic. **Do not revert this to a timestamp**; the
+surname scheme is intentional. Rotate the pool by editing `NAMES` in `beta.yml`.
 
 Install / upgrade / verify:
 
 ```bash
 brew install colangelo/tap/herdr-beta      # coexists with stable `herdr`
 brew update && brew upgrade herdr-beta
-herdr-beta --version                        # herdr X.Y.Z-ac-beta.<timestamp>
+herdr-beta --version                        # herdr X.Y.Z-ac-beta.<run>-<codename>
 ```
 
 Notes:
 - Needs the same `HOMEBREW_TAP_TOKEN` secret on colangelo/herdr as stable.
+- Build ids are `<run>-<codename>` (above), monotonic via the run number.
+  Changing the scheme breaks that ordering once — the 2026-07 timestamp→run-
+  number switch made the first new build sort *below* the installed one, so
+  `brew upgrade` skipped it. Cross a scheme change with one `brew reinstall
+  herdr-beta` per machine; `brew upgrade` resumes after.
 - No docs promotion, no tag, no `just check` gate — beta trusts the pushed
   `master` (run `just check` before pushing). CI on `master` should be green
   first.
