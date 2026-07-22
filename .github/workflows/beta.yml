@@ -39,9 +39,18 @@ jobs:
 
       - name: Compute shared beta build id and version
         id: compute
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           BASE=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          BUILD_ID=$(date -u +%Y%m%d%H%M%S)
+          # Beta build id = a monotonic run number (keeps `brew upgrade` ordering
+          # intact — Homebrew compares the number first) plus a mnemonic codename:
+          # the surname of a Juventus player from 2012 to today, chosen
+          # deterministically from the run number so each build reads like
+          # "0.7.5-ac-beta.7-pirlo" instead of an opaque timestamp.
+          NAMES=(pirlo vidal pogba marchisio tevez llorente chiellini bonucci barzagli lichtsteiner asamoah giovinco vucinic buffon evra dybala higuain mandzukic khedira pjanic cuadrado benatia rugani sturaro alves douglascosta bernardeschi matuidi szczesny ronaldo ramsey rabiot deligt demiral danilo alexsandro kulusevski mckennie morata chiesa bentancur arthur vlahovic locatelli kean zakaria gatti bremer paredes kostic milik fagioli miretti perin thuram koopmeiners cambiaso yildiz weah conceicao kalulu kelly digregorio douglasluiz mbangula)
+          NAME=${NAMES[$(( RUN_NUMBER % ${#NAMES[@]} ))]}
+          BUILD_ID="${RUN_NUMBER}-${NAME}"
           echo "build_id=${BUILD_ID}" >> "$GITHUB_OUTPUT"
           echo "version=${BASE}-ac-beta.${BUILD_ID}" >> "$GITHUB_OUTPUT"
 
