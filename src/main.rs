@@ -464,6 +464,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # the agent panel status line.
 # show_agent_numbers = false
 
+# Show the herdr server's short host name, right-aligned on the sidebar
+# "SPACES" header row.
+# show_host = true
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"

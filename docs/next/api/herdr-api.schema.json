@@ -8981,6 +8981,13 @@
                   ],
                   "default": null
                 },
+                "hostname": {
+                  "description": "Short host name of the machine running the server. Absent when the\nOS lookup fails.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "protocol": {
                   "format": "uint32",
                   "minimum": 0,
