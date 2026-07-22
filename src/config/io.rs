@@ -770,6 +770,50 @@ mod tests {
         );
     }
 
+    /// `KeysConfig` (serialize) and `KeysConfigOverlay` (deserialize) are
+    /// separate structs, so an action wired into one but not the other fails
+    /// silently: it appears in `--default-config` yet is rejected as an unknown
+    /// key when a user actually sets it. This regressed for `next_layout` and
+    /// `balance_panes` and stayed invisible until v0.7.5 added unknown-key
+    /// reporting. Guard the two structs against drift: every `[keys]` action
+    /// must deserialize through the overlay without an unknown-key diagnostic.
+    #[test]
+    fn every_keybinding_action_is_accepted_by_the_keys_overlay() {
+        const MODEL_SRC: &str = include_str!("model.rs");
+        let mut body = String::from("[keys]\n");
+        let mut actions = Vec::new();
+        for line in MODEL_SRC.lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("pub ") else {
+                continue;
+            };
+            let Some((name, ty)) = rest.split_once(':') else {
+                continue;
+            };
+            if ty.trim().trim_end_matches(',') != "BindingConfig" {
+                continue;
+            }
+            let name = name.trim();
+            body.push_str(&format!("{name} = \"prefix+f1\"\n"));
+            actions.push(name.to_string());
+        }
+        assert!(
+            !actions.is_empty(),
+            "no `pub <field>: BindingConfig` actions found in config/model.rs"
+        );
+
+        let (_config, ignored) =
+            deserialize_with_ignored::<Config, _>(toml::Deserializer::new(&body))
+                .expect("a [keys] config of every action should deserialize");
+        let unknown = unknown_config_key_diagnostics(ignored, None);
+
+        assert!(
+            unknown.is_empty(),
+            "keybind actions rejected by KeysConfigOverlay \
+             (add them to the overlay struct + apply_field! + local_profile): {unknown:?}"
+        );
+    }
+
     #[test]
     fn config_diagnostic_summary_keeps_mixed_diagnostics_generic() {
         let diagnostics = vec![
