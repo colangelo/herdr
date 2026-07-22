@@ -1567,13 +1567,43 @@ fn render_workspace_list(
     );
     let list_bottom = area.y + area.height.saturating_sub(1);
     if area.height > 0 {
+        let header_text = if editorial { " SPACES" } else { " spaces" };
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
-                if editorial { " SPACES" } else { " spaces" },
+                header_text,
                 sidebar_header_style(editorial, p),
             )])),
             Rect::new(area.x, area.y, area.width, 1),
         );
+        // Right-align the server host name on the same header row, styled as
+        // part of the header. Casing follows the header (uppercase editorial,
+        // lowercase otherwise). Hidden entirely — never truncated — when the
+        // row cannot fit the header text, a two-cell gap, the label, and one
+        // cell of right padding.
+        if app.show_host {
+            if let Some(host) = &app.host_label {
+                let label = if editorial {
+                    host.to_uppercase()
+                } else {
+                    host.to_lowercase()
+                };
+                let label_width = display_width_u16(&label);
+                let needed = display_width_u16(header_text)
+                    .saturating_add(2)
+                    .saturating_add(label_width)
+                    .saturating_add(1);
+                if label_width > 0 && area.width >= needed {
+                    let x = area.x + area.width.saturating_sub(label_width + 1);
+                    frame.render_widget(
+                        Paragraph::new(Line::from(vec![Span::styled(
+                            label,
+                            sidebar_header_style(editorial, p),
+                        )])),
+                        Rect::new(x, area.y, label_width, 1),
+                    );
+                }
+            }
+        }
     }
 
     let metrics = workspace_list_scroll_metrics(app, area);
@@ -2183,6 +2213,91 @@ mod tests {
                     row_text(buffer, row, width)
                 )
             })
+    }
+
+    /// Renders the sidebar and returns the trimmed text of the "SPACES" header
+    /// row within the workspace-list area (excluding the sidebar frame border),
+    /// which is where the host label is drawn.
+    fn render_sidebar_header_row(app: &mut crate::app::state::AppState, width: u16) -> String {
+        app.ensure_test_terminals();
+        let area = Rect::new(0, 0, width, 20);
+        let ws_rect = workspace_list_rect(area, app.sidebar_section_split);
+        let cards = compute_workspace_card_areas(&*app, ws_rect);
+        app.view.workspace_card_areas = cards;
+        let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let (ws_area, _) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let buffer = terminal.backend().buffer();
+        (ws_area.x..ws_area.x + ws_area.width)
+            .map(|x| buffer[(x, ws_area.y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn sidebar_header_renders_host_label_right_aligned_editorial() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_style = crate::config::SidebarStyleConfig::Editorial;
+        app.show_host = true;
+        app.host_label = Some("mbm5".into());
+
+        let header = render_sidebar_header_row(&mut app, 26);
+        assert!(header.contains("SPACES"), "header: {header:?}");
+        assert!(
+            header.trim_end().ends_with("MBM5"),
+            "host label should be uppercased and right-aligned: {header:?}"
+        );
+    }
+
+    #[test]
+    fn sidebar_header_lowercases_host_label_in_default_style() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.show_host = true;
+        app.host_label = Some("MBM5".into());
+
+        let header = render_sidebar_header_row(&mut app, 26);
+        assert!(
+            header.trim_end().ends_with("mbm5"),
+            "host label should be lowercased in default style: {header:?}"
+        );
+    }
+
+    #[test]
+    fn sidebar_header_hides_host_label_when_disabled() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_style = crate::config::SidebarStyleConfig::Editorial;
+        app.show_host = false;
+        app.host_label = Some("mbm5".into());
+
+        let header = render_sidebar_header_row(&mut app, 26);
+        assert!(header.contains("SPACES"), "header: {header:?}");
+        assert!(
+            !header.to_lowercase().contains("mbm5"),
+            "disabled host label must not render: {header:?}"
+        );
+    }
+
+    #[test]
+    fn sidebar_header_hides_host_label_when_row_too_narrow() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.sidebar_style = crate::config::SidebarStyleConfig::Editorial;
+        app.show_host = true;
+        // Far wider than " SPACES" + a two-cell gap + right pad allow at 26 cols.
+        app.host_label = Some("a-really-long-hostname".into());
+
+        let header = render_sidebar_header_row(&mut app, 26);
+        assert!(header.contains("SPACES"), "header: {header:?}");
+        assert!(
+            !header.to_uppercase().contains("REALLY"),
+            "overflowing host label must be hidden, not truncated: {header:?}"
+        );
     }
 
     #[test]

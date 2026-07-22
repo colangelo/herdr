@@ -874,6 +874,12 @@
           "description": "Show each agent's jump symbol (1-9, then a-z; the `focus_agent` target) on the agent panel status line."
         },
         {
+          "key": "ui.show_host",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the herdr server's short host name, right-aligned on the sidebar \"SPACES\" header row."
+        },
+        {
           "key": "ui.workspace_number_color",
           "type": "color",
           "default": "unset",

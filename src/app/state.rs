@@ -1754,6 +1754,12 @@ pub struct AppState {
     pub tab_bar_position: TabBarPositionConfig,
     pub show_workspace_numbers: bool,
     pub show_agent_numbers: bool,
+    /// Show the server's short host name on the sidebar "SPACES" header row.
+    pub show_host: bool,
+    /// Short host name of the machine running the server, read once at
+    /// construction. `None` when the OS lookup fails. Rendering is gated by
+    /// `show_host`; reloads never re-read it because the host is stable.
+    pub host_label: Option<String>,
     pub pane_history_persistence: bool,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
@@ -2290,6 +2296,8 @@ impl AppState {
             tab_bar_position: TabBarPositionConfig::Top,
             show_workspace_numbers: false,
             show_agent_numbers: false,
+            show_host: false,
+            host_label: None,
             pane_history_persistence: false,
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,

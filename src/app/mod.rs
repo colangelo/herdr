@@ -703,6 +703,8 @@ impl App {
             tab_bar_position: config.ui.tab_bar_position,
             show_workspace_numbers: config.ui.show_workspace_numbers,
             show_agent_numbers: config.ui.show_agent_numbers,
+            show_host: config.ui.show_host,
+            host_label: crate::platform::hostname(),
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
@@ -1564,6 +1566,9 @@ impl App {
                 self.state.tab_bar_position = config.ui.tab_bar_position;
                 self.state.show_workspace_numbers = config.ui.show_workspace_numbers;
                 self.state.show_agent_numbers = config.ui.show_agent_numbers;
+                // `host_label` is intentionally not re-read here: the host is
+                // stable for the server's lifetime, so only the toggle reloads.
+                self.state.show_host = config.ui.show_host;
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.status_indicators = config.ui.status_indicators;
@@ -3544,6 +3549,29 @@ mod tests {
             app.state.sidebar_collapsed_mode,
             crate::config::SidebarCollapsedModeConfig::Hidden
         );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_updates_show_host() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-show-host");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        // Default is on; the toggle must reload live via apply_live_config.
+        assert!(app.state.show_host);
+        let host_before = app.state.host_label.clone();
+
+        std::fs::write(&path, "[ui]\nshow_host = false\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(!app.state.show_host);
+        // The host name itself is stable across reloads — only the toggle moves.
+        assert_eq!(app.state.host_label, host_before);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

@@ -47,6 +47,10 @@ pub enum ResponseResult {
         protocol: u32,
         #[serde(default)]
         capabilities: Option<ServerCapabilities>,
+        /// Short host name of the machine running the server. Absent when the
+        /// OS lookup fails.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hostname: Option<String>,
     },
     SessionSnapshot {
         snapshot: Box<SessionSnapshot>,
