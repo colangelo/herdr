@@ -112,10 +112,11 @@ pub(crate) use self::{
     tabs::{compute_tab_bar_view, tab_bar_content_area},
     widgets::{centered_popup_rect, modal_stack_areas},
 };
-// The indicator's cells have exactly one definition; the pane renderer calls it
-// through the module, and the mouse hit-test reaches it through this re-export
-// so a click can never land on cells the renderer did not draw. Until that
-// hit-test lands (phase-2 task 3) the bin target sees these as unreached.
+// The indicator's cells have exactly one definition; the pane renderer reaches
+// it through the module with the terminal it already resolved, and the mouse
+// hit-test reaches it through this re-export so a click can never land on cells
+// the renderer did not draw. Until that hit-test lands (phase-2 task 3) the bin
+// target sees these as unreached.
 #[allow(unused_imports)]
 pub(crate) use self::panes::{pane_todo_indicator, PaneTodoIndicator};
 use crate::app::state::ViewLayout;
