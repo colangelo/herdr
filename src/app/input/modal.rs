@@ -3311,4 +3311,177 @@ mod tests {
             toast.context
         );
     }
+
+    /// Builds a workspace with three panes so the todo's own pane has two
+    /// linkable siblings, and puts one todo on the root pane.
+    fn app_with_linkable_panes() -> (
+        App,
+        crate::layout::PaneId,
+        Vec<(crate::layout::PaneId, String)>,
+    ) {
+        let mut app = app_with_test_workspaces(&["links"]);
+        app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.workspaces[0].test_split(ratatui::layout::Direction::Vertical);
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "rerun the deploy",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+        let candidates = app.state.pane_link_candidates(pane_id);
+        assert_eq!(candidates.len(), 2, "two sibling panes should be linkable");
+        (app, pane_id, candidates)
+    }
+
+    fn stored_todo(app: &App, pane_id: crate::layout::PaneId) -> crate::terminal::todo::PaneTodo {
+        app.state
+            .pane_terminal(pane_id)
+            .expect("pane terminal")
+            .todos()
+            .first()
+            .expect("one todo")
+            .clone()
+    }
+
+    /// The tri-state link control is only worth having if the choice survives
+    /// the save. Without this, `PaneTodoEditLink::Set(_) => public_pane_id(..)`
+    /// in `save_pane_todo_edit_via_api` could return `None` and every test
+    /// would still pass.
+    #[test]
+    fn a_link_chosen_in_the_edit_modal_reaches_the_store() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+
+        // Keep -> Clear -> first candidate.
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        assert_eq!(
+            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            crate::app::state::PaneTodoEditLink::Set(candidates[0].0),
+        );
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        let saved = stored_todo(&app, pane_id);
+        let link = saved.link.expect("the chosen link must reach the store");
+        assert_eq!(
+            link.pane,
+            Some(candidates[0].0),
+            "the modal's link target must be the pane that was selected"
+        );
+        // The label is resolved server-side from the target pane's label or
+        // agent name, falling back to its public id; these test panes have
+        // neither, so the public id is what gets captured.
+        let expected_label = app
+            .public_pane_id(0, candidates[0].0)
+            .expect("target pane has a public id");
+        assert_eq!(
+            link.label, expected_label,
+            "the link captures a label identifying its target"
+        );
+        assert!(
+            app.state.pane_todo_edit.is_none(),
+            "saving closes the modal"
+        );
+    }
+
+    /// The Clear arm maps to `clear_link: true`; without this, hardcoding
+    /// `clear_link = false` leaves the suite green.
+    #[test]
+    fn clearing_the_link_in_the_edit_modal_removes_it_from_the_store() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+
+        // Give the todo a link first, through the same save path.
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        assert_eq!(
+            stored_todo(&app, pane_id)
+                .link
+                .expect("link should be set")
+                .pane,
+            Some(candidates[0].0),
+        );
+
+        // Reopen and cycle Keep -> Clear, then save.
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        assert_eq!(
+            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            crate::app::state::PaneTodoEditLink::Clear,
+        );
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        assert_eq!(
+            stored_todo(&app, pane_id).link,
+            None,
+            "choosing Clear must remove the link from the store"
+        );
+    }
+
+    /// `Keep` must leave an existing link untouched, which is the arm the other
+    /// two tests cannot distinguish from a no-op save.
+    #[test]
+    fn keeping_the_link_in_the_edit_modal_leaves_it_alone() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        // Reopen, change only the text, save with the link left on Keep.
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('!')));
+        assert_eq!(
+            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            crate::app::state::PaneTodoEditLink::Keep,
+        );
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        let saved = stored_todo(&app, pane_id);
+        assert_eq!(
+            saved.link.expect("Keep must not drop the link").pane,
+            Some(candidates[0].0),
+        );
+        assert!(
+            saved.text.ends_with('!'),
+            "the text edit still saved: {}",
+            saved.text
+        );
+    }
 }
