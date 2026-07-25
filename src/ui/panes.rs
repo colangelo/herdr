@@ -634,18 +634,15 @@ pub(crate) struct PaneTodoIndicator {
     /// Exactly the cells the label is drawn into.
     pub rect: Rect,
     pub label: String,
-    /// Outstanding count, so a caller that hit-tests the indicator can act on
-    /// it without re-deriving it from the store. The label already carries it,
-    /// so outside tests nothing reads it yet.
-    #[allow(dead_code)]
-    pub outstanding: usize,
     /// Highest outstanding priority; `None` once every todo is done.
     pub priority: Option<crate::terminal::todo::TodoPriority>,
 }
 
 /// `▾ N` for N outstanding todos, a bare `▾` once they are all done, and
 /// nothing at all for a pane with no todos — a quiet pane keeps exactly the
-/// border it has today. Same spacing grammar as the notification `◆`.
+/// border it has today. Same spacing grammar as the notification `◆`. The
+/// count is at most two digits because `add_todo` caps a pane at
+/// `MAX_TODOS_PER_PANE` (50).
 fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String> {
     if total == 0 {
         return None;
@@ -653,26 +650,41 @@ fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String>
     if outstanding == 0 {
         return Some(" ▾ ".to_string());
     }
-    if outstanding > 99 {
-        return Some(" ▾ 99+ ".to_string());
-    }
     Some(format!(" ▾ {outstanding} "))
 }
 
+/// The entry point for a caller holding only a pane id — the mouse hit-test,
+/// which must read the same cells the renderer drew. It lands in phase-2 task
+/// 3; until then the bin target reaches this only from tests, so it carries
+/// the same scoped allow as its `src/ui.rs` re-export and both go away
+/// together.
+#[allow(dead_code)]
 pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<PaneTodoIndicator> {
+    pane_todo_indicator_for(app, info, app.pane_terminal(info.id)?)
+}
+
+/// [`pane_todo_indicator`] for a caller that already holds the pane's
+/// terminal. The render path resolves it from the workspace it was handed, so
+/// it must not pay `AppState::pane_terminal`'s scan of every workspace once
+/// per pane per frame.
+fn pane_todo_indicator_for(
+    app: &AppState,
+    info: &PaneInfo,
+    terminal: &crate::terminal::TerminalState,
+) -> Option<PaneTodoIndicator> {
     // No top border means no place to put it: a single-pane tab or
     // `ui.pane_borders = false` draws no chrome at all, and the keybinding is
     // the discoverable path there.
     if !app.show_pane_todo_indicator || !info.borders.contains(Borders::TOP) {
         return None;
     }
-    let terminal = app.pane_terminal(info.id)?;
-    let outstanding = terminal.outstanding_todo_count();
-    let label = pane_todo_indicator_label(terminal.todos().len(), outstanding)?;
+    let label =
+        pane_todo_indicator_label(terminal.todos().len(), terminal.outstanding_todo_count())?;
     let width = display_width_u16(&label);
-    // Leave both corner glyphs plus one cell of border; below that the pane is
-    // too narrow for any chrome and nothing is drawn.
-    if width == 0 || info.rect.width <= width.saturating_add(3) {
+    // The label plus both corner glyphs is the whole requirement: the title is
+    // laid out in what is left over and drops itself when that is too narrow,
+    // so the control is what survives a squeeze.
+    if width == 0 || info.rect.width < width.saturating_add(2) {
         return None;
     }
     let x = info
@@ -684,7 +696,6 @@ pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<Pan
     Some(PaneTodoIndicator {
         rect: Rect::new(x, info.rect.y, width, 1),
         label,
-        outstanding,
         priority: terminal.highest_outstanding_todo_priority(),
     })
 }
@@ -706,18 +717,21 @@ fn render_pane_border_titles(
             continue;
         }
 
+        // One lookup feeds both the indicator and the title.
+        let terminal = ws
+            .pane_state(info.id)
+            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id));
+
         // The indicator claims the far right of the border before the title is
         // laid out, so a narrow pane truncates the title instead of dropping
         // the control.
-        let indicator = pane_todo_indicator(app, info);
+        let indicator = terminal.and_then(|terminal| pane_todo_indicator_for(app, info, terminal));
         let reserved = indicator
             .as_ref()
             .map(|indicator| indicator.rect.width)
             .unwrap_or(0);
 
-        if let Some(title) = ws
-            .pane_state(info.id)
-            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
+        if let Some(title) = terminal
             .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
             .and_then(|label| {
                 pane_border_title(
@@ -1736,7 +1750,6 @@ mod tests {
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
 
         assert_eq!(indicator.label, " ▾ 3 ");
-        assert_eq!(indicator.outstanding, 3);
         assert_eq!(indicator.priority, Some(TodoPriority::High));
     }
 
@@ -1823,11 +1836,7 @@ mod tests {
         );
     }
 
-    /// Spec: "the indicator SHALL be laid out before the pane title so the
-    /// title truncates instead of the control disappearing".
-    #[test]
-    fn the_indicator_reserves_its_cells_before_the_title() {
-        let mut app = app_with_pane_todos(&[(false, TodoPriority::High)]);
+    fn set_manual_pane_label(app: &mut AppState, label: &str) {
         let pane_id = app.view.pane_infos[0].id;
         let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
             .attached_terminal_id
@@ -1835,7 +1844,15 @@ mod tests {
         app.terminals
             .get_mut(&terminal_id)
             .expect("test terminal should exist")
-            .set_manual_label("a very long pane label indeed".into());
+            .set_manual_label(label.into());
+    }
+
+    /// Spec: "the indicator SHALL be laid out before the pane title so the
+    /// title truncates instead of the control disappearing".
+    #[test]
+    fn the_indicator_reserves_its_cells_before_the_title() {
+        let mut app = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        set_manual_pane_label(&mut app, "a very long pane label indeed");
 
         let indicator =
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
@@ -1851,6 +1868,28 @@ mod tests {
         );
     }
 
+    /// Spec: "when pane width forces a choice, the indicator SHALL be laid out
+    /// before the pane title". At 8 columns the 5-cell label still fits, so
+    /// the title is what has to give way — not the other way round.
+    #[test]
+    fn a_squeezed_pane_keeps_the_control_and_drops_the_title() {
+        let mut app = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        set_manual_pane_label(&mut app, "label");
+        app.view.pane_infos[0].rect = Rect::new(0, 0, 8, 4);
+        app.view.pane_infos[0].inner_rect = Rect::new(1, 1, 6, 2);
+
+        let indicator =
+            pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
+        assert_eq!(indicator.label, " ▾ 1 ");
+
+        let buffer = draw_pane_borders(&app);
+        assert_eq!(
+            row_text(&buffer, 0, 8),
+            "┌─ ▾ 1 ┐",
+            "the control survives whole and the title drops out"
+        );
+    }
+
     #[test]
     fn the_indicator_is_hidden_by_config_and_on_borderless_panes() {
         let mut off = app_with_pane_todos(&[(false, TodoPriority::High)]);
@@ -1863,9 +1902,15 @@ mod tests {
 
         let mut narrow = app_with_pane_todos(&[(false, TodoPriority::High)]);
         narrow.view.pane_infos[0].rect = Rect::new(0, 0, 6, 4);
+        narrow.view.pane_infos[0].inner_rect = Rect::new(1, 1, 4, 2);
         assert!(
             pane_todo_indicator(&narrow, &narrow.view.pane_infos[0]).is_none(),
-            "below the minimum width neither the title nor the control is drawn"
+            "a 5-cell label plus both corner glyphs needs 7 columns"
+        );
+        assert_eq!(
+            row_text(&draw_pane_borders(&narrow), 0, 6),
+            "┌────┐",
+            "and nothing is drawn over the border it would not fit in"
         );
     }
 
