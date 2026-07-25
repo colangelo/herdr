@@ -2106,6 +2106,37 @@ impl AppState {
             .position(|workspace| workspace.id == workspace_id)
     }
 
+    /// Whether closing this pane would discard unfinished work.
+    pub(crate) fn pane_has_outstanding_todos(&self, pane_id: PaneId) -> bool {
+        self.pane_terminal(pane_id)
+            .is_some_and(|terminal| terminal.outstanding_todo_count() > 0)
+    }
+
+    /// Ask before destroying a pane that still has outstanding todos. Returns
+    /// true when the close was deferred to the confirmation modal.
+    ///
+    /// A pending confirmation for the same pane *is* the user's answer: it is
+    /// consumed here, so the retry that the modal issues goes straight through.
+    /// That keeps the whole gate in one place and needs no `force` flag on the
+    /// wire.
+    ///
+    /// Deliberately not gated on `ui.confirm_close`: that option is documented
+    /// as "ask before closing a workspace", and this requirement has no escape
+    /// hatch - the prompt only appears when work is genuinely unfinished.
+    pub(crate) fn confirm_pane_close_with_todos(&mut self, ws_idx: usize, pane_id: PaneId) -> bool {
+        if self.confirm_close_pane == Some(pane_id) {
+            self.confirm_close_pane = None;
+            return false;
+        }
+        if !self.pane_has_outstanding_todos(pane_id) {
+            return false;
+        }
+        self.selected = ws_idx;
+        self.confirm_close_pane = Some(pane_id);
+        self.mode = Mode::ConfirmClose;
+        true
+    }
+
     pub(crate) fn confirm_implicit_worktree_group_close(&mut self, ws_idx: usize) -> bool {
         self.confirm_close
             && self.workspace_close_would_close_worktree_group(ws_idx)
@@ -2141,6 +2172,20 @@ impl AppState {
         }) {
             if let Some(ws_idx) = active {
                 if self.confirm_implicit_worktree_group_close(ws_idx) {
+                    return true;
+                }
+            }
+        }
+
+        // Same gate the API path applies, so this test twin cannot drift from
+        // production behaviour.
+        if let Some(ws_idx) = active {
+            if let Some(pane_id) = self
+                .workspaces
+                .get(ws_idx)
+                .and_then(crate::workspace::Workspace::focused_pane_id)
+            {
+                if self.confirm_pane_close_with_todos(ws_idx, pane_id) {
                     return true;
                 }
             }
@@ -6265,5 +6310,37 @@ mod tests {
         assert!(!deferred);
         assert_eq!(state.workspaces.len(), 1);
         assert_eq!(state.workspaces[0].display_name(), "notes");
+    }
+
+    #[test]
+    fn close_pane_defers_to_confirmation_while_todos_remain() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("todos")];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "unfinished",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+
+        assert!(state.close_pane(), "the close is deferred to confirmation");
+        assert_eq!(state.mode, Mode::ConfirmClose);
+        assert_eq!(state.confirm_close_pane, Some(pane_id));
+
+        assert!(
+            !state.close_pane(),
+            "answering yes consumes the token and the close proceeds"
+        );
     }
 }

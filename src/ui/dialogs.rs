@@ -885,6 +885,25 @@ fn confirm_close_overlay_text(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
 ) -> (String, String) {
+    if let Some(pane_id) = app.confirm_close_pane {
+        let outstanding = app
+            .pane_terminal(pane_id)
+            .map(|terminal| terminal.outstanding_todo_count())
+            .unwrap_or(0);
+        let label = app
+            .pane_terminal(pane_id)
+            .and_then(|terminal| terminal.border_label(true))
+            .unwrap_or_else(|| "this pane".to_string());
+        let todo_text = if outstanding == 1 {
+            "1 outstanding todo".to_string()
+        } else {
+            format!("{outstanding} outstanding todos")
+        };
+        return (
+            "Close pane with unfinished todos?".to_string(),
+            format!("{label} - {todo_text}"),
+        );
+    }
     let ws_name = app
         .workspaces
         .get(app.selected)
@@ -1472,5 +1491,37 @@ mod tests {
             .map(|x| buffer[(x, rects.save.y)].symbol())
             .collect();
         assert!(save.contains("save"));
+    }
+
+    #[test]
+    fn confirm_close_text_names_the_unfinished_todos() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("current")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.ensure_test_terminals();
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        for text in ["one", "two"] {
+            terminal
+                .add_todo(text, crate::terminal::todo::TodoPriority::Normal, None, 100)
+                .expect("todo should be added");
+        }
+        app.confirm_close_pane = Some(pane_id);
+
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let (title, detail) = confirm_close_overlay_text(&app, &terminal_runtimes);
+
+        assert_eq!(title, "Close pane with unfinished todos?");
+        assert!(
+            detail.contains("2 outstanding"),
+            "detail should count the outstanding todos: {detail}"
+        );
     }
 }

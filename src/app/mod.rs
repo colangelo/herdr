@@ -622,6 +622,7 @@ impl App {
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
             rename_pane_target: None,
+            confirm_close_pane: None,
             worktree_create: None,
             worktree_open: None,
             pane_move_target_picker: None,
