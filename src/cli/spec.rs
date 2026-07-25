@@ -37,6 +37,7 @@ pub(super) fn command() -> Command {
         .subcommand(worktree_command())
         .subcommand(tab_command())
         .subcommand(notification_command())
+        .subcommand(todo_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
         .subcommand(terminal_command())
@@ -318,6 +319,73 @@ fn notification_command() -> Command {
                 ]))
                 .arg(option("sound", "SOUND").value_parser(["none", "done", "request"])),
         )
+}
+
+fn todo_command() -> Command {
+    Command::new("todo")
+        .about("Manage per-pane todo lists")
+        .subcommand(
+            Command::new("add")
+                .about("Add a todo to a pane")
+                .override_usage("herdr todo add <TEXT> [OPTIONS]")
+                .arg(required("text", "TEXT"))
+                .args(current_pane_args())
+                .arg(todo_priority_option())
+                .arg(option("link", "TARGET").help("Link the todo to another pane"))
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("list")
+                .about("List pane todos")
+                .args(current_pane_args())
+                .arg(flag("all").help("List todos from every pane"))
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("done")
+                .about("Mark a todo done")
+                .arg(required("id", "ID"))
+                .args(current_pane_args())
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("undone")
+                .about("Reopen a done todo")
+                .arg(required("id", "ID"))
+                .args(current_pane_args())
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("edit")
+                .about("Edit a todo")
+                .override_usage("herdr todo edit <ID> [OPTIONS]")
+                .arg(required("id", "ID"))
+                .arg(option("text", "TEXT"))
+                .arg(todo_priority_option())
+                .arg(option("link", "TARGET").help("Link the todo to another pane"))
+                .arg(flag("unlink").help("Drop the todo's pane link"))
+                .args(current_pane_args())
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("rm")
+                .about("Remove a todo")
+                .arg(required("id", "ID"))
+                .args(current_pane_args())
+                .arg(json_flag()),
+        )
+        .subcommand(
+            Command::new("clear")
+                .about("Clear a pane's todos")
+                .arg(flag("done").help("Clear only the done todos"))
+                .args(current_pane_args())
+                .arg(json_flag()),
+        )
+        .after_help("Without --pane or --current, every verb acts on the calling pane.")
+}
+
+fn todo_priority_option() -> Arg {
+    option("priority", "PRIORITY").value_parser(["high", "normal", "low"])
 }
 
 fn agent_command() -> Command {
