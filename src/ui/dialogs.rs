@@ -76,7 +76,7 @@ fn render_name_input_field(app: &AppState, frame: &mut Frame, input_rect: Rect) 
 }
 
 pub(crate) const PANE_TODO_EDIT_POPUP_WIDTH: u16 = 60;
-pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 11;
+pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 12;
 
 /// The modal's interactive regions. One definition, read by the renderer and
 /// by the mouse layer, so clicking "priority" always lands on the row that
@@ -86,12 +86,16 @@ pub(crate) struct PaneTodoEditRects {
     pub input: Rect,
     pub priority: Rect,
     pub link: Rect,
+    /// Reserved unconditionally so the geometry does not shift between the
+    /// "new" and "edit" modals; only drawn and hit-tested when editing.
+    pub done: Rect,
     pub save: Rect,
     pub cancel: Rect,
 }
 
 pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
-    if inner.width == 0 || inner.height < 8 {
+    // Row 6 now holds `done`, so the button row (height - 1) must clear it.
+    if inner.width == 0 || inner.height < 9 {
         return None;
     }
     let row = |offset: u16| Rect::new(inner.x, inner.y + offset, inner.width, 1);
@@ -114,6 +118,7 @@ pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
         input: row(2),
         priority: row(4),
         link: row(5),
+        done: row(6),
         save: buttons[0],
         cancel: buttons[1],
     })
@@ -200,6 +205,24 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
         )),
         rects.link,
     );
+
+    // Composing a new todo has no done state to show, so the reserved row
+    // stays blank rather than offering a control that cannot be saved.
+    if edit.todo_id.is_some() {
+        frame.render_widget(
+            Paragraph::new(field(
+                "done",
+                "^d",
+                if edit.done { "yes" } else { "no" }.to_string(),
+                Style::default().fg(if edit.done {
+                    app.palette.green
+                } else {
+                    app.palette.overlay1
+                }),
+            )),
+            rects.done,
+        );
+    }
 
     render_action_button(
         frame,
@@ -1491,6 +1514,64 @@ mod tests {
             .map(|x| buffer[(x, rects.save.y)].symbol())
             .collect();
         assert!(save.contains("save"));
+    }
+
+    /// The done row is only drawn when editing an existing todo, so the
+    /// new-todo geometry test above cannot cover it. Same property: the cells
+    /// that say "done" are the cells `pane_todo_edit_rects` hands the mouse.
+    #[test]
+    fn the_done_row_is_drawn_where_it_is_hit_tested_when_editing() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("todos")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        app.view.terminal_area = Rect::new(0, 0, 80, 24);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let todo_id = app
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "ship it",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added")
+            .id;
+        app.open_pane_todo_edit(pane_id, todo_id);
+
+        let render = |app: &AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| render_pane_todo_edit_overlay(app, frame, frame.area()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let inner = crate::ui::centered_popup_rect(
+                Rect::new(0, 0, 80, 24),
+                PANE_TODO_EDIT_POPUP_WIDTH,
+                PANE_TODO_EDIT_POPUP_HEIGHT,
+            )
+            .map(|popup| Rect::new(popup.x + 1, popup.y + 1, popup.width - 2, popup.height - 2))
+            .expect("popup should fit");
+            let rects = pane_todo_edit_rects(inner).expect("edit rects should exist");
+            let row: String = (rects.done.x..rects.done.x + rects.done.width)
+                .map(|x| buffer[(x, rects.done.y)].symbol())
+                .collect();
+            row
+        };
+
+        let row = render(&app);
+        assert!(row.contains("done"), "the done row is labelled: {row}");
+        assert!(row.contains("^d"), "it advertises its shortcut: {row}");
+        assert!(row.contains("no"), "and shows the current state: {row}");
+
+        app.toggle_pane_todo_edit_done();
+        let row = render(&app);
+        assert!(row.contains("yes"), "toggling repaints the same row: {row}");
     }
 
     #[test]

@@ -1195,6 +1195,12 @@ impl App {
                 self.state.cycle_pane_todo_edit_link();
                 return;
             }
+            // Space belongs to the text field here, so the panel's `space`
+            // toggle needs a modifier of its own inside the modal.
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.state.toggle_pane_todo_edit_done();
+                return;
+            }
             _ => {}
         }
         handle_pane_todo_edit_text_key(&mut self.state, key);
@@ -1212,7 +1218,7 @@ impl App {
     }
 
     fn save_pane_todo_edit_via_api(&mut self) {
-        let Some((pane_id, todo_id, text, priority, link)) =
+        let Some((pane_id, todo_id, text, priority, link, done)) =
             self.state.pane_todo_edit.as_ref().map(|edit| {
                 (
                     edit.pane_id,
@@ -1220,6 +1226,7 @@ impl App {
                     edit.text.trim().to_string(),
                     edit.priority,
                     edit.link,
+                    edit.done,
                 )
             })
         else {
@@ -1249,7 +1256,7 @@ impl App {
                     pane_id: public_pane_id,
                     id,
                     text: Some(text),
-                    done: None,
+                    done: Some(done),
                     priority: Some(priority),
                     link_pane_id,
                     clear_link,
@@ -3179,6 +3186,92 @@ mod tests {
         assert_eq!(todo.text, "keep me", "cancel writes nothing");
         assert_eq!(todo.priority, crate::terminal::todo::TodoPriority::Normal);
         assert_eq!(app.state.mode, Mode::PaneTodos);
+    }
+
+    /// The panel toggles done with `space`, but inside the modal `space` is
+    /// text, so the same action needs `ctrl+d`.
+    #[test]
+    fn ctrl_d_toggles_done_in_the_edit_modal_and_saves_it() {
+        let mut app = app_with_pane_todos(&[(
+            "finish me",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+        assert!(
+            !app.state.pane_todo_edit.as_ref().expect("edit state").done,
+            "the modal opens carrying the todo's current done state"
+        );
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+        assert!(app.state.pane_todo_edit.as_ref().expect("edit state").done);
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        let todo = app
+            .state
+            .selected_pane_todo()
+            .expect("the todo should survive the save");
+        assert!(
+            todo.done,
+            "the toggle reaches the store through todo.update"
+        );
+        assert_eq!(todo.text, "finish me", "text is untouched by the toggle");
+
+        // And back again, so this is a toggle rather than a one-way latch.
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        assert!(
+            !app.state
+                .selected_pane_todo()
+                .expect("a selected todo")
+                .done
+        );
+    }
+
+    #[test]
+    fn cancelling_discards_a_done_toggle() {
+        let mut app = app_with_pane_todos(&[(
+            "leave me alone",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Esc));
+
+        assert!(
+            !app.state
+                .selected_pane_todo()
+                .expect("a selected todo")
+                .done,
+            "cancel writes nothing, including the done toggle"
+        );
+    }
+
+    /// `todo.add` carries no `done`, so offering the toggle while composing
+    /// would promise something the save cannot keep.
+    #[test]
+    fn ctrl_d_is_inert_while_composing_a_new_todo() {
+        let mut app = app_with_pane_todos(&[(
+            "existing",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        let pane_id = app
+            .state
+            .pane_todos
+            .as_ref()
+            .expect("panel should be open")
+            .pane_id;
+        app.state.open_new_pane_todo(pane_id);
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+
+        assert!(
+            !app.state.pane_todo_edit.as_ref().expect("edit state").done,
+            "composing a new todo cannot mark it done"
+        );
     }
 
     #[test]

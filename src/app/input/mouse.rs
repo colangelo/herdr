@@ -659,6 +659,11 @@ impl AppState {
                         self.cycle_pane_todo_edit_link();
                         return None;
                     }
+                    if rect_contains(rects.done, mouse.column, mouse.row) {
+                        // No-ops while composing, matching the blank row.
+                        self.toggle_pane_todo_edit_done();
+                        return None;
+                    }
                     // Anything else cancels, matching the rename modal.
                     let action = modal_action_from_buttons(
                         mouse.column,
