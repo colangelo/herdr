@@ -9,7 +9,7 @@ use ratatui::{
 use super::scrollbar::{render_pane_scrollbar, should_show_scrollbar};
 #[cfg(test)]
 use super::text::display_width;
-use super::text::truncate_end;
+use super::text::{display_width_u16, truncate_end};
 use super::widgets::panel_contrast_fg;
 use crate::app::state::Palette;
 use crate::app::{AppState, Mode};
@@ -666,6 +666,68 @@ fn line_touches_pane(x: u16, y: u16, info: &PaneInfo, pane_gaps: bool) -> bool {
         || (x == shared_right && y == shared_bottom)
 }
 
+/// Where a pane's todo indicator lives and what it says. The renderer and the
+/// mouse hit-test both read this one value, which is what keeps the drawn
+/// glyph and the click target from drifting.
+pub(crate) struct PaneTodoIndicator {
+    /// Exactly the cells the label is drawn into.
+    pub rect: Rect,
+    pub label: String,
+    /// Outstanding count, so a caller that hit-tests the indicator can act on
+    /// it without re-deriving it from the store. The label already carries it,
+    /// so outside tests nothing reads it yet.
+    #[allow(dead_code)]
+    pub outstanding: usize,
+    /// Highest outstanding priority; `None` once every todo is done.
+    pub priority: Option<crate::terminal::todo::TodoPriority>,
+}
+
+/// `▾ N` for N outstanding todos, a bare `▾` once they are all done, and
+/// nothing at all for a pane with no todos — a quiet pane keeps exactly the
+/// border it has today. Same spacing grammar as the notification `◆`.
+fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String> {
+    if total == 0 {
+        return None;
+    }
+    if outstanding == 0 {
+        return Some(" ▾ ".to_string());
+    }
+    if outstanding > 99 {
+        return Some(" ▾ 99+ ".to_string());
+    }
+    Some(format!(" ▾ {outstanding} "))
+}
+
+pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<PaneTodoIndicator> {
+    // No top border means no place to put it: a single-pane tab or
+    // `ui.pane_borders = false` draws no chrome at all, and the keybinding is
+    // the discoverable path there.
+    if !app.show_pane_todo_indicator || !info.borders.contains(Borders::TOP) {
+        return None;
+    }
+    let terminal = app.pane_terminal(info.id)?;
+    let outstanding = terminal.outstanding_todo_count();
+    let label = pane_todo_indicator_label(terminal.todos().len(), outstanding)?;
+    let width = display_width_u16(&label);
+    // Leave both corner glyphs plus one cell of border; below that the pane is
+    // too narrow for any chrome and nothing is drawn.
+    if width == 0 || info.rect.width <= width.saturating_add(3) {
+        return None;
+    }
+    let x = info
+        .rect
+        .x
+        .saturating_add(info.rect.width)
+        .saturating_sub(1)
+        .saturating_sub(width);
+    Some(PaneTodoIndicator {
+        rect: Rect::new(x, info.rect.y, width, 1),
+        label,
+        outstanding,
+        priority: terminal.highest_outstanding_todo_priority(),
+    })
+}
+
 fn render_pane_border_titles(
     app: &AppState,
     ws: &crate::workspace::Workspace,
@@ -678,39 +740,64 @@ fn render_pane_border_titles(
         if !info.borders.contains(Borders::TOP) || info.rect.width <= 4 {
             continue;
         }
-        let Some(title) = ws
-            .pane_state(info.id)
-            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
-            .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
-            .and_then(|label| pane_border_title(&label, info.rect.width, info.is_focused))
-        else {
-            continue;
-        };
         let y = info.rect.y;
         if y < area.y || y >= area.y.saturating_add(area.height) {
             continue;
         }
-        let start_x = info.rect.x.saturating_add(1);
-        let end_x = info
-            .rect
-            .x
-            .saturating_add(info.rect.width)
-            .saturating_sub(1)
-            .min(area.x.saturating_add(area.width));
-        if start_x >= end_x {
-            continue;
+
+        // The indicator claims the far right of the border before the title is
+        // laid out, so a narrow pane truncates the title instead of dropping
+        // the control.
+        let indicator = pane_todo_indicator(app, info);
+        let reserved = indicator
+            .as_ref()
+            .map(|indicator| indicator.rect.width)
+            .unwrap_or(0);
+
+        if let Some(title) = ws
+            .pane_state(info.id)
+            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
+            .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
+            .and_then(|label| {
+                pane_border_title(
+                    &label,
+                    info.rect.width.saturating_sub(reserved),
+                    info.is_focused,
+                )
+            })
+        {
+            let start_x = info.rect.x.saturating_add(1);
+            let end_x = info
+                .rect
+                .x
+                .saturating_add(info.rect.width)
+                .saturating_sub(1)
+                .saturating_sub(reserved)
+                .min(area.x.saturating_add(area.width));
+            if start_x < end_x {
+                let mut style = Style::default().fg(app.pane_title_color(info.is_focused));
+                if info.is_focused {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                buf.set_stringn(
+                    start_x,
+                    y,
+                    title,
+                    end_x.saturating_sub(start_x) as usize,
+                    style,
+                );
+            }
         }
-        let mut style = Style::default().fg(app.pane_title_color(info.is_focused));
-        if info.is_focused {
-            style = style.add_modifier(Modifier::BOLD);
+
+        if let Some(indicator) = indicator {
+            buf.set_stringn(
+                indicator.rect.x,
+                indicator.rect.y,
+                &indicator.label,
+                indicator.rect.width as usize,
+                Style::default().fg(app.pane_todo_indicator_color(indicator.priority)),
+            );
         }
-        buf.set_stringn(
-            start_x,
-            y,
-            title,
-            end_x.saturating_sub(start_x) as usize,
-            style,
-        );
     }
 }
 
@@ -1023,6 +1110,7 @@ mod tests {
     use super::*;
     use crate::layout::PaneId;
     use crate::selection::Selection;
+    use crate::terminal::todo::{TodoPriority, TodoUpdate};
     use crate::terminal::TerminalRuntime;
     use crate::terminal::TerminalState;
     use crate::workspace::Workspace;
@@ -1680,6 +1768,214 @@ mod tests {
         assert_eq!(second.add_modifier, expected_style.add_modifier);
         assert_eq!(third.add_modifier, expected_style.add_modifier);
         assert!(!second.add_modifier.contains(Modifier::BOLD));
+    }
+
+    /// One 30x4 pane with `Borders::ALL`, whose terminal carries `todos` given
+    /// as (done, priority) pairs. The workspace lives in `app.workspaces` and
+    /// `app.active` points at it, because the indicator resolves a pane's
+    /// terminal the same way `render_panes` does.
+    fn app_with_pane_todos(todos: &[(bool, TodoPriority)]) -> AppState {
+        let mut app = AppState::test_new();
+        app.mode = Mode::Terminal;
+        app.workspaces = vec![Workspace::test_new("todos")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        for (index, (done, priority)) in todos.iter().enumerate() {
+            let todo = terminal
+                .add_todo(&format!("todo {index}"), *priority, None, 100)
+                .expect("todo should be added");
+            if *done {
+                terminal
+                    .update_todo(
+                        todo.id,
+                        TodoUpdate {
+                            done: Some(true),
+                            ..TodoUpdate::default()
+                        },
+                        200,
+                    )
+                    .expect("todo should be updated");
+            }
+        }
+
+        app.view.terminal_area = Rect::new(0, 0, 30, 4);
+        app.view.pane_infos = vec![PaneInfo {
+            id: pane_id,
+            rect: Rect::new(0, 0, 30, 4),
+            inner_rect: Rect::new(1, 1, 28, 2),
+            scrollbar_rect: None,
+            borders: Borders::ALL,
+            is_focused: false,
+        }];
+        app
+    }
+
+    fn draw_pane_borders(app: &AppState) -> ratatui::buffer::Buffer {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 4)).unwrap();
+        terminal
+            .draw(|frame| render_view_pane_borders(app, &app.workspaces[0], frame))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buffer: &ratatui::buffer::Buffer, row: u16, width: u16) -> String {
+        (0..width).map(|x| buffer[(x, row)].symbol()).collect()
+    }
+
+    #[test]
+    fn pane_todo_indicator_counts_only_outstanding_todos() {
+        let app = app_with_pane_todos(&[
+            (false, TodoPriority::High),
+            (false, TodoPriority::Normal),
+            (false, TodoPriority::Low),
+            (true, TodoPriority::High),
+        ]);
+
+        let indicator =
+            pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
+
+        assert_eq!(indicator.label, " ▾ 3 ");
+        assert_eq!(indicator.outstanding, 3);
+        assert_eq!(indicator.priority, Some(TodoPriority::High));
+    }
+
+    /// Spec: "the cells that respond to a click are exactly the cells drawn".
+    #[test]
+    fn pane_todo_indicator_draws_exactly_the_cells_it_claims() {
+        let app = app_with_pane_todos(&[(false, TodoPriority::High), (false, TodoPriority::Low)]);
+        let indicator =
+            pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
+        let buffer = draw_pane_borders(&app);
+
+        let drawn: String = (indicator.rect.x..indicator.rect.x + indicator.rect.width)
+            .map(|x| buffer[(x, indicator.rect.y)].symbol())
+            .collect();
+        assert_eq!(drawn, indicator.label, "claimed cells must hold the label");
+        assert_eq!(
+            buffer[(indicator.rect.x - 1, indicator.rect.y)].symbol(),
+            "─",
+            "the cell before the indicator is still border"
+        );
+        assert_eq!(
+            buffer[(indicator.rect.x + indicator.rect.width, indicator.rect.y)].symbol(),
+            "┐",
+            "the corner glyph is never overwritten"
+        );
+        assert_eq!(
+            indicator.rect.x + indicator.rect.width,
+            app.view.pane_infos[0].rect.x + app.view.pane_infos[0].rect.width - 1,
+            "the indicator hugs the far right of the top border"
+        );
+    }
+
+    #[test]
+    fn a_pane_with_no_todos_renders_the_border_it_has_today() {
+        let app = app_with_pane_todos(&[]);
+
+        assert!(pane_todo_indicator(&app, &app.view.pane_infos[0]).is_none());
+        let buffer = draw_pane_borders(&app);
+        assert_eq!(row_text(&buffer, 0, 30), format!("┌{}┐", "─".repeat(28)));
+    }
+
+    #[test]
+    fn an_all_done_pane_shows_a_bare_dimmed_glyph() {
+        let app = app_with_pane_todos(&[(true, TodoPriority::High), (true, TodoPriority::Normal)]);
+        let indicator =
+            pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
+
+        assert_eq!(indicator.label, " ▾ ", "no count once everything is done");
+        assert_eq!(indicator.priority, None);
+
+        let buffer = draw_pane_borders(&app);
+        assert_eq!(
+            buffer[(indicator.rect.x + 1, indicator.rect.y)].style().fg,
+            Some(app.palette.overlay0),
+            "a finished pane's indicator is muted"
+        );
+    }
+
+    #[test]
+    fn indicator_color_follows_the_highest_outstanding_priority() {
+        let high = app_with_pane_todos(&[(false, TodoPriority::High), (false, TodoPriority::Low)]);
+        let normal = app_with_pane_todos(&[(false, TodoPriority::Normal)]);
+
+        assert_eq!(
+            high.pane_todo_indicator_color(Some(TodoPriority::High)),
+            high.palette.red
+        );
+        assert_eq!(
+            normal.pane_todo_indicator_color(Some(TodoPriority::Normal)),
+            normal.palette.yellow
+        );
+
+        let mut pinned = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        pinned.pane_todo_color = Some(ratatui::style::Color::Magenta);
+        assert_eq!(
+            pinned.pane_todo_indicator_color(Some(TodoPriority::High)),
+            ratatui::style::Color::Magenta,
+            "ui.pane_todo_color pins the outstanding colour"
+        );
+        assert_eq!(
+            pinned.pane_todo_indicator_color(None),
+            pinned.palette.overlay0,
+            "an all-done indicator stays muted even when pinned"
+        );
+    }
+
+    /// Spec: "the indicator SHALL be laid out before the pane title so the
+    /// title truncates instead of the control disappearing".
+    #[test]
+    fn the_indicator_reserves_its_cells_before_the_title() {
+        let mut app = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        let pane_id = app.view.pane_infos[0].id;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .set_manual_label("a very long pane label indeed".into());
+
+        let indicator =
+            pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
+        let buffer = draw_pane_borders(&app);
+
+        let drawn: String = (indicator.rect.x..indicator.rect.x + indicator.rect.width)
+            .map(|x| buffer[(x, indicator.rect.y)].symbol())
+            .collect();
+        assert_eq!(drawn, indicator.label, "the control survives intact");
+        assert!(
+            row_text(&buffer, 0, 30).contains('…'),
+            "the title truncates instead"
+        );
+    }
+
+    #[test]
+    fn the_indicator_is_hidden_by_config_and_on_borderless_panes() {
+        let mut off = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        off.show_pane_todo_indicator = false;
+        assert!(pane_todo_indicator(&off, &off.view.pane_infos[0]).is_none());
+
+        let mut borderless = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        borderless.view.pane_infos[0].borders = Borders::NONE;
+        assert!(pane_todo_indicator(&borderless, &borderless.view.pane_infos[0]).is_none());
+
+        let mut narrow = app_with_pane_todos(&[(false, TodoPriority::High)]);
+        narrow.view.pane_infos[0].rect = Rect::new(0, 0, 6, 4);
+        assert!(
+            pane_todo_indicator(&narrow, &narrow.view.pane_infos[0]).is_none(),
+            "below the minimum width neither the title nor the control is drawn"
+        );
     }
 
     #[test]
