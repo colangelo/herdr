@@ -200,8 +200,11 @@ toggling done, removing a todo, clearing done todos, opening a todo for editing,
 following a todo's link, and closing.
 
 Opening a todo for editing SHALL present a modal built from the existing dialog
-structure allowing its text, priority, and link to be changed, with explicit save
-and cancel.
+structure allowing its text, priority, link, and done state to be changed, with
+explicit save and cancel. Because the modal's text field owns the panel's
+done-toggle key, the modal SHALL offer the toggle under a distinct binding. A
+todo being composed SHALL NOT offer the done toggle, since it cannot be already
+done.
 
 Following a link SHALL move focus to the linked pane through the same focus path
 used when jumping to a notification's pane.
@@ -220,6 +223,15 @@ left unbound by default.
 - **WHEN** a todo is opened for editing, its text changed, and the change saved
 - **THEN** the todo's text and updated timestamp change while its id, done state,
   and creation timestamp are preserved
+
+#### Scenario: Toggling done from the edit modal
+
+- **WHEN** a todo is opened for editing and the done toggle is activated and the
+  change saved
+- **THEN** the todo's done state flips while its text, id, and creation timestamp
+  are preserved
+- **WHEN** the edit is cancelled instead
+- **THEN** the todo's done state is unchanged
 
 #### Scenario: Following a link
 
