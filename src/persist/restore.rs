@@ -1163,16 +1163,24 @@ mod tests {
     #[tokio::test]
     async fn restore_rehydrates_todos_and_resolves_cross_tab_links() {
         let cwd = std::env::current_dir().unwrap();
-        let todo = |id: u64, text: &str, link_pane: Option<u32>, link_label: Option<&str>| {
+        // Every field varies from the struct default on purpose: a mapping
+        // regression that hardcoded `done: false` or `priority: default()`
+        // would otherwise pass the whole suite.
+        let todo = |id: u64,
+                    text: &str,
+                    done: bool,
+                    priority: crate::terminal::todo::TodoPriority,
+                    link_pane: Option<u32>,
+                    link_label: Option<&str>| {
             super::super::snapshot::PaneTodoSnapshot {
                 id,
                 text: text.into(),
-                done: false,
-                priority: crate::terminal::todo::TodoPriority::Normal,
+                done,
+                priority,
                 link_pane,
                 link_label: link_label.map(str::to_string),
                 created_at_unix: 100,
-                updated_at_unix: 100,
+                updated_at_unix: 140 + id,
             }
         };
         let owner_pane = super::super::snapshot::PaneSnapshot {
@@ -1183,9 +1191,30 @@ mod tests {
             agent_session: None,
             launch_argv: None,
             todos: vec![
-                todo(4, "linked", Some(20), Some("infra")),
-                todo(5, "dead link", Some(999), Some("gone")),
-                todo(6, "unlinked", None, None),
+                todo(
+                    4,
+                    "linked",
+                    true,
+                    crate::terminal::todo::TodoPriority::High,
+                    Some(20),
+                    Some("infra"),
+                ),
+                todo(
+                    5,
+                    "dead link",
+                    false,
+                    crate::terminal::todo::TodoPriority::Low,
+                    Some(999),
+                    Some("gone"),
+                ),
+                todo(
+                    6,
+                    "unlinked",
+                    false,
+                    crate::terminal::todo::TodoPriority::Normal,
+                    None,
+                    None,
+                ),
             ],
             next_todo_id: 7,
         };
@@ -1259,6 +1288,54 @@ mod tests {
         let todos = terminals[&owner_terminal_id].todos();
 
         assert_eq!(todos.len(), 3, "no todo may be dropped by restore");
+
+        // Scenario "Todos survive a restart" names text, done state, priority,
+        // and ids explicitly, so assert every one of them rather than trusting
+        // the field-for-field copy.
+        let restored: Vec<(u64, &str, bool, crate::terminal::todo::TodoPriority, u64)> = todos
+            .iter()
+            .map(|todo| {
+                (
+                    todo.id,
+                    todo.text.as_str(),
+                    todo.done,
+                    todo.priority,
+                    todo.updated_at_unix,
+                )
+            })
+            .collect();
+        assert_eq!(
+            restored,
+            vec![
+                (
+                    4,
+                    "linked",
+                    true,
+                    crate::terminal::todo::TodoPriority::High,
+                    144
+                ),
+                (
+                    5,
+                    "dead link",
+                    false,
+                    crate::terminal::todo::TodoPriority::Low,
+                    145
+                ),
+                (
+                    6,
+                    "unlinked",
+                    false,
+                    crate::terminal::todo::TodoPriority::Normal,
+                    146
+                ),
+            ],
+            "ids, text, done state, priority, and timestamps must survive restore intact"
+        );
+        assert!(
+            todos.iter().all(|todo| todo.created_at_unix == 100),
+            "created_at must survive restore"
+        );
+
         assert_eq!(
             todos[0].link,
             Some(crate::terminal::todo::TodoLink {
