@@ -463,6 +463,7 @@ impl App {
             NavigateAction::OpenNotificationCenter => {
                 self.state.open_notification_center();
             }
+            NavigateAction::OpenPaneTodos => self.open_focused_pane_todos(),
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -803,6 +804,13 @@ impl App {
         let ws_idx = self.state.active?;
         let pane_id = self.state.workspaces.get(ws_idx)?.focused_pane_id()?;
         Some((ws_idx, pane_id))
+    }
+
+    pub(crate) fn open_focused_pane_todos(&mut self) {
+        let Some((_, pane_id)) = self.focused_pane_target() else {
+            return;
+        };
+        self.state.open_pane_todos(pane_id);
     }
 
     fn directional_pane_target_from_view(
@@ -1814,6 +1822,7 @@ pub(crate) enum NavigateAction {
     ReloadConfig,
     OpenNotificationTarget,
     OpenNotificationCenter,
+    OpenPaneTodos,
     Detach,
     OpenNavigator,
 }
@@ -1982,6 +1991,7 @@ fn non_indexed_action_for_key(
             &kb.open_notification_center,
             NavigateAction::OpenNotificationCenter,
         ),
+        (&kb.open_pane_todos, NavigateAction::OpenPaneTodos),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
     ] {
@@ -2330,6 +2340,15 @@ pub(super) fn execute_navigate_action_in_context(
             }
         }
         NavigateAction::OpenNotificationCenter => state.open_notification_center(),
+        NavigateAction::OpenPaneTodos => {
+            if let Some(pane_id) = state
+                .active
+                .and_then(|ws_idx| state.workspaces.get(ws_idx))
+                .and_then(crate::workspace::Workspace::focused_pane_id)
+            {
+                state.open_pane_todos(pane_id);
+            }
+        }
         NavigateAction::Detach => {
             super::modal::request_detach(state);
             leave_navigate_mode(state);
@@ -2585,6 +2604,37 @@ mod tests {
                 Some(action),
             );
         }
+    }
+
+    #[test]
+    fn open_pane_todos_maps_to_its_action_in_prefix_mode() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds = crate::config::Config::default().keybinds();
+
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::OpenPaneTodos)
+        );
+    }
+
+    #[test]
+    fn open_pane_todos_opens_the_panel_on_the_focused_pane() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let pane_id = app.state.workspaces[0]
+            .focused_pane_id()
+            .expect("a focused pane");
+
+        app.execute_tui_navigate_action(NavigateAction::OpenPaneTodos, ActionContext::Prefix);
+
+        assert_eq!(app.state.mode, Mode::PaneTodos);
+        assert_eq!(
+            app.state.pane_todos.as_ref().expect("panel").pane_id,
+            pane_id
+        );
     }
 
     #[test]

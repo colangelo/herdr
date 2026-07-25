@@ -119,8 +119,7 @@ impl App {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
                 Mode::NotificationCenter => self.handle_notification_center_key_via_api(key_event),
-                // Inert until phase-2 task 3 wires the panel's key handling.
-                Mode::PaneTodos => {}
+                Mode::PaneTodos => self.handle_pane_todos_key_via_api(key_event),
                 Mode::Terminal => unreachable!(),
             },
         }
@@ -432,6 +431,7 @@ impl App {
                         self.activate_notification_row(index)
                     }
                     MouseAction::ClearNotifications => self.state.clear_notifications(),
+                    MouseAction::PaneTodo(action) => self.apply_pane_todo_action(action),
                     MouseAction::MoveWorkspace {
                         source_ws_idx,
                         insert_idx,

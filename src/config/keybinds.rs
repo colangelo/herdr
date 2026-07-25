@@ -339,6 +339,7 @@ pub struct Keybinds {
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
     pub open_notification_center: ActionKeybinds,
+    pub open_pane_todos: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
@@ -518,6 +519,7 @@ impl Config {
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
             open_notification_center: empty_action!(),
+            open_pane_todos: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
             previous_agent: empty_action!(),
@@ -665,6 +667,7 @@ impl Config {
                 open_notification_center,
                 source
             );
+            apply_action!(keybinds.open_pane_todos, open_pane_todos, source);
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
             apply_action!(keybinds.previous_agent, previous_agent, source);
@@ -1660,6 +1663,24 @@ next_tab = "prefix+n"
                 KeyCode::Char('g'),
                 KeyModifiers::SHIFT
             ))]
+        );
+    }
+
+    #[test]
+    fn open_pane_todos_defaults_to_prefix_ctrl_t() {
+        let kb = Config::default().keybinds();
+        assert_eq!(
+            binding_triggers(&kb.open_pane_todos),
+            // `KeyCombo` is the bare `(KeyCode, KeyModifiers)` tuple, not a
+            // `TerminalKey` — see `new_worktree_defaults_to_prefix_shift_g`.
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('t'),
+                KeyModifiers::CONTROL
+            ))]
+        );
+        assert!(
+            Config::default().collect_diagnostics().is_empty(),
+            "prefix+ctrl+t must not collide with an existing default"
         );
     }
 

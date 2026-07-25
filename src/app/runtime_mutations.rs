@@ -2,9 +2,10 @@ use crate::api::schema::{
     EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, LayoutSetSplitRatioParams, Method,
     PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PaneRenameParams,
     PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, TabCreateParams,
-    TabMoveParams, TabRenameParams, TabTarget, WorkspaceCloseParams, WorkspaceCreateParams,
-    WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams, WorkspaceTarget,
-    WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
+    TabMoveParams, TabRenameParams, TabTarget, TodoAddParams, TodoClearParams, TodoRemoveParams,
+    TodoUpdateParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams,
+    WorkspaceMoveParams, WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams,
+    WorktreeOpenParams, WorktreeRemoveParams,
 };
 
 use super::App;
@@ -162,6 +163,37 @@ impl App {
         target: PaneTarget,
     ) -> String {
         self.dispatch_runtime_mutation(id, Method::PaneClearScrollback(target))
+    }
+
+    // The panel reads and edits todos; the surface that authors a new one is
+    // the edit modal in phase-2 task 4, which is the first caller.
+    #[allow(dead_code)]
+    pub(crate) fn runtime_todo_add(&mut self, id: &'static str, params: TodoAddParams) -> String {
+        self.dispatch_runtime_mutation(id, Method::TodoAdd(params))
+    }
+
+    pub(crate) fn runtime_todo_update(
+        &mut self,
+        id: &'static str,
+        params: TodoUpdateParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::TodoUpdate(params))
+    }
+
+    pub(crate) fn runtime_todo_remove(
+        &mut self,
+        id: &'static str,
+        params: TodoRemoveParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::TodoRemove(params))
+    }
+
+    pub(crate) fn runtime_todo_clear(
+        &mut self,
+        id: &'static str,
+        params: TodoClearParams,
+    ) -> String {
+        self.dispatch_runtime_mutation(id, Method::TodoClear(params))
     }
 
     pub(crate) fn runtime_pane_split(
