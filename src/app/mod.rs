@@ -699,6 +699,7 @@ impl App {
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
+            show_pane_todo_indicator: config.ui.show_pane_todo_indicator,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             tab_bar_position: config.ui.tab_bar_position,
             show_workspace_numbers: config.ui.show_workspace_numbers,
@@ -750,6 +751,11 @@ impl App {
             pane_title_inactive_color: config
                 .ui
                 .pane_title_inactive_color
+                .as_deref()
+                .map(crate::config::parse_color),
+            pane_todo_color: config
+                .ui
+                .pane_todo_color
                 .as_deref()
                 .map(crate::config::parse_color),
             sidebar_active_border: config.ui.sidebar_active_border,
@@ -1562,6 +1568,7 @@ impl App {
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
+                self.state.show_pane_todo_indicator = config.ui.show_pane_todo_indicator;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.tab_bar_position = config.ui.tab_bar_position;
                 self.state.show_workspace_numbers = config.ui.show_workspace_numbers;
@@ -1627,6 +1634,11 @@ impl App {
                 self.state.pane_title_inactive_color = config
                     .ui
                     .pane_title_inactive_color
+                    .as_deref()
+                    .map(crate::config::parse_color);
+                self.state.pane_todo_color = config
+                    .ui
+                    .pane_todo_color
                     .as_deref()
                     .map(crate::config::parse_color);
                 self.state.sidebar_active_border = config.ui.sidebar_active_border;
@@ -3572,6 +3584,35 @@ mod tests {
         assert!(!app.state.show_host);
         // The host name itself is stable across reloads — only the toggle moves.
         assert_eq!(app.state.host_label, host_before);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_updates_pane_todo_indicator_options() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-todo-indicator");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        // Defaults: indicator on, colour driven by the highest priority.
+        assert!(app.state.show_pane_todo_indicator);
+        assert_eq!(app.state.pane_todo_color, None);
+
+        std::fs::write(
+            &path,
+            "[ui]\nshow_pane_todo_indicator = false\npane_todo_color = \"#f38ba8\"\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(!app.state.show_pane_todo_indicator);
+        assert_eq!(
+            app.state.pane_todo_color,
+            Some(crate::config::parse_color("#f38ba8"))
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

@@ -1750,6 +1750,8 @@ pub struct AppState {
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
     pub show_agent_labels_on_pane_borders: bool,
+    /// Draw the pane todo indicator on split pane top borders.
+    pub show_pane_todo_indicator: bool,
     pub hide_tab_bar_when_single_tab: bool,
     pub tab_bar_position: TabBarPositionConfig,
     pub show_workspace_numbers: bool,
@@ -1802,6 +1804,9 @@ pub struct AppState {
     /// Override color for unfocused panes' border titles; None follows
     /// `pane_border_inactive_color`, then the palette default.
     pub pane_title_inactive_color: Option<Color>,
+    /// Override color for the pane todo indicator while todos are outstanding;
+    /// None colors it by the highest outstanding priority.
+    pub pane_todo_color: Option<Color>,
     /// Highlight pattern for the active space and agent in the sidebar,
     /// styled like the active pane border.
     pub sidebar_active_border: crate::config::SidebarActiveBorderConfig,
@@ -1971,6 +1976,36 @@ impl AppState {
             self.pane_title_inactive_color
         };
         explicit.unwrap_or_else(|| self.pane_border_color(focused))
+    }
+
+    /// The terminal backing a pane, wherever that pane lives. Todos are stored
+    /// on `TerminalState`, so every todo surface resolves through here.
+    pub(crate) fn pane_terminal(&self, pane_id: PaneId) -> Option<&crate::terminal::TerminalState> {
+        let pane = self
+            .workspaces
+            .iter()
+            .find_map(|workspace| workspace.pane_state(pane_id))?;
+        self.terminals.get(&pane.attached_terminal_id)
+    }
+
+    /// Colour of a pane's todo indicator. The highest outstanding priority
+    /// drives it unless `ui.pane_todo_color` pins it; `None` means every todo
+    /// is done, which always reads muted.
+    pub fn pane_todo_indicator_color(
+        &self,
+        priority: Option<crate::terminal::todo::TodoPriority>,
+    ) -> Color {
+        let Some(priority) = priority else {
+            return self.palette.overlay0;
+        };
+        if let Some(color) = self.pane_todo_color {
+            return color;
+        }
+        match priority {
+            crate::terminal::todo::TodoPriority::High => self.palette.red,
+            crate::terminal::todo::TodoPriority::Normal => self.palette.yellow,
+            crate::terminal::todo::TodoPriority::Low => self.palette.blue,
+        }
     }
 
     /// Background of the active space/agent band in the sidebar; falls back
@@ -2292,6 +2327,7 @@ impl AppState {
             pane_scrollbars: true,
             pane_gaps: false,
             show_agent_labels_on_pane_borders: false,
+            show_pane_todo_indicator: true,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             show_workspace_numbers: false,
@@ -2319,6 +2355,7 @@ impl AppState {
             pane_border_active_style: crate::config::PaneBorderActiveStyleConfig::Light,
             pane_title_active_color: None,
             pane_title_inactive_color: None,
+            pane_todo_color: None,
             sidebar_active_border: crate::config::SidebarActiveBorderConfig::Off,
             sidebar_active_bg: None,
             pane_active_bg: None,

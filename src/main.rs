@@ -454,6 +454,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # pane_title_active_color = "#ffd700"
 # pane_title_inactive_color = "#7a7a7a"
 
+# Show a todo indicator (▾ N outstanding) at the far right of a split pane's
+# top border. Panes with no todos are unaffected.
+# show_pane_todo_indicator = true
+
+# Colour for the pane todo indicator while todos are outstanding (same syntax
+# as accent). Unset colours it by the highest outstanding priority.
+# pane_todo_color = "#f38ba8"
+
 # Highlight the active space and agent in the sidebar, using
 # pane_border_active_color and pane_border_active_style. Modes: "off",
 # "above", "below", "both" (lines in the spacer rows), "left", "right"

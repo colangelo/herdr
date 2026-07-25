@@ -1085,6 +1085,9 @@ pub struct UiConfig {
     pub pane_gaps: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Show a todo indicator at the far right of a split pane's top border,
+    /// carrying the pane's outstanding todo count. Default: true.
+    pub show_pane_todo_indicator: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
@@ -1178,6 +1181,12 @@ pub struct UiConfig {
     /// Unset follows `pane_border_inactive_color`, then the theme's muted color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_title_inactive_color: Option<String>,
+    /// Override colour for the pane todo indicator while todos are outstanding.
+    /// Same syntax as `accent`. Unset colours it by the highest outstanding
+    /// priority (high red, normal yellow, low blue); an all-done indicator is
+    /// always muted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_todo_color: Option<String>,
     /// Highlight pattern for the active space and agent in the sidebar, using
     /// `pane_border_active_color` and `pane_border_active_style`. Accepts
     /// "off", "above", "below", "both", "left", "right" — or a bool for
@@ -1406,6 +1415,7 @@ impl Default for UiConfig {
             pane_scrollbars: true,
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
+            show_pane_todo_indicator: true,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             show_workspace_numbers: false,
@@ -1433,6 +1443,7 @@ impl Default for UiConfig {
             pane_border_active_style: PaneBorderActiveStyleConfig::Light,
             pane_title_active_color: None,
             pane_title_inactive_color: None,
+            pane_todo_color: None,
             sidebar_active_border: SidebarActiveBorderConfig::Off,
             sidebar_active_bg: None,
             pane_active_bg: None,
@@ -1981,6 +1992,22 @@ tab_bar_position = "bottom"
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
+    }
+
+    #[test]
+    fn pane_todo_indicator_config_parses_and_defaults() {
+        let defaults = Config::default();
+        assert!(defaults.ui.show_pane_todo_indicator);
+        assert_eq!(defaults.ui.pane_todo_color, None);
+
+        let toml = r##"
+[ui]
+show_pane_todo_indicator = false
+pane_todo_color = "#f38ba8"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.ui.show_pane_todo_indicator);
+        assert_eq!(config.ui.pane_todo_color.as_deref(), Some("#f38ba8"));
     }
 
     #[test]
