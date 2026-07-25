@@ -771,6 +771,7 @@ fn main() -> io::Result<()> {
         println!("       herdr worktree <subcommand> ...");
         println!("       herdr tab <subcommand> ...");
         println!("       herdr notification <subcommand> ...");
+        println!("       herdr todo <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
         println!("       herdr session <subcommand> ...");
@@ -821,6 +822,10 @@ fn main() -> io::Result<()> {
             (
                 "herdr notification <subcommand>",
                 "Notification helpers over the socket API",
+            ),
+            (
+                "herdr todo <subcommand>",
+                "Per-pane todo helpers over the socket API",
             ),
             (
                 "herdr agent <subcommand>",
