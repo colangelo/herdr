@@ -399,6 +399,13 @@ impl AppState {
         self.onboarding_modal_inner(56, 7)
     }
 
+    pub(super) fn pane_todo_edit_inner(&self) -> Option<Rect> {
+        self.onboarding_modal_inner(
+            crate::ui::PANE_TODO_EDIT_POPUP_WIDTH,
+            crate::ui::PANE_TODO_EDIT_POPUP_HEIGHT,
+        )
+    }
+
     fn release_notes_body_rect(&self) -> Option<Rect> {
         let inner = self.release_notes_modal_inner()?;
         if inner.height < 8 || inner.width < 4 {

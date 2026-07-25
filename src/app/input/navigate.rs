@@ -477,6 +477,7 @@ impl App {
                 self.state.open_notification_center();
             }
             NavigateAction::OpenPaneTodos => self.open_focused_pane_todos(),
+            NavigateAction::AddPaneTodo => self.open_new_pane_todo_for_focused_pane(),
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -824,6 +825,13 @@ impl App {
             return;
         };
         self.state.open_pane_todos(pane_id);
+    }
+
+    pub(crate) fn open_new_pane_todo_for_focused_pane(&mut self) {
+        let Some((_, pane_id)) = self.focused_pane_target() else {
+            return;
+        };
+        self.state.open_new_pane_todo(pane_id);
     }
 
     fn directional_pane_target_from_view(
@@ -1461,7 +1469,13 @@ impl App {
         false
     }
 
-    fn show_pane_move_feedback(&mut self, title: impl Into<String>, context: impl Into<String>) {
+    /// Shared "that did not work" channel for actions with no modal of their
+    /// own to report into: pane moves, clear scrollback, todo saves.
+    pub(super) fn show_pane_move_feedback(
+        &mut self,
+        title: impl Into<String>,
+        context: impl Into<String>,
+    ) {
         set_pane_move_feedback(&mut self.state, title, context);
         // Treat feedback as newly shown even when the same edge case is triggered repeatedly.
         self.sync_toast_deadline(None);
@@ -1798,6 +1812,7 @@ pub(crate) enum NavigateAction {
     OpenNotificationTarget,
     OpenNotificationCenter,
     OpenPaneTodos,
+    AddPaneTodo,
     Detach,
     OpenNavigator,
 }
@@ -1967,6 +1982,7 @@ fn non_indexed_action_for_key(
             NavigateAction::OpenNotificationCenter,
         ),
         (&kb.open_pane_todos, NavigateAction::OpenPaneTodos),
+        (&kb.add_pane_todo, NavigateAction::AddPaneTodo),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
     ] {
@@ -2324,6 +2340,15 @@ pub(super) fn execute_navigate_action_in_context(
                 state.open_pane_todos(pane_id);
             }
         }
+        NavigateAction::AddPaneTodo => {
+            if let Some(pane_id) = state
+                .active
+                .and_then(|ws_idx| state.workspaces.get(ws_idx))
+                .and_then(crate::workspace::Workspace::focused_pane_id)
+            {
+                state.open_new_pane_todo(pane_id);
+            }
+        }
         NavigateAction::Detach => {
             super::modal::request_detach(state);
             leave_navigate_mode(state);
@@ -2608,6 +2633,71 @@ mod tests {
         assert_eq!(app.state.mode, Mode::PaneTodos);
         assert_eq!(
             app.state.pane_todos.as_ref().expect("panel").pane_id,
+            pane_id
+        );
+    }
+
+    #[test]
+    fn add_pane_todo_is_unbound_by_default_and_maps_when_bound() {
+        let default_config = Config::default();
+        assert!(
+            default_config.keybinds().add_pane_todo.bindings.is_empty(),
+            "add_pane_todo ships unbound by default, discoverable through the help panel"
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+add_pane_todo = "prefix+a"
+"#,
+        )
+        .expect("config should parse");
+        assert!(config.collect_diagnostics().is_empty());
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds = config.keybinds();
+
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('a'), KeyModifiers::empty()),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::AddPaneTodo),
+        );
+    }
+
+    #[test]
+    fn add_pane_todo_opens_a_new_todo_on_the_focused_pane() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        let pane_id = app.state.workspaces[0]
+            .focused_pane_id()
+            .expect("a focused pane");
+
+        app.execute_tui_navigate_action(NavigateAction::AddPaneTodo, ActionContext::Prefix);
+
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        assert_eq!(edit.pane_id, pane_id);
+        assert_eq!(edit.todo_id, None, "the action authors a new todo");
+        assert!(
+            app.state.pane_todos.is_none(),
+            "the action goes straight to the modal without opening the panel"
+        );
+    }
+
+    #[test]
+    fn add_pane_todo_opens_a_new_todo_from_navigate_mode() {
+        let mut state = state_with_workspaces(&["main"]);
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0]
+            .focused_pane_id()
+            .expect("a focused pane");
+
+        execute_navigate_action(&mut state, NavigateAction::AddPaneTodo);
+
+        assert_eq!(state.mode, Mode::PaneTodoEdit);
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").pane_id,
             pane_id
         );
     }

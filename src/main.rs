@@ -180,6 +180,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_notification_target = "prefix+o"
 # open_notification_center = "prefix+ctrl+n"
 # open_pane_todos = "prefix+ctrl+t"
+# add_pane_todo = ""      # optional, unset by default; compose a new todo for the focused pane
 # workspace_picker = "prefix+w"
 # goto = "prefix+g"
 # new_workspace = "prefix+shift+n"
