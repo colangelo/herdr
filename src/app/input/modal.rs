@@ -783,6 +783,7 @@ pub(super) fn confirm_close_accept(state: &mut AppState) {
 }
 
 pub(super) fn confirm_close_cancel(state: &mut AppState) {
+    state.confirm_close_pane = None;
     state.mode = Mode::Navigate;
 }
 
@@ -1403,6 +1404,25 @@ impl App {
     }
 
     pub(super) fn confirm_close_accept_via_api(&mut self) {
+        // A pending pane confirmation is what is on screen; the retry re-enters
+        // close_pane, which consumes the token and proceeds. Without this branch
+        // the modal would close the whole workspace.
+        if let Some(pane_id) = self.state.confirm_close_pane {
+            let ws_idx = self.state.selected;
+            match self.public_pane_id(ws_idx, pane_id) {
+                Some(public_pane_id) => {
+                    self.runtime_pane_close("tui.pane.close", public_pane_id);
+                }
+                None => self.state.confirm_close_pane = None,
+            }
+            self.state.mode = if self.state.active.is_some() {
+                Mode::Terminal
+            } else {
+                Mode::Navigate
+            };
+            return;
+        }
+
         let ws_idx = self.state.selected;
         if ws_idx < self.state.workspaces.len() {
             self.close_workspace_idx_via_api(ws_idx);
@@ -3356,5 +3376,99 @@ mod tests {
             "the text edit still saved: {}",
             saved.text
         );
+    }
+
+    fn close_pane_via_api(app: &mut App, pane_id: crate::layout::PaneId) -> serde_json::Value {
+        let public_pane_id = app
+            .public_pane_id(0, pane_id)
+            .expect("pane should have a public id");
+        let raw = app.handle_api_request(crate::api::schema::Request {
+            id: "test".into(),
+            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                pane_id: public_pane_id,
+            }),
+        });
+        serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    /// Spec: "a pane with at least one not-done todo is closed -> a
+    /// confirmation is requested before the pane is destroyed".
+    #[test]
+    fn closing_a_pane_with_outstanding_todos_asks_first() {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        let response = close_pane_via_api(&mut app, pane_id);
+
+        assert_eq!(response["error"]["code"], "confirmation_required");
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.confirm_close_pane, Some(pane_id));
+        assert!(
+            !app.state.workspaces.is_empty(),
+            "nothing is destroyed before the answer"
+        );
+    }
+
+    #[test]
+    fn accepting_the_confirmation_closes_the_pane() {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        close_pane_via_api(&mut app, pane_id);
+
+        app.confirm_close_accept_via_api();
+
+        assert!(
+            app.state.confirm_close_pane.is_none(),
+            "the pending token is consumed, so the retry goes through"
+        );
+        assert!(
+            app.state.workspaces.is_empty(),
+            "the last pane closing takes its workspace with it"
+        );
+    }
+
+    #[test]
+    fn cancelling_the_confirmation_keeps_the_pane_and_drops_the_token() {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        close_pane_via_api(&mut app, pane_id);
+
+        confirm_close_cancel(&mut app.state);
+
+        assert!(app.state.confirm_close_pane.is_none());
+        assert!(!app.state.workspaces.is_empty());
+    }
+
+    /// Spec: "every todo on the pane is done -> the pane closes without
+    /// additional confirmation".
+    #[test]
+    fn a_pane_whose_todos_are_all_done_closes_without_a_prompt() {
+        let mut app = app_with_pane_todos(&[(
+            "finished",
+            true,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        let response = close_pane_via_api(&mut app, pane_id);
+
+        assert!(response["result"].is_object(), "no prompt: {response:?}");
+        assert!(app.state.confirm_close_pane.is_none());
     }
 }

@@ -1688,6 +1688,10 @@ pub struct AppState {
     pub requested_new_tab_name: Option<String>,
     pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
     pub rename_pane_target: Option<PaneId>,
+    /// Pane whose close is waiting on the confirmation modal because it still
+    /// has outstanding todos. Doubles as the "the user said yes" token: the
+    /// close path consumes it.
+    pub confirm_close_pane: Option<PaneId>,
     pub worktree_create: Option<WorktreeCreateState>,
     pub worktree_open: Option<WorktreeOpenState>,
     pub pane_move_target_picker: Option<PaneMoveTargetPickerState>,
@@ -2017,6 +2021,34 @@ impl AppState {
 
     /// Closes the panel only. Every caller pairs this with `leave_modal` or an
     /// explicit mode, exactly like `close_notification_center`.
+    /// Drop the TUI todo surfaces that pointed at a pane which is going away,
+    /// so no panel, modal, or pending confirmation outlives its pane.
+    pub(crate) fn forget_pane_todo_ui(&mut self, pane_id: PaneId) {
+        if self
+            .pane_todos
+            .as_ref()
+            .is_some_and(|panel| panel.pane_id == pane_id)
+        {
+            self.pane_todos = None;
+            if self.mode == Mode::PaneTodos {
+                self.mode = Mode::Terminal;
+            }
+        }
+        if self
+            .pane_todo_edit
+            .as_ref()
+            .is_some_and(|edit| edit.pane_id == pane_id)
+        {
+            self.pane_todo_edit = None;
+            if self.mode == Mode::PaneTodoEdit {
+                self.mode = Mode::Terminal;
+            }
+        }
+        if self.confirm_close_pane == Some(pane_id) {
+            self.confirm_close_pane = None;
+        }
+    }
+
     pub(crate) fn close_pane_todos(&mut self) {
         self.pane_todos = None;
     }
@@ -2473,6 +2505,7 @@ impl AppState {
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
             rename_pane_target: None,
+            confirm_close_pane: None,
             worktree_create: None,
             worktree_open: None,
             pane_move_target_picker: None,

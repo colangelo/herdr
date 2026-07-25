@@ -1553,6 +1553,16 @@ impl App {
                 "closing this pane would close a worktree group",
             ));
         }
+        // After the worktree-group check so the bigger warning still wins when
+        // both apply. Gating here rather than in the TUI means an external
+        // pane.close over the socket gets the same answer the TUI does.
+        if self.state.confirm_pane_close_with_todos(ws_idx, pane_id) {
+            return Err(encode_error(
+                id,
+                "confirmation_required",
+                "this pane still has outstanding todos",
+            ));
+        }
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
         let should_close_workspace = {
@@ -1561,6 +1571,7 @@ impl App {
             };
             ws.close_pane(pane_id)
         };
+        self.state.forget_pane_todo_ui(pane_id);
         self.state.remove_plugin_pane_records([pane_id]);
         if should_close_workspace {
             self.state.selected = ws_idx;
