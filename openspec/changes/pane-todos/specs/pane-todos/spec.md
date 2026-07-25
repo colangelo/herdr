@@ -42,8 +42,8 @@ rather than to a different todo.
 
 ### Requirement: Todo display ordering
 
-Stored order SHALL be insertion order. Presentation order SHALL be priority
-descending, then not-done before done, then creation order. Changing a todo's
+Stored order SHALL be insertion order. Presentation order SHALL be not-done
+before done, then priority descending, then creation order. Changing a todo's
 priority SHALL NOT change its id or its stored position.
 
 #### Scenario: Priority orders the list
