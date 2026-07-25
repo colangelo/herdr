@@ -84,6 +84,8 @@ pub enum Subscription {
     LayoutUpdated {},
     #[serde(rename = "notification.posted")]
     NotificationPosted {},
+    #[serde(rename = "todo.changed")]
+    TodoChanged {},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -221,6 +223,7 @@ pub enum EventKind {
     PaneAgentStatusChanged,
     LayoutUpdated,
     NotificationPosted,
+    TodoChanged,
 }
 
 impl EventKind {
@@ -253,6 +256,7 @@ impl EventKind {
             EventKind::PaneAgentStatusChanged => "pane.agent_status_changed",
             EventKind::LayoutUpdated => "layout.updated",
             EventKind::NotificationPosted => "notification.posted",
+            EventKind::TodoChanged => "todo.changed",
         }
     }
 }
@@ -286,6 +290,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneAgentStatusChanged,
     EventKind::LayoutUpdated,
     EventKind::NotificationPosted,
+    EventKind::TodoChanged,
 ];
 
 pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
@@ -560,5 +565,11 @@ pub enum EventData {
     },
     NotificationPosted {
         notification: super::notifications::NotificationInfo,
+    },
+    /// Emitted once per mutating `todo.*` call, naming the affected pane. The
+    /// todos themselves are read back with `todo.list` so the event stays small
+    /// and consumers see one shape.
+    TodoChanged {
+        pane_id: String,
     },
 }

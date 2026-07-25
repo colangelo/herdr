@@ -11,6 +11,7 @@ pub mod response;
 pub mod server;
 pub mod session;
 pub mod tabs;
+pub mod todos;
 pub mod workspaces;
 pub mod worktrees;
 
@@ -25,6 +26,7 @@ pub use response::*;
 pub use server::*;
 pub use session::*;
 pub use tabs::*;
+pub use todos::*;
 pub use workspaces::*;
 pub use worktrees::*;
 
@@ -65,6 +67,16 @@ pub enum Method {
     NotificationMarkSeen(NotificationMarkSeenParams),
     #[serde(rename = "notification.clear")]
     NotificationClear(EmptyParams),
+    #[serde(rename = "todo.list")]
+    TodoList(TodoListParams),
+    #[serde(rename = "todo.add")]
+    TodoAdd(TodoAddParams),
+    #[serde(rename = "todo.update")]
+    TodoUpdate(TodoUpdateParams),
+    #[serde(rename = "todo.remove")]
+    TodoRemove(TodoRemoveParams),
+    #[serde(rename = "todo.clear")]
+    TodoClear(TodoClearParams),
     #[serde(rename = "client.window_title.set")]
     ClientWindowTitleSet(ClientWindowTitleSetParams),
     #[serde(rename = "client.window_title.clear")]

@@ -11,6 +11,7 @@ pub(crate) mod plugins;
 mod responses;
 mod session;
 mod tabs;
+mod todos;
 mod workspaces;
 mod worktrees;
 
@@ -1104,6 +1105,21 @@ impl App {
             }
             Method::NotificationClear(_) => {
                 return self.handle_notification_clear(request.id);
+            }
+            Method::TodoList(params) => {
+                return self.handle_todo_list(request.id, params);
+            }
+            Method::TodoAdd(params) => {
+                return self.handle_todo_add(request.id, params);
+            }
+            Method::TodoUpdate(params) => {
+                return self.handle_todo_update(request.id, params);
+            }
+            Method::TodoRemove(params) => {
+                return self.handle_todo_remove(request.id, params);
+            }
+            Method::TodoClear(params) => {
+                return self.handle_todo_clear(request.id, params);
             }
             Method::ClientWindowTitleSet(_) | Method::ClientWindowTitleClear(_) => {
                 return responses::encode_success(

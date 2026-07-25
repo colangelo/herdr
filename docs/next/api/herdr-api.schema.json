@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 21,
+  "protocol": 20,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -739,6 +739,23 @@
                 "notification"
               ],
               "type": "object"
+            },
+            {
+              "description": "Emitted once per mutating `todo.*` call, naming the affected pane. The\ntodos themselves are read back with `todo.list` so the event stays small\nand consumers see one shape.",
+              "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "todo_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -770,7 +787,8 @@
             "pane_agent_detected",
             "pane_agent_status_changed",
             "layout_updated",
-            "notification_posted"
+            "notification_posted",
+            "todo_changed"
           ],
           "type": "string"
         },
@@ -2190,7 +2208,6 @@
             "kilo",
             "hermes",
             "qodercli",
-            "qwen",
             "cursor",
             "mastracode",
             "antigravity_cli",
@@ -4207,6 +4224,18 @@
                 "type"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "todo.changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -4307,17 +4336,135 @@
           ],
           "type": "string"
         },
-        "WorkspaceCloseParams": {
+        "TodoAddParams": {
           "properties": {
-            "close_group": {
-              "type": "boolean"
+            "link_pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
-            "workspace_id": {
+            "pane_id": {
+              "type": "string"
+            },
+            "priority": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/TodoPriority"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
               "type": "string"
             }
           },
           "required": [
-            "workspace_id"
+            "pane_id",
+            "text"
+          ],
+          "type": "object"
+        },
+        "TodoClearParams": {
+          "description": "Params for `todo.clear`: `done_only` keeps the outstanding todos.",
+          "properties": {
+            "done_only": {
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
+        "TodoListParams": {
+          "description": "Params for `todo.list`: a `pane_id` scopes the result to one pane, no\n`pane_id` returns every pane's todos.",
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "TodoPriority": {
+          "enum": [
+            "low",
+            "normal",
+            "high"
+          ],
+          "type": "string"
+        },
+        "TodoRemoveParams": {
+          "properties": {
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "id"
+          ],
+          "type": "object"
+        },
+        "TodoUpdateParams": {
+          "description": "Params for `todo.update`. Every optional field left out keeps its current\nvalue; `clear_link` removes the link and wins over `link_pane_id`.",
+          "properties": {
+            "clear_link": {
+              "type": "boolean"
+            },
+            "done": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "link_pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "priority": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/TodoPriority"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pane_id",
+            "id"
           ],
           "type": "object"
         },
@@ -4766,6 +4913,86 @@
         {
           "properties": {
             "method": {
+              "const": "todo.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TodoListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "todo.add",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TodoAddParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "todo.update",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TodoUpdateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "todo.remove",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TodoRemoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "todo.clear",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TodoClearParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "client.window_title.set",
               "type": "string"
             },
@@ -4946,7 +5173,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/WorkspaceCloseParams"
+              "$ref": "#/schemas/request/$defs/WorkspaceTarget"
             }
           },
           "required": [
@@ -7285,6 +7512,23 @@
                 "notification"
               ],
               "type": "object"
+            },
+            {
+              "description": "Emitted once per mutating `todo.*` call, naming the affected pane. The\ntodos themselves are read back with `todo.list` so the event stays small\nand consumers see one shape.",
+              "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "todo_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7331,7 +7575,8 @@
             "pane_agent_detected",
             "pane_agent_status_changed",
             "layout_updated",
-            "notification_posted"
+            "notification_posted",
+            "todo_changed"
           ],
           "type": "string"
         },
@@ -7462,7 +7707,6 @@
             "kilo",
             "hermes",
             "qodercli",
-            "qwen",
             "cursor",
             "mastracode",
             "antigravity_cli",
@@ -9679,14 +9923,6 @@
                   "description": "Accepts damage metadata while still consuming a complete canonical file.",
                   "type": "boolean"
                 },
-                "file_frame_direct_max_bytes": {
-                  "format": "uint",
-                  "minimum": 0,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
                 "file_frame_directory": {
                   "type": [
                     "string",
@@ -9896,6 +10132,59 @@
               "required": [
                 "type",
                 "cleared"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "todos": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/TodoInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "todo_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "todos"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "todo": {
+                  "$ref": "#/schemas/success_response/$defs/TodoInfo"
+                },
+                "type": {
+                  "const": "todo",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "todo"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "removed": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "todo_cleared",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "removed"
               ],
               "type": "object"
             },
@@ -10375,6 +10664,75 @@
             "agent_status"
           ],
           "type": "object"
+        },
+        "TodoInfo": {
+          "description": "One pane todo as exposed over the API. `pane_id` is the owning pane, so a\nwhole-session `todo.list` stays unambiguous.",
+          "properties": {
+            "created_at_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "done": {
+              "type": "boolean"
+            },
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "link_alive": {
+              "default": false,
+              "description": "Always serialized: a client rendering a dead link needs to tell \"no\nlink\" from \"link whose target is gone\", and both carry no `link_pane_id`.",
+              "type": "boolean"
+            },
+            "link_label": {
+              "description": "Label captured when the link was made, so a dead link can still say what\nit meant.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "link_pane_id": {
+              "description": "Public id of the linked pane while it still resolves. Absent once the\ntarget is gone, which is what makes the link dead.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "priority": {
+              "$ref": "#/schemas/success_response/$defs/TodoPriority"
+            },
+            "text": {
+              "type": "string"
+            },
+            "updated_at_unix": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "pane_id",
+            "id",
+            "text",
+            "done",
+            "priority",
+            "created_at_unix",
+            "updated_at_unix"
+          ],
+          "type": "object"
+        },
+        "TodoPriority": {
+          "enum": [
+            "low",
+            "normal",
+            "high"
+          ],
+          "type": "string"
         },
         "WorkspaceInfo": {
           "properties": {
