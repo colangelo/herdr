@@ -95,7 +95,12 @@ build-libghostty-vt:
 release-docs-check:
     python3 scripts/agent_detection_manifest_check.py --require-website
     python3 scripts/config_reference_check.py
-    node website/scripts/docs-versions.mjs check
+    # fork: `docs-versions.mjs check` is omitted — it asserts docs/versions
+    # manifest.current == website/latest.json version, and the fork's latest.json
+    # is fork-scoped (its own -ac releases) while docs/versions tracks upstream's
+    # herdr.dev release docs. The fork does not publish herdr.dev, so the two are
+    # intentionally out of step. `just website-build` below still validates every
+    # version snapshot renders.
     node website/scripts/docs-preview.mjs check
     @test -f docs/next/README.md
     @test -f docs/next/README.zh-CN.md
