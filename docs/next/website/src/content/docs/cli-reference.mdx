@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Herdr commands for sessions, workspaces, tabs, panes, notifications, agents, waits, integrations, and status.
+description: Herdr commands for sessions, workspaces, tabs, panes, notifications, todos, agents, waits, integrations, and status.
 ---
 
 Herdr’s CLI talks to the running server over the same local socket API used by integrations and agents.
@@ -104,6 +104,26 @@ herdr notification clear [--json]
 `notification show` uses the configured `[ui.toast]` delivery. `--position` only affects in-app Herdr toasts. `--sound` defaults to `none`; `done` and `request` play the existing finished and needs-attention sounds only when the notification is shown.
 
 `notification list` prints the server's notification log newest-first — the same feed as the in-app notification center — with unread entries marked `*` and a trailing unread count. An entry reads as unread until it is activated in the notification center or marked via `notification.mark_seen`. Pass `--json` for the raw `notification.list` response, including each entry's `id`, `kind`, `read` flag, target ids, and `posted_at_unix`. The log holds the newest 100 entries in server memory and empties on a cold server restart. `notification clear` empties the log (the same action as the notification center's "Clear all" button) and reports how many entries were removed.
+
+## Todos
+
+```bash
+herdr todo add <text> [--pane ID|--current] [--priority high|normal|low] [--link <target>] [--json]
+herdr todo list [--pane ID|--current|--all] [--json]
+herdr todo done <id> [--pane ID|--current] [--json]
+herdr todo undone <id> [--pane ID|--current] [--json]
+herdr todo edit <id> [--text TEXT] [--priority high|normal|low] [--link <target>|--unlink] [--pane ID|--current] [--json]
+herdr todo rm <id> [--pane ID|--current] [--json]
+herdr todo clear [--done] [--pane ID|--current] [--json]
+```
+
+Every pane carries its own todo list. Without `--pane` or `--current`, each verb acts on the calling pane's `HERDR_PANE_ID`, so an agent about to exit can record its next steps with `herdr todo add "hand back to review"` without knowing its own pane id. Run outside a Herdr pane without a target and the command fails instead of guessing; `todo list` also accepts `--all` to list every pane in the session.
+
+`--priority` is `high`, `normal`, or `low` and defaults to `normal`. `--link <target>` points a todo at another pane by pane id (`w1:p2`); the link captures a label for the target when it is made — that pane's label, its agent name, or the id you passed — so it still reads sensibly once the target is gone. `edit --unlink` drops the link. A pane holds at most 50 todos of at most 500 characters each; writes past either limit are rejected with `todo_limit_reached` or `todo_text_too_long` rather than truncated.
+
+`todo list` prints one todo per line in display order — highest priority first, outstanding before done, then creation order — marking outstanding todos with `*`, followed by the id, priority, and text, with ` → label` appended for a linked todo and ` (gone)` when its target pane no longer exists. A trailing line counts the outstanding todos when any remain. `--all` adds a pane column. Pass `--json` for the raw `todo.list` response, including each todo's `link_pane_id`, `link_alive`, `created_at_unix`, and `updated_at_unix`.
+
+Todos belong to the pane and follow it: they ride the session snapshot across server restarts and `herdr update --handoff`, and links are remapped to the restored pane ids. A link whose target did not come back keeps its label and stops resolving instead of pointing at some other pane.
 
 ## Sessions
 

@@ -42,6 +42,7 @@ The socket API can:
 - list, inspect, split, swap, focus, resize, rename, read, close, and send input to panes
 - list, inspect, read, prompt, wait on, rename, focus, start, and attach agents through CLI helpers
 - report custom agent state from hooks and plugins
+- add, list, edit, remove, and clear per-pane todos
 - subscribe to events and wait for output or state changes
 - install and uninstall built-in integrations
 - stop the server and reload config
@@ -98,6 +99,7 @@ Raw socket method names use dot notation:
 | --- | --- |
 | Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
 | Notification | `notification.show`, `notification.list`, `notification.mark_seen`, `notification.clear` |
+| Todo | `todo.list`, `todo.add`, `todo.update`, `todo.remove`, `todo.clear` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
@@ -448,6 +450,73 @@ Activating a notification in the Herdr TUI's notification center marks that
 same entry read, so external consumers and the built-in unread indicator
 always agree. Subscribe to `notification.posted` for a push feed of new
 entries.
+
+Todos are the durable counterpart: each pane owns a list of next steps that
+survives a server restart and a live handoff, exposed as `todo.list`,
+`todo.add`, `todo.update`, `todo.remove`, and `todo.clear`. `herdr todo` is the
+CLI wrapper for the same methods.
+
+List one pane's todos, or every pane's when `pane_id` is omitted:
+
+```json
+{"id":"req_tlist","method":"todo.list","params":{"pane_id":"w1:p2"}}
+```
+
+```json
+{"id":"req_tlist","result":{"type":"todo_list","todos":[{"pane_id":"w1:p2","id":3,"text":"rerun the deploy","done":false,"priority":"high","link_pane_id":"w1:p1","link_label":"infra","link_alive":true,"created_at_unix":1789000000,"updated_at_unix":1789000100}]}}
+```
+
+Todos come back in display order: highest priority first (`high`, `normal`,
+`low`), outstanding before done, then creation order. Every entry names its own
+`pane_id`, so a whole-session listing stays unambiguous. `link_pane_id` and
+`link_label` appear only on linked todos. `link_alive` is `false` once the
+linked pane is gone; the label is kept so a dead link can still say what it
+meant, and it never resolves to some other pane.
+
+Add a todo to a pane:
+
+```json
+{"id":"req_tadd","method":"todo.add","params":{"pane_id":"w1:p2","text":"rerun the deploy","priority":"high","link_pane_id":"w1:p1"}}
+```
+
+```json
+{"id":"req_tadd","result":{"type":"todo","todo":{"pane_id":"w1:p2","id":3,"text":"rerun the deploy","done":false,"priority":"high","link_pane_id":"w1:p1","link_label":"infra","link_alive":true,"created_at_unix":1789000000,"updated_at_unix":1789000000}}}
+```
+
+`priority` is optional and defaults to `normal`. `link_pane_id` is optional and
+must resolve to a live pane; the link label is captured from that pane's label,
+its agent name, or the id you passed, in that order.
+Text is trimmed and must not be empty, a todo is capped at 500 characters, and
+a pane is capped at 50 todos. Nothing is silently truncated: over-limit or
+malformed writes fail with `todo_text_empty`, `todo_text_too_long`,
+`todo_limit_reached`, `todo_link_unresolved`, or `pane_not_found`.
+
+Update one todo. Omitted fields keep their current value, and `clear_link`
+removes the link and wins over `link_pane_id`:
+
+```json
+{"id":"req_tupd","method":"todo.update","params":{"pane_id":"w1:p2","id":3,"done":true}}
+{"id":"req_tunlink","method":"todo.update","params":{"pane_id":"w1:p2","id":3,"text":"rerun the deploy after review","priority":"normal","clear_link":true}}
+```
+
+The response is `type: "todo"` with the stored record. An id that is not on
+that pane fails with `todo_not_found`, and a rejected update leaves the todo
+untouched.
+
+Remove one todo, or clear a pane's list; `done_only` keeps the outstanding ones:
+
+```json
+{"id":"req_trm","method":"todo.remove","params":{"pane_id":"w1:p2","id":3}}
+{"id":"req_tclear","method":"todo.clear","params":{"pane_id":"w1:p2","done_only":true}}
+```
+
+```json
+{"id":"req_trm","result":{"type":"ok"}}
+{"id":"req_tclear","result":{"type":"todo_cleared","removed":2}}
+```
+
+Every call that changes a pane's list emits `todo.changed` for that pane; a
+clear that removed nothing changes nothing and emits nothing.
 
 Set or clear the foreground client's outer terminal window title:
 
@@ -896,6 +965,10 @@ updated `PaneLayoutSnapshot` for one tab. Clients that bootstrap with
 Notification subscriptions include `notification.posted`, emitted whenever an
 entry is appended to the server's notification log. The event carries the same
 `notification` record as `notification.list`.
+
+Todo subscriptions include `todo.changed`, emitted once per `todo.*` call that
+changed a pane's list. The event carries only the affected `pane_id`; read the
+list back with `todo.list` so consumers always see one shape.
 
 Worktree event subscriptions include `worktree.created`, `worktree.opened`, and `worktree.removed`. Worktree events describe Git checkout lifecycle. `worktree.created` includes the opened `workspace` and created `worktree`. `worktree.opened` includes the target `workspace`, opened `worktree`, and `already_open`. `worktree.removed` includes the `workspace_id`, removed `worktree`, and `forced`.
 
