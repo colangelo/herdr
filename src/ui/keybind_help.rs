@@ -164,6 +164,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
         ),
         help_entry(keybind_label(&kb.edit_scrollback), "edit scrollback"),
         help_entry(keybind_label(&kb.clear_scrollback), "clear scrollback"),
+        help_entry(keybind_label(&kb.open_pane_todos), "pane todos"),
         help_entry(keybind_label(&kb.copy_mode), "copy mode"),
         help_entry(keybind_label(&kb.copy_mode_page_up), "copy mode + page up"),
         help_entry(

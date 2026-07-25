@@ -78,9 +78,8 @@ use self::tabs::render_tab_bar;
 use self::todo_panel::render_pane_todo_panel;
 pub(crate) use self::todo_panel::{pane_todo_panel_button_rects, PaneTodoPanelButtonRects};
 // The chip's cells have exactly one definition, so a click can never land on
-// cells the renderer did not draw. Until that hit-test lands (phase-2 task 3)
-// the bin target reaches the chip only through the renderer inside the module.
-#[allow(unused_imports)]
+// cells the renderer did not draw: the renderer reaches it inside the module
+// and the mouse hit-test reaches it through this re-export.
 pub(crate) use self::todo_panel::pane_todo_link_chip;
 pub(crate) use self::{
     dialogs::{
@@ -122,10 +121,9 @@ pub(crate) use self::{
 // The indicator's cells have exactly one definition; the pane renderer reaches
 // it through the module with the terminal it already resolved, and the mouse
 // hit-test reaches it through this re-export so a click can never land on cells
-// the renderer did not draw. Until that hit-test lands (phase-2 task 3) the bin
-// target sees these as unreached.
-#[allow(unused_imports)]
-pub(crate) use self::panes::{pane_todo_indicator, PaneTodoIndicator};
+// the renderer did not draw. The returned `PaneTodoIndicator` is read field by
+// field, so no caller outside this module needs to name the type.
+pub(crate) use self::panes::pane_todo_indicator;
 use crate::app::state::ViewLayout;
 use crate::app::{AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
@@ -1798,6 +1796,22 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(rendered.contains("PREFIX"));
+    }
+
+    #[test]
+    fn keybind_help_lists_the_pane_todo_panel_action() {
+        let app = crate::app::state::AppState::test_new();
+        let groups = keybind_help_groups(&app);
+        let panes = groups
+            .iter()
+            .find(|(name, _)| *name == "panes")
+            .expect("panes group")
+            .1
+            .clone();
+
+        assert!(panes
+            .iter()
+            .any(|(key, label)| key == "prefix+ctrl+t" && label.as_ref() == "pane todos"));
     }
 
     #[test]

@@ -25,6 +25,18 @@ pub(super) enum ModalAction {
     Close,
 }
 
+/// What the todo panel is being asked to do. Keys and clicks both funnel
+/// through `App::apply_pane_todo_action`, so a shortcut and its button can
+/// never diverge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PaneTodoAction {
+    Edit,
+    ToggleDone,
+    Remove,
+    ClearDone,
+    FollowLink,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ModalKeyBinding {
     Enter,
@@ -1046,6 +1058,96 @@ impl App {
                 leave_modal(&mut self.state);
             }
             _ => {}
+        }
+    }
+
+    pub(crate) fn handle_pane_todos_key_via_api(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.state.pane_todos_move_selection(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.state.pane_todos_move_selection(1),
+            // Enter edits rather than jumps: todos are authored, notifications
+            // are not. Jumping is on the link chip and `g`.
+            KeyCode::Enter => self.apply_pane_todo_action(PaneTodoAction::Edit),
+            KeyCode::Char(' ') => self.apply_pane_todo_action(PaneTodoAction::ToggleDone),
+            KeyCode::Char('g') => self.apply_pane_todo_action(PaneTodoAction::FollowLink),
+            KeyCode::Char('d') => self.apply_pane_todo_action(PaneTodoAction::Remove),
+            KeyCode::Char('c') => self.apply_pane_todo_action(PaneTodoAction::ClearDone),
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.state.close_pane_todos();
+                leave_modal(&mut self.state);
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply a panel action to the selected todo. Every mutation goes back
+    /// through the `todo.*` API, so the panel, the CLI, and subscribers all
+    /// move the same state and `todo.changed` is emitted for free.
+    pub(super) fn apply_pane_todo_action(&mut self, action: PaneTodoAction) {
+        let Some(pane_id) = self.state.pane_todos.as_ref().map(|panel| panel.pane_id) else {
+            return;
+        };
+        let Some(ws_idx) = self.state.active else {
+            return;
+        };
+        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+            return;
+        };
+
+        if action == PaneTodoAction::ClearDone {
+            self.runtime_todo_clear(
+                "tui.todo.clear",
+                crate::api::schema::TodoClearParams {
+                    pane_id: public_pane_id,
+                    done_only: true,
+                },
+            );
+            // The list just shrank under the cursor.
+            self.state.pane_todos_move_selection(0);
+            return;
+        }
+
+        let Some(todo) = self.state.selected_pane_todo() else {
+            return;
+        };
+        match action {
+            // Task 4 opens the edit modal here.
+            PaneTodoAction::Edit => {}
+            PaneTodoAction::ToggleDone => {
+                self.runtime_todo_update(
+                    "tui.todo.update",
+                    crate::api::schema::TodoUpdateParams {
+                        pane_id: public_pane_id,
+                        id: todo.id,
+                        done: Some(!todo.done),
+                        ..Default::default()
+                    },
+                );
+                // Toggling re-sorts the list (done sinks), so re-clamp.
+                self.state.pane_todos_move_selection(0);
+            }
+            PaneTodoAction::Remove => {
+                self.runtime_todo_remove(
+                    "tui.todo.remove",
+                    crate::api::schema::TodoRemoveParams {
+                        pane_id: public_pane_id,
+                        id: todo.id,
+                    },
+                );
+                self.state.pane_todos_move_selection(0);
+            }
+            PaneTodoAction::FollowLink => {
+                // A dead link is inert: it keeps its label and never resolves
+                // to some other pane.
+                let Some((target_ws_idx, target_pane_id)) = self.state.pane_todo_link_target(&todo)
+                else {
+                    return;
+                };
+                self.state.close_pane_todos();
+                self.focus_pane_internal_via_api(target_ws_idx, target_pane_id);
+                self.state.mode = Mode::Terminal;
+            }
+            PaneTodoAction::ClearDone => {}
         }
     }
 
@@ -2539,5 +2641,213 @@ mod tests {
         assert_eq!(app.state.mode, Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
         assert!(app.state.context_menu.is_none());
+    }
+
+    /// App with one workspace, one pane, and todos on it. Builds on the
+    /// module's existing `app_with_test_workspaces`, which already wires
+    /// `App::new`, `ensure_test_terminals`, and `active`.
+    fn app_with_pane_todos(todos: &[(&str, bool, crate::terminal::todo::TodoPriority)]) -> App {
+        let mut app = app_with_test_workspaces(&["todos"]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        for (text, done, priority) in todos {
+            let todo = terminal
+                .add_todo(text, *priority, None, 100)
+                .expect("todo should be added");
+            if *done {
+                terminal
+                    .update_todo(
+                        todo.id,
+                        crate::terminal::todo::TodoUpdate {
+                            done: Some(true),
+                            ..Default::default()
+                        },
+                        200,
+                    )
+                    .expect("todo should be updated");
+            }
+        }
+        app.state.open_pane_todos(pane_id);
+        app
+    }
+
+    fn panel_todo_texts(app: &App) -> Vec<String> {
+        let pane_id = app
+            .state
+            .pane_todos
+            .as_ref()
+            .expect("panel should be open")
+            .pane_id;
+        app.state
+            .pane_todos_in_display_order(pane_id)
+            .into_iter()
+            .map(|todo| todo.text.clone())
+            .collect()
+    }
+
+    #[test]
+    fn pane_todo_panel_selection_moves_with_arrows_and_j_k() {
+        let mut app = app_with_pane_todos(&[
+            ("first", false, crate::terminal::todo::TodoPriority::High),
+            ("second", false, crate::terminal::todo::TodoPriority::Normal),
+        ]);
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Down));
+        assert_eq!(app.state.pane_todos.as_ref().expect("panel").selected, 1);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('k')));
+        assert_eq!(app.state.pane_todos.as_ref().expect("panel").selected, 0);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('j')));
+        assert_eq!(app.state.pane_todos.as_ref().expect("panel").selected, 1);
+    }
+
+    #[test]
+    fn space_toggles_the_selected_todo_through_the_api() {
+        let mut app = app_with_pane_todos(&[(
+            "toggle me",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.session_dirty = false;
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char(' ')));
+
+        let todo = app
+            .state
+            .selected_pane_todo()
+            .expect("a todo should still be selected");
+        assert!(todo.done, "space marks the selected todo done");
+        assert!(
+            app.state.session_dirty,
+            "the mutation went through the API, so the session is dirty"
+        );
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char(' ')));
+        assert!(
+            !app.state
+                .selected_pane_todo()
+                .expect("a todo should still be selected")
+                .done,
+            "space toggles back"
+        );
+    }
+
+    #[test]
+    fn d_removes_and_c_clears_only_done_todos() {
+        let mut app = app_with_pane_todos(&[
+            (
+                "keep me",
+                false,
+                crate::terminal::todo::TodoPriority::Normal,
+            ),
+            (
+                "finished",
+                true,
+                crate::terminal::todo::TodoPriority::Normal,
+            ),
+        ]);
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('c')));
+        assert_eq!(panel_todo_texts(&app), vec!["keep me".to_string()]);
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('d')));
+        assert!(panel_todo_texts(&app).is_empty());
+        assert_eq!(
+            app.state.pane_todos.as_ref().expect("panel").selected,
+            0,
+            "the selection re-clamps once the list shrinks"
+        );
+    }
+
+    /// Spec: "Following a link → focus moves to the linked pane" via the same
+    /// focus path a notification jump uses.
+    #[test]
+    fn g_follows_a_live_link_and_closes_the_panel() {
+        let mut app = app_with_pane_todos(&[(
+            "look over there",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let todo_id = app.state.terminals[&terminal_id].todos()[0].id;
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .update_todo(
+                todo_id,
+                crate::terminal::todo::TodoUpdate {
+                    link: Some(Some(crate::terminal::todo::TodoLink {
+                        pane: Some(pane_id),
+                        label: "infra".into(),
+                    })),
+                    ..Default::default()
+                },
+                300,
+            )
+            .expect("todo should be updated");
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('g')));
+
+        assert!(app.state.pane_todos.is_none(), "the panel closes on a jump");
+        assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn g_on_a_dead_link_is_inert() {
+        let mut app =
+            app_with_pane_todos(&[("gone", false, crate::terminal::todo::TodoPriority::Normal)]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let todo_id = app.state.terminals[&terminal_id].todos()[0].id;
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .update_todo(
+                todo_id,
+                crate::terminal::todo::TodoUpdate {
+                    link: Some(Some(crate::terminal::todo::TodoLink {
+                        pane: None,
+                        label: "infra".into(),
+                    })),
+                    ..Default::default()
+                },
+                300,
+            )
+            .expect("todo should be updated");
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('g')));
+
+        assert!(
+            app.state.pane_todos.is_some(),
+            "a dead link changes nothing at all"
+        );
+        assert_eq!(app.state.mode, Mode::PaneTodos);
+    }
+
+    #[test]
+    fn esc_and_q_close_the_panel() {
+        for code in [KeyCode::Esc, KeyCode::Char('q')] {
+            let mut app = app_with_pane_todos(&[(
+                "still here",
+                false,
+                crate::terminal::todo::TodoPriority::Normal,
+            )]);
+            app.handle_pane_todos_key_via_api(key(code));
+            assert!(app.state.pane_todos.is_none());
+            assert_ne!(app.state.mode, Mode::PaneTodos);
+        }
     }
 }

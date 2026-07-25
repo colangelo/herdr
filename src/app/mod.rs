@@ -2038,8 +2038,9 @@ impl App {
             Mode::NotificationCenter => {
                 self.handle_notification_center_key_via_api(key_event);
             }
-            // Inert until phase-2 task 3 wires the panel's key handling.
-            Mode::PaneTodos => {}
+            Mode::PaneTodos => {
+                self.handle_pane_todos_key_via_api(key_event);
+            }
             Mode::Resize => {
                 self.handle_resize_key_via_api(key);
             }

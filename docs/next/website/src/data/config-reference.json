@@ -338,6 +338,12 @@
           "description": "Open the notification center panel."
         },
         {
+          "key": "keys.open_pane_todos",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+t\"",
+          "description": "Open the focused pane's todo panel."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",

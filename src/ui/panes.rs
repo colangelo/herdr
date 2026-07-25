@@ -654,11 +654,7 @@ fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String>
 }
 
 /// The entry point for a caller holding only a pane id — the mouse hit-test,
-/// which must read the same cells the renderer drew. It lands in phase-2 task
-/// 3; until then the bin target reaches this only from tests, so it carries
-/// the same scoped allow as its `src/ui.rs` re-export and both go away
-/// together.
-#[allow(dead_code)]
+/// which must read the same cells the renderer drew.
 pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<PaneTodoIndicator> {
     pane_todo_indicator_for(app, info, app.pane_terminal(info.id)?)
 }

@@ -6,8 +6,8 @@ use tracing::warn;
 use crate::{
     app::state::{
         AgentPanelSort, AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget,
-        MenuListState, Mode, RightClickPassthroughGesture, TabPressState, ViewLayout,
-        WorkspacePressState,
+        MenuListState, Mode, PaneTodoPanelButton, RightClickPassthroughGesture, TabPressState,
+        ViewLayout, WorkspacePressState,
     },
     layout::{PaneInfo, SplitBorder},
     selection::Selection,
@@ -20,6 +20,7 @@ use super::{
     modal::{
         apply_global_menu_action, confirm_close_cancel, global_menu_actions, leave_modal,
         modal_action_from_buttons, open_global_menu, open_new_tab_dialog, ModalAction,
+        PaneTodoAction,
     },
     settings::SettingsAction,
     ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
@@ -46,6 +47,7 @@ pub(super) enum MouseAction {
         index: usize,
     },
     ClearNotifications,
+    PaneTodo(PaneTodoAction),
     MoveWorkspace {
         source_ws_idx: usize,
         insert_idx: usize,
@@ -197,6 +199,30 @@ impl AppState {
             return None;
         }
 
+        // Placement is the whole trick: the indicator sits on a pane's top
+        // border, and for every pane below the top of the layout
+        // `find_border_at` treats that row as a split-drag hitbox. Answering
+        // here returns before the `Down(Left)` arm ever reaches the drag, so
+        // the glyph stays clickable. `Mode::PaneTodos` is in the allowlist so
+        // the glyph toggles the panel shut again. The hit-test resolves every
+        // pane's terminal, so it is only paid on a click, never on motion.
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && matches!(
+                self.mode,
+                Mode::Terminal | Mode::Navigate | Mode::Resize | Mode::PaneTodos
+            )
+        {
+            if let Some(pane_id) = self.pane_todo_indicator_at(mouse.column, mouse.row) {
+                if self.mode == Mode::PaneTodos {
+                    self.close_pane_todos();
+                    leave_modal(self);
+                } else {
+                    self.open_pane_todos(pane_id);
+                }
+                return None;
+            }
+        }
+
         if self.mode == Mode::NotificationCenter {
             match mouse.kind {
                 MouseEventKind::Moved => {
@@ -241,6 +267,64 @@ impl AppState {
                         return None;
                     }
                     self.close_notification_center();
+                    leave_modal(self);
+                }
+                _ => {}
+            }
+            return None;
+        }
+
+        if self.mode == Mode::PaneTodos {
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    let over_button = self
+                        .pane_todo_panel_buttons()
+                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row));
+                    if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
+                        if let Some(panel) = self.pane_todos.as_mut() {
+                            panel.selected = idx;
+                        }
+                    }
+                    if let Some(panel) = self.pane_todos.as_mut() {
+                        panel.hovered_button = over_button;
+                    }
+                }
+                MouseEventKind::ScrollUp => self.pane_todos_move_selection(-1),
+                MouseEventKind::ScrollDown => self.pane_todos_move_selection(1),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
+                        let on_chip = self.pane_todo_link_chip_at(mouse.column, mouse.row);
+                        if let Some(panel) = self.pane_todos.as_mut() {
+                            panel.selected = idx;
+                        }
+                        return Some(MouseAction::PaneTodo(if on_chip {
+                            PaneTodoAction::FollowLink
+                        } else {
+                            PaneTodoAction::Edit
+                        }));
+                    }
+                    match self
+                        .pane_todo_panel_buttons()
+                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
+                    {
+                        Some(PaneTodoPanelButton::Toggle) => {
+                            return Some(MouseAction::PaneTodo(PaneTodoAction::ToggleDone));
+                        }
+                        Some(PaneTodoPanelButton::ClearDone) => {
+                            return Some(MouseAction::PaneTodo(PaneTodoAction::ClearDone));
+                        }
+                        Some(PaneTodoPanelButton::Close) => {
+                            self.close_pane_todos();
+                            leave_modal(self);
+                            return None;
+                        }
+                        None => {}
+                    }
+                    // A near-miss elsewhere on the buttons' row is inert.
+                    if self.pane_todo_panel_footer_row_y() == Some(mouse.row) {
+                        return None;
+                    }
+                    self.close_pane_todos();
                     leave_modal(self);
                 }
                 _ => {}
@@ -1559,8 +1643,6 @@ impl AppState {
 
     /// Y of the footer row. Clicks in this row but outside a button are inert
     /// rather than closing, so a near-miss does not dismiss the panel.
-    // The click routing that reads it lands in phase-2 task 3.
-    #[allow(dead_code)]
     fn pane_todo_panel_footer_row_y(&self) -> Option<u16> {
         self.pane_todo_panel_buttons()
             .map(|buttons| buttons.row_y())
@@ -1585,6 +1667,40 @@ impl AppState {
         let visible = list.height as usize;
         let start = selected.saturating_sub(visible.saturating_sub(1));
         Some((list, start))
+    }
+
+    fn pane_todo_panel_row_at(&self, col: u16, row: u16) -> Option<usize> {
+        let panel = self.pane_todos.as_ref()?;
+        let (list, start) = self.pane_todo_panel_list_window()?;
+        let len = self.pane_todos_in_display_order(panel.pane_id).len();
+        if len == 0 || !rect_contains(list, col, row) {
+            return None;
+        }
+        let idx = start + (row - list.y) as usize;
+        (idx < len).then_some(idx)
+    }
+
+    /// Whether the cell is on a row's link chip. Uses the same chip geometry
+    /// the renderer draws, so what looks clickable is clickable.
+    fn pane_todo_link_chip_at(&self, col: u16, row: u16) -> bool {
+        let Some(idx) = self.pane_todo_panel_row_at(col, row) else {
+            return false;
+        };
+        let Some(panel) = self.pane_todos.as_ref() else {
+            return false;
+        };
+        let Some((list, _)) = self.pane_todo_panel_list_window() else {
+            return false;
+        };
+        let todos = self.pane_todos_in_display_order(panel.pane_id);
+        let Some(todo) = todos.get(idx) else {
+            return false;
+        };
+        let Some(link) = todo.link.as_ref() else {
+            return false;
+        };
+        crate::ui::pane_todo_link_chip(Rect::new(list.x, row, list.width, 1), &link.label)
+            .is_some_and(|(chip, _)| rect_contains(chip, col, row))
     }
 
     fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
@@ -1826,6 +1942,15 @@ impl AppState {
 
     pub(crate) fn pane_info_by_id(&self, pane_id: crate::layout::PaneId) -> Option<&PaneInfo> {
         self.view.pane_infos.iter().find(|info| info.id == pane_id)
+    }
+
+    /// The pane whose todo indicator covers this cell. Reads the very rect the
+    /// renderer draws into, so the click target cannot drift from the glyph.
+    fn pane_todo_indicator_at(&self, col: u16, row: u16) -> Option<crate::layout::PaneId> {
+        self.view.pane_infos.iter().find_map(|info| {
+            let indicator = crate::ui::pane_todo_indicator(self, info)?;
+            rect_contains(indicator.rect, col, row).then_some(info.id)
+        })
     }
 
     pub(super) fn pane_frame_at(&self, col: u16, row: u16) -> Option<&PaneInfo> {
@@ -4486,5 +4611,156 @@ mod tests {
         };
 
         assert_eq!(wheel_routing(input_state), WheelRouting::HostScroll);
+    }
+
+    /// Give the mouse-test app a bordered pane with one outstanding todo.
+    fn app_for_pane_todo_indicator() -> crate::app::App {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("todos")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "ship it",
+                crate::terminal::todo::TodoPriority::High,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+        app.state.view.pane_infos = vec![PaneInfo {
+            id: pane_id,
+            rect: Rect::new(26, 0, 40, 10),
+            inner_rect: Rect::new(27, 1, 38, 8),
+            scrollbar_rect: None,
+            borders: ratatui::widgets::Borders::ALL,
+            is_focused: true,
+        }];
+        app
+    }
+
+    /// Spec: "the cells that respond to a click are exactly the cells drawn".
+    #[test]
+    fn clicking_the_pane_todo_indicator_toggles_the_panel() {
+        let mut app = app_for_pane_todo_indicator();
+        let indicator = crate::ui::pane_todo_indicator(&app.state, &app.state.view.pane_infos[0])
+            .expect("indicator should exist");
+
+        for col in indicator.rect.x..indicator.rect.x + indicator.rect.width {
+            app.state.handle_mouse(
+                &mut app.terminal_runtimes,
+                mouse(
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                    col,
+                    indicator.rect.y,
+                ),
+            );
+            assert_eq!(
+                app.state.mode,
+                Mode::PaneTodos,
+                "column {col} of the indicator must open the panel"
+            );
+            app.state.handle_mouse(
+                &mut app.terminal_runtimes,
+                mouse(
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                    col,
+                    indicator.rect.y,
+                ),
+            );
+            assert!(
+                app.state.pane_todos.is_none(),
+                "a second click on the indicator closes it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_border_click_beside_the_indicator_still_starts_a_split_drag_or_focus() {
+        let mut app = app_for_pane_todo_indicator();
+        let indicator = crate::ui::pane_todo_indicator(&app.state, &app.state.view.pane_infos[0])
+            .expect("indicator should exist");
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                indicator.rect.x - 1,
+                indicator.rect.y,
+            ),
+        );
+
+        assert!(
+            app.state.pane_todos.is_none(),
+            "only the drawn cells open the panel"
+        );
+    }
+
+    #[test]
+    fn clicking_a_panel_row_opens_the_edit_view_and_the_chip_follows_the_link() {
+        let mut app = app_for_pane_todo_indicator();
+        let pane_id = app.state.view.pane_infos[0].id;
+        app.state.open_pane_todos(pane_id);
+        let (list, _) = app
+            .state
+            .pane_todo_panel_list_window()
+            .expect("panel list window should exist");
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                list.x + 4,
+                list.y,
+            ),
+        );
+
+        assert!(
+            matches!(action, Some(MouseAction::PaneTodo(PaneTodoAction::Edit))),
+            "a row click edits, mirroring Enter"
+        );
+    }
+
+    #[test]
+    fn a_near_miss_on_the_panel_footer_row_is_inert() {
+        let mut app = app_for_pane_todo_indicator();
+        let pane_id = app.state.view.pane_infos[0].id;
+        app.state.open_pane_todos(pane_id);
+        let buttons = app
+            .state
+            .pane_todo_panel_buttons()
+            .expect("footer buttons should exist");
+
+        // Aim at the gap between two boxes rather than at a column guessed
+        // from the panel's edge: `centered_button_row` centres the row, so
+        // `panel.x + 1` lands *on* the leftmost box at this panel width and
+        // the test would pass without ever reaching the inert path.
+        let gap_col = buttons.clear_done.x + buttons.clear_done.width;
+        assert_eq!(
+            buttons.hit(gap_col, buttons.row_y()),
+            None,
+            "the near-miss column must really miss every button"
+        );
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                gap_col,
+                buttons.row_y(),
+            ),
+        );
+
+        assert!(action.is_none(), "a near-miss triggers no action at all");
+        assert!(
+            app.state.pane_todos.is_some(),
+            "missing a footer button must not dismiss the panel"
+        );
     }
 }

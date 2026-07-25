@@ -37,9 +37,6 @@ pub(crate) struct PaneTodoPanelButtonRects {
 }
 
 impl PaneTodoPanelButtonRects {
-    // The click routing that calls this lands in phase-2 task 3; the renderer
-    // only needs the rects themselves.
-    #[allow(dead_code)]
     pub(crate) fn hit(&self, col: u16, row: u16) -> Option<PaneTodoPanelButton> {
         let contains = |rect: Rect| col >= rect.x && col < rect.x + rect.width && row == rect.y;
         if self.toggle.is_some_and(contains) {
