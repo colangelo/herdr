@@ -65,6 +65,7 @@ pub(super) enum MouseAction {
         ratio: f32,
     },
     RenameModal(ModalAction),
+    PaneTodoEditModal(ModalAction),
     ConfirmCloseAccept,
     SubmitPaneMoveTarget,
     ContextMenu {
@@ -647,6 +648,29 @@ impl AppState {
                         })
                         .unwrap_or(ModalAction::Cancel);
                     return Some(MouseAction::RenameModal(action));
+                }
+
+                if self.mode == Mode::PaneTodoEdit {
+                    let rects = self.pane_todo_edit_regions()?;
+                    if rect_contains(rects.priority, mouse.column, mouse.row) {
+                        self.cycle_pane_todo_edit_priority();
+                        return None;
+                    }
+                    if rect_contains(rects.link, mouse.column, mouse.row) {
+                        self.cycle_pane_todo_edit_link();
+                        return None;
+                    }
+                    // Anything else cancels, matching the rename modal.
+                    let action = modal_action_from_buttons(
+                        mouse.column,
+                        mouse.row,
+                        &[
+                            (rects.save, ModalAction::Save),
+                            (rects.cancel, ModalAction::Cancel),
+                        ],
+                    )
+                    .unwrap_or(ModalAction::Cancel);
+                    return Some(MouseAction::PaneTodoEditModal(action));
                 }
 
                 if self.mode == Mode::ContextMenu {
@@ -1674,6 +1698,13 @@ impl AppState {
             return None;
         }
         crate::ui::pane_todo_panel_button_rects(self.pane_todo_panel_inner()?)
+    }
+
+    /// The edit modal's interactive regions in screen space, from the one
+    /// definition the renderer draws with.
+    pub(crate) fn pane_todo_edit_regions(&self) -> Option<crate::ui::PaneTodoEditRects> {
+        self.pane_todo_edit_inner()
+            .and_then(crate::ui::pane_todo_edit_rects)
     }
 
     /// Y of the footer row. Clicks in this row but outside a button are inert

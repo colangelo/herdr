@@ -637,16 +637,16 @@ fn delete_rename_input_char(state: &mut AppState) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RenameWordDeleteClass {
+enum WordDeleteClass {
     Word,
     Separator,
 }
 
-fn rename_word_delete_class(ch: char) -> RenameWordDeleteClass {
+fn word_delete_class(ch: char) -> WordDeleteClass {
     if ch.is_alphanumeric() || ch == '_' {
-        RenameWordDeleteClass::Word
+        WordDeleteClass::Word
     } else {
-        RenameWordDeleteClass::Separator
+        WordDeleteClass::Separator
     }
 }
 
@@ -655,32 +655,56 @@ fn delete_rename_input_word(state: &mut AppState) {
         clear_rename_input(state);
         return;
     }
+    delete_last_word(&mut state.name_input);
+}
 
-    while state
-        .name_input
-        .chars()
-        .last()
-        .is_some_and(char::is_whitespace)
-    {
-        state.name_input.pop();
+/// Delete trailing whitespace, then the run of like-classed characters before
+/// it. Shared by the rename modal and the todo edit modal.
+fn delete_last_word(buffer: &mut String) {
+    while buffer.chars().last().is_some_and(char::is_whitespace) {
+        buffer.pop();
     }
-
-    let Some(class) = state
-        .name_input
-        .chars()
-        .last()
-        .map(rename_word_delete_class)
-    else {
+    let Some(class) = buffer.chars().last().map(word_delete_class) else {
         return;
     };
-
-    while state
-        .name_input
+    while buffer
         .chars()
         .last()
-        .is_some_and(|ch| !ch.is_whitespace() && rename_word_delete_class(ch) == class)
+        .is_some_and(|ch| !ch.is_whitespace() && word_delete_class(ch) == class)
     {
-        state.name_input.pop();
+        buffer.pop();
+    }
+}
+
+fn handle_pane_todo_edit_text_key(state: &mut AppState, key: KeyEvent) {
+    let Some(edit) = state.pane_todo_edit.as_mut() else {
+        return;
+    };
+    match key.code {
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => edit.text.clear(),
+        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => edit.text.clear(),
+        KeyCode::Backspace
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            delete_last_word(&mut edit.text);
+        }
+        KeyCode::Char('h' | 'w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            delete_last_word(&mut edit.text);
+        }
+        KeyCode::Backspace => {
+            edit.text.pop();
+        }
+        // The length guard sits in the pattern so a full buffer simply stops
+        // matching: stopping at the store's limit means the modal can never
+        // compose a todo the server will reject.
+        KeyCode::Char(c)
+            if key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
+                && edit.text.chars().count() < crate::terminal::todo::MAX_TODO_TEXT_LEN =>
+        {
+            edit.text.push(c);
+        }
+        _ => {}
     }
 }
 
@@ -1115,8 +1139,7 @@ impl App {
             return;
         };
         match action {
-            // Task 4 opens the edit modal here.
-            PaneTodoAction::Edit => {}
+            PaneTodoAction::Edit => self.state.open_pane_todo_edit(pane_id, todo.id),
             PaneTodoAction::ToggleDone => {
                 self.runtime_todo_update(
                     "tui.todo.update",
@@ -1152,6 +1175,117 @@ impl App {
                 self.state.mode = Mode::Terminal;
             }
             PaneTodoAction::ClearDone => {}
+        }
+    }
+
+    pub(crate) fn handle_pane_todo_edit_key_via_api(&mut self, key: KeyEvent) {
+        // Commands before text, like `handle_rename_key_via_api`. Anything
+        // carrying CTRL/ALT/SUPER can never be swallowed by the text field.
+        match key.code {
+            KeyCode::Enter => {
+                self.save_pane_todo_edit_via_api();
+                return;
+            }
+            KeyCode::Esc => {
+                self.close_pane_todo_edit_and_return();
+                return;
+            }
+            KeyCode::Tab => {
+                self.state.cycle_pane_todo_edit_priority();
+                return;
+            }
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.state.cycle_pane_todo_edit_link();
+                return;
+            }
+            _ => {}
+        }
+        handle_pane_todo_edit_text_key(&mut self.state, key);
+    }
+
+    /// Leave the modal back to the panel it was opened from, or to the
+    /// terminal when it was opened straight from a keybinding.
+    pub(super) fn close_pane_todo_edit_and_return(&mut self) {
+        self.state.close_pane_todo_edit();
+        if self.state.pane_todos.is_some() {
+            self.state.mode = Mode::PaneTodos;
+        } else {
+            leave_modal(&mut self.state);
+        }
+    }
+
+    fn save_pane_todo_edit_via_api(&mut self) {
+        let Some((pane_id, todo_id, text, priority, link)) =
+            self.state.pane_todo_edit.as_ref().map(|edit| {
+                (
+                    edit.pane_id,
+                    edit.todo_id,
+                    edit.text.trim().to_string(),
+                    edit.priority,
+                    edit.link,
+                )
+            })
+        else {
+            return;
+        };
+        if text.is_empty() {
+            // The store rejects empty text; keep the modal open rather than
+            // silently dropping what was typed.
+            return;
+        }
+        let Some(ws_idx) = self.state.active else {
+            return;
+        };
+        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+            return;
+        };
+        let link_pane_id = match link {
+            crate::app::state::PaneTodoEditLink::Set(target) => self.public_pane_id(ws_idx, target),
+            _ => None,
+        };
+        let clear_link = matches!(link, crate::app::state::PaneTodoEditLink::Clear);
+
+        let response = match todo_id {
+            Some(id) => self.runtime_todo_update(
+                "tui.todo.update",
+                crate::api::schema::TodoUpdateParams {
+                    pane_id: public_pane_id,
+                    id,
+                    text: Some(text),
+                    done: None,
+                    priority: Some(priority),
+                    link_pane_id,
+                    clear_link,
+                },
+            ),
+            None => self.runtime_todo_add(
+                "tui.todo.add",
+                crate::api::schema::TodoAddParams {
+                    pane_id: public_pane_id,
+                    text,
+                    priority: Some(priority),
+                    link_pane_id,
+                },
+            ),
+        };
+        // The store can still refuse a save the modal cannot pre-check — text
+        // over the length cap, the 50-todo per-pane limit, or a todo removed
+        // from under the edit. Closing on a rejection would throw away what was
+        // typed with no explanation, so say why and leave the modal open.
+        if let Ok(error) = serde_json::from_str::<crate::api::schema::ErrorResponse>(&response) {
+            tracing::debug!(code = %error.error.code, "pane todo save rejected");
+            self.show_pane_move_feedback("todo save failed", error.error.message);
+            return;
+        }
+        self.close_pane_todo_edit_and_return();
+        self.state.pane_todos_move_selection(0);
+    }
+
+    pub(super) fn apply_pane_todo_edit_action_via_api(&mut self, action: ModalAction) {
+        match action {
+            ModalAction::Save => self.save_pane_todo_edit_via_api(),
+            ModalAction::Cancel => self.close_pane_todo_edit_and_return(),
+            _ => {}
         }
     }
 
@@ -2992,5 +3126,189 @@ mod tests {
             assert!(app.state.pane_todos.is_none());
             assert_ne!(app.state.mode, Mode::PaneTodos);
         }
+    }
+
+    trait WithControl {
+        fn with_control(self) -> KeyEvent;
+    }
+
+    impl WithControl for KeyEvent {
+        fn with_control(mut self) -> KeyEvent {
+            self.modifiers |= KeyModifiers::CONTROL;
+            self
+        }
+    }
+
+    /// Spec: "its text changed and the change saved → the todo's text and
+    /// updated timestamp change while its id, done state, and creation
+    /// timestamp are preserved".
+    #[test]
+    fn saving_an_edit_changes_text_and_keeps_id_done_and_created_at() {
+        let mut app =
+            app_with_pane_todos(&[("draft", true, crate::terminal::todo::TodoPriority::Normal)]);
+        let before = app.state.selected_pane_todo().expect("a selected todo");
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        assert_eq!(
+            app.state.pane_todo_edit.as_ref().expect("edit state").text,
+            "draft",
+            "the modal opens prefilled"
+        );
+
+        for _ in 0..5 {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Backspace));
+        }
+        for ch in "final".chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        let after = app.state.selected_pane_todo().expect("a selected todo");
+        assert_eq!(after.text, "final");
+        assert_eq!(after.id, before.id, "id is preserved");
+        assert!(after.done, "done state is untouched by a text edit");
+        assert_eq!(
+            after.created_at_unix, before.created_at_unix,
+            "created_at is preserved"
+        );
+        assert!(after.updated_at_unix >= before.updated_at_unix);
+        assert!(app.state.pane_todo_edit.is_none());
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodos,
+            "saving returns to the panel it was opened from"
+        );
+    }
+
+    #[test]
+    fn tab_cycles_priority_and_cancel_discards_the_buffer() {
+        let mut app = app_with_pane_todos(&[(
+            "keep me",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Tab));
+        assert_eq!(
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .priority,
+            crate::terminal::todo::TodoPriority::High
+        );
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('!')));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Esc));
+
+        let todo = app.state.selected_pane_todo().expect("a selected todo");
+        assert_eq!(todo.text, "keep me", "cancel writes nothing");
+        assert_eq!(todo.priority, crate::terminal::todo::TodoPriority::Normal);
+        assert_eq!(app.state.mode, Mode::PaneTodos);
+    }
+
+    #[test]
+    fn an_empty_buffer_never_saves() {
+        let mut app = app_with_pane_todos(&[(
+            "keep me",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('u')).with_control());
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodoEdit,
+            "the store rejects empty text, so the modal stays open instead of dropping the edit"
+        );
+        assert_eq!(
+            app.state.selected_pane_todo().expect("a todo").text,
+            "keep me"
+        );
+    }
+
+    #[test]
+    fn the_add_action_creates_a_todo_on_the_focused_pane() {
+        let mut app = app_with_pane_todos(&[]);
+        app.state.close_pane_todos();
+        app.state.mode = Mode::Terminal;
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.execute_tui_navigate_action(
+            super::super::navigate::NavigateAction::AddPaneTodo,
+            super::super::navigate::ActionContext::Prefix,
+        );
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodoEdit,
+            "the action opens the modal itself, without going through the panel"
+        );
+        assert_eq!(
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .pane_id,
+            pane_id
+        );
+
+        for ch in "write it down".chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        let todos = app.state.pane_todos_in_display_order(pane_id);
+        assert_eq!(todos.len(), 1);
+        assert_eq!(todos[0].text, "write it down");
+        assert!(
+            app.state.pane_todos.is_none(),
+            "opened without a panel, it returns to the terminal rather than opening one"
+        );
+    }
+
+    #[test]
+    fn a_save_the_store_rejects_keeps_the_modal_open_with_the_typed_text() {
+        let full = vec![
+            ("filler", false, crate::terminal::todo::TodoPriority::Normal);
+            crate::terminal::todo::MAX_TODOS_PER_PANE
+        ];
+        let mut app = app_with_pane_todos(&full);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.execute_tui_navigate_action(
+            super::super::navigate::NavigateAction::AddPaneTodo,
+            super::super::navigate::ActionContext::Prefix,
+        );
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        for ch in "one too many".chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodoEdit,
+            "the pane is at the todo cap, so the save is refused and the modal stays open"
+        );
+        assert_eq!(
+            app.state.pane_todo_edit.as_ref().expect("edit state").text,
+            "one too many",
+            "a refused save must not eat what was typed"
+        );
+        assert_eq!(
+            app.state.pane_todos_in_display_order(pane_id).len(),
+            crate::terminal::todo::MAX_TODOS_PER_PANE
+        );
+        let toast = app.state.toast.as_ref().expect("rejection feedback");
+        assert_eq!(toast.title, "todo save failed");
+        assert!(
+            toast.context.contains("maximum"),
+            "the store's reason is surfaced verbatim: {}",
+            toast.context
+        );
     }
 }

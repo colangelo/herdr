@@ -75,6 +75,154 @@ fn render_name_input_field(app: &AppState, frame: &mut Frame, input_rect: Rect) 
     frame.set_cursor_position((caret_x, input_rect.y));
 }
 
+pub(crate) const PANE_TODO_EDIT_POPUP_WIDTH: u16 = 60;
+pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 11;
+
+/// The modal's interactive regions. One definition, read by the renderer and
+/// by the mouse layer, so clicking "priority" always lands on the row that
+/// says "priority".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PaneTodoEditRects {
+    pub input: Rect,
+    pub priority: Rect,
+    pub link: Rect,
+    pub save: Rect,
+    pub cancel: Rect,
+}
+
+pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
+    if inner.width == 0 || inner.height < 8 {
+        return None;
+    }
+    let row = |offset: u16| Rect::new(inner.x, inner.y + offset, inner.width, 1);
+    let buttons = action_button_row_rects(
+        inner,
+        &[
+            ActionButtonSpec {
+                hint: Some("↵"),
+                label: "save",
+            },
+            ActionButtonSpec {
+                hint: Some("esc"),
+                label: "cancel",
+            },
+        ],
+        2,
+        inner.height - 1,
+    );
+    Some(PaneTodoEditRects {
+        input: row(2),
+        priority: row(4),
+        link: row(5),
+        save: buttons[0],
+        cancel: buttons[1],
+    })
+}
+
+pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+    let Some(edit) = app.pane_todo_edit.as_ref() else {
+        return;
+    };
+    super::dim_background(frame, area);
+
+    let title = if edit.todo_id.is_some() {
+        "edit todo"
+    } else {
+        "new todo"
+    };
+    let Some(inner) = render_modal_shell(
+        frame,
+        area,
+        PANE_TODO_EDIT_POPUP_WIDTH,
+        PANE_TODO_EDIT_POPUP_HEIGHT,
+        &app.palette,
+    ) else {
+        return;
+    };
+    let Some(rects) = pane_todo_edit_rects(inner) else {
+        return;
+    };
+
+    render_modal_header(
+        frame,
+        Rect::new(inner.x, inner.y, inner.width, 1),
+        title,
+        &app.palette,
+    );
+
+    frame.render_widget(Clear, rects.input);
+    frame.render_widget(
+        Paragraph::new(format!(
+            " {}█",
+            truncate_end(&edit.text, rects.input.width.saturating_sub(3) as usize)
+        ))
+        .style(
+            Style::default()
+                .fg(app.palette.text)
+                .bg(app.palette.surface0),
+        ),
+        rects.input,
+    );
+
+    let priority_label = match edit.priority {
+        crate::terminal::todo::TodoPriority::High => "high",
+        crate::terminal::todo::TodoPriority::Normal => "normal",
+        crate::terminal::todo::TodoPriority::Low => "low",
+    };
+    let field = |name: &str, hint: &str, value: String, value_style: Style| {
+        Line::from(vec![
+            Span::styled(
+                format!(" {name:<10}"),
+                Style::default().fg(app.palette.overlay0),
+            ),
+            Span::styled(
+                format!("{hint:<5}"),
+                Style::default().fg(app.palette.overlay1),
+            ),
+            Span::styled(value, value_style),
+        ])
+    };
+    frame.render_widget(
+        Paragraph::new(field(
+            "priority",
+            "⇥",
+            priority_label.to_string(),
+            Style::default().fg(app.pane_todo_indicator_color(Some(edit.priority))),
+        )),
+        rects.priority,
+    );
+    frame.render_widget(
+        Paragraph::new(field(
+            "link",
+            "^l",
+            app.pane_todo_edit_link_label(),
+            Style::default().fg(app.palette.blue),
+        )),
+        rects.link,
+    );
+
+    render_action_button(
+        frame,
+        rects.save,
+        Some("↵"),
+        "save",
+        Style::default()
+            .fg(panel_contrast_fg(&app.palette))
+            .bg(app.palette.accent)
+            .add_modifier(Modifier::BOLD),
+    );
+    render_action_button(
+        frame,
+        rects.cancel,
+        Some("esc"),
+        "cancel",
+        Style::default()
+            .fg(app.palette.text)
+            .bg(app.palette.surface0)
+            .add_modifier(Modifier::BOLD),
+    );
+}
+
 pub(super) fn render_rename_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
     super::dim_background(frame, area);
 
@@ -914,7 +1062,9 @@ mod tests {
     };
 
     use super::{
-        confirm_close_overlay_text, render_new_linked_worktree_overlay, render_rename_overlay,
+        confirm_close_overlay_text, pane_todo_edit_rects, render_new_linked_worktree_overlay,
+        render_pane_todo_edit_overlay, render_rename_overlay, PANE_TODO_EDIT_POPUP_HEIGHT,
+        PANE_TODO_EDIT_POPUP_WIDTH,
     };
 
     #[test]
@@ -1271,5 +1421,56 @@ mod tests {
             worktree_overlay_caret("あい"),
             Position::new(input.x + 5, input.y)
         );
+    }
+
+    #[test]
+    fn pane_todo_edit_hit_test_geometry_matches_what_is_drawn() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("todos")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        app.view.terminal_area = Rect::new(0, 0, 80, 24);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        app.open_new_pane_todo(pane_id);
+        if let Some(edit) = app.pane_todo_edit.as_mut() {
+            edit.text = "rerun the deploy".into();
+        }
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| render_pane_todo_edit_overlay(&app, frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let inner = crate::ui::centered_popup_rect(
+            Rect::new(0, 0, 80, 24),
+            PANE_TODO_EDIT_POPUP_WIDTH,
+            PANE_TODO_EDIT_POPUP_HEIGHT,
+        )
+        .map(|popup| Rect::new(popup.x + 1, popup.y + 1, popup.width - 2, popup.height - 2))
+        .expect("popup should fit");
+        let rects = pane_todo_edit_rects(inner).expect("edit rects should exist");
+
+        let input: String = (rects.input.x..rects.input.x + rects.input.width)
+            .map(|x| buffer[(x, rects.input.y)].symbol())
+            .collect();
+        assert!(input.contains("rerun the deploy"));
+        assert!(input.contains('█'), "the fake cursor sits after the text");
+
+        let priority: String = (rects.priority.x..rects.priority.x + rects.priority.width)
+            .map(|x| buffer[(x, rects.priority.y)].symbol())
+            .collect();
+        assert!(priority.contains("priority"));
+        assert!(priority.contains("normal"));
+
+        let link: String = (rects.link.x..rects.link.x + rects.link.width)
+            .map(|x| buffer[(x, rects.link.y)].symbol())
+            .collect();
+        assert!(link.contains("link"));
+
+        let save: String = (rects.save.x..rects.save.x + rects.save.width)
+            .map(|x| buffer[(x, rects.save.y)].symbol())
+            .collect();
+        assert!(save.contains("save"));
     }
 }
