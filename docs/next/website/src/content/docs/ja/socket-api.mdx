@@ -280,7 +280,7 @@ todo は永続する対になる仕組みです。各ペインが次の一手の
 {"id":"req_tlist","result":{"type":"todo_list","todos":[{"pane_id":"w1:p2","id":3,"text":"rerun the deploy","done":false,"priority":"high","link_pane_id":"w1:p1","link_label":"infra","link_alive":true,"created_at_unix":1789000000,"updated_at_unix":1789000100}]}}
 ```
 
-todo は表示順 (優先度の高い順 `high`、`normal`、`low` → 未完了が先 → 作成順) で返ります。各エントリは自分の `pane_id` を持つため、セッション全体の一覧でも曖昧になりません。`link_pane_id` と `link_label` はリンク付きの todo にのみ現れます。リンク先のペインがなくなると `link_alive` は `false` になり、ラベルは残るので切れたリンクでも意味が読み取れます。別のペインに解決されることはありません。
+todo は表示順 (未完了が先 → 優先度の高い順 `high`、`normal`、`low` → 作成順) で返ります。各エントリは自分の `pane_id` を持つため、セッション全体の一覧でも曖昧になりません。`link_pane_id` と `link_label` はリンク付きの todo にのみ現れます。リンク先のペインがなくなると `link_alive` は `false` になり、ラベルは残るので切れたリンクでも意味が読み取れます。別のペインに解決されることはありません。
 
 ペインに todo を追加します:
 
