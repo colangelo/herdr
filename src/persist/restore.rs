@@ -15,7 +15,8 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 use crate::workspace::Workspace;
 
 use super::snapshot::{
-    PaneAgentSessionSnapshot, PaneHistorySnapshot, TabHistorySnapshot, WorkspaceHistorySnapshot,
+    PaneAgentSessionSnapshot, PaneHistorySnapshot, PaneTodoSnapshot, TabHistorySnapshot,
+    WorkspaceHistorySnapshot,
 };
 use super::{
     DirectionSnapshot, LayoutSnapshot, SessionHistorySnapshot, SessionSnapshot, TabSnapshot,
@@ -32,6 +33,108 @@ struct PaneRestoreStartup<'a> {
     initial_history_ansi: Option<&'a str>,
     duplicate_agent_session: bool,
     reserved_agent_session: Option<String>,
+}
+
+/// A saved todo link waiting for the restore-wide pane id map.
+struct PendingTodoLink {
+    terminal_id: TerminalId,
+    todo_id: u64,
+    old_raw_pane: u32,
+}
+
+/// Cross-pane todo links cannot be resolved while terminals are built: restore
+/// allocates fresh pane ids tab by tab, so a link can target a pane that has not
+/// been remapped yet — or one in another workspace entirely. Links are recorded
+/// here as terminals are restored and resolved in a single pass afterwards,
+/// once every restored tab has contributed its mapping.
+#[derive(Default)]
+struct TodoLinkRestore {
+    id_map: HashMap<u32, PaneId>,
+    pending: Vec<PendingTodoLink>,
+}
+
+impl TodoLinkRestore {
+    /// Publish one tab's remap. Only panes that survived restore are published,
+    /// so a link to a dropped pane stays dead instead of pointing at nothing.
+    fn register_pane_ids(&mut self, id_map: &HashMap<u32, PaneId>, surviving: &HashSet<PaneId>) {
+        for (old_raw, new_id) in id_map {
+            if surviving.contains(new_id) {
+                self.id_map.insert(*old_raw, *new_id);
+            }
+        }
+    }
+
+    fn resolve(self, terminals: &mut HashMap<TerminalId, TerminalState>) {
+        let Self { id_map, pending } = self;
+        for link in pending {
+            let Some(terminal) = terminals.get_mut(&link.terminal_id) else {
+                continue;
+            };
+            let Some(todo) = terminal
+                .todos_mut()
+                .iter_mut()
+                .find(|todo| todo.id == link.todo_id)
+            else {
+                continue;
+            };
+            let label = todo.link.as_ref().map(|link| link.label.clone());
+            todo.link = resolve_todo_link(&id_map, Some(link.old_raw_pane), label);
+        }
+    }
+}
+
+/// Remap a saved todo link onto the restored pane ids. A target missing from
+/// the map becomes a dead link that keeps its label — never a different pane.
+fn resolve_todo_link(
+    id_map: &HashMap<u32, PaneId>,
+    link_pane: Option<u32>,
+    link_label: Option<String>,
+) -> Option<crate::terminal::todo::TodoLink> {
+    let label = link_label?;
+    Some(crate::terminal::todo::TodoLink {
+        pane: link_pane.and_then(|raw| id_map.get(&raw).copied()),
+        label,
+    })
+}
+
+/// Install a pane's saved todos on its restored terminal, with every link left
+/// unresolved and recorded for [`TodoLinkRestore::resolve`].
+fn restore_pane_todos(
+    terminal: &mut TerminalState,
+    saved_todos: &[PaneTodoSnapshot],
+    saved_next_todo_id: u64,
+    todo_links: &mut TodoLinkRestore,
+) {
+    if saved_todos.is_empty() && saved_next_todo_id <= 1 {
+        return;
+    }
+    let todos = saved_todos
+        .iter()
+        .map(|snap| crate::terminal::todo::PaneTodo {
+            id: snap.id,
+            text: snap.text.clone(),
+            done: snap.done,
+            priority: snap.priority,
+            // The label lands now so an unresolvable target degrades to a
+            // labelled dead link rather than losing what the link meant.
+            link: snap
+                .link_label
+                .clone()
+                .map(|label| crate::terminal::todo::TodoLink { pane: None, label }),
+            created_at_unix: snap.created_at_unix,
+            updated_at_unix: snap.updated_at_unix,
+        })
+        .collect();
+    terminal.restore_todos(todos, saved_next_todo_id);
+    for snap in saved_todos {
+        if let Some(old_raw_pane) = snap.link_pane {
+            todo_links.pending.push(PendingTodoLink {
+                terminal_id: terminal.id.clone(),
+                todo_id: snap.id,
+                old_raw_pane,
+            });
+        }
+    }
 }
 
 struct RestoreRuntimeContext<'a> {
@@ -271,6 +374,7 @@ fn restore_with_imports_and_failures(
     let mut terminals = HashMap::new();
     let mut terminal_runtimes = HashMap::new();
     let mut resumed_agent_sessions = HashSet::new();
+    let mut todo_links = TodoLinkRestore::default();
     let mut failed_imports = 0;
     for (idx, ws_snap) in snapshot.workspaces.iter().enumerate() {
         let runtime_context = RestoreRuntimeContext {
@@ -289,6 +393,7 @@ fn restore_with_imports_and_failures(
             &runtime_context,
             &mut resumed_agent_sessions,
             imported_panes,
+            &mut todo_links,
         );
         failed_imports += workspace_failed_imports;
         if let Some((workspace, restored_terminals, restored_runtimes)) = restored {
@@ -299,6 +404,9 @@ fn restore_with_imports_and_failures(
             workspaces.push(workspace);
         }
     }
+    // Every tab has published its remap by now, so cross-pane todo links can
+    // finally point at the panes they were saved against.
+    todo_links.resolve(&mut terminals);
     crate::workspace::reserve_workspace_ids(&workspaces);
     ((workspaces, terminals, terminal_runtimes), failed_imports)
 }
@@ -311,6 +419,7 @@ fn restore_workspace(
     runtime_context: &RestoreRuntimeContext<'_>,
     resumed_agent_sessions: &mut HashSet<String>,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
+    todo_links: &mut TodoLinkRestore,
 ) -> RestoreFailures<Option<RestoredWorkspace>> {
     let mut tabs = Vec::new();
     let mut terminals = Vec::new();
@@ -366,6 +475,7 @@ fn restore_workspace(
             resumed_agent_sessions,
             imported_panes,
             &public_pane_ids_by_old_raw,
+            todo_links,
         );
         failed_imports += tab_failed_imports;
         let Some((mut tab, restored_terminals, restored_runtimes, reverse_id_map)) = restored_tab
@@ -454,6 +564,7 @@ fn restore_tab(
     resumed_agent_sessions: &mut HashSet<String>,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
     public_pane_ids_by_old_raw: &HashMap<u32, String>,
+    todo_links: &mut TodoLinkRestore,
 ) -> RestoreFailures<Option<RestoredTab>> {
     let (node, id_map) = restore_node_remapped(&snap.layout);
     let reverse_id_map: HashMap<PaneId, u32> = id_map
@@ -497,6 +608,9 @@ fn restore_tab(
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
+        let saved_todos: &[PaneTodoSnapshot] =
+            saved_pane.map(|p| p.todos.as_slice()).unwrap_or_default();
+        let saved_next_todo_id = saved_pane.map(|p| p.next_todo_id).unwrap_or(1);
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
         let startup = {
@@ -567,6 +681,7 @@ fn restore_tab(
                     std::time::Instant::now(),
                 );
             }
+            restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
             panes.insert(*id, PaneState::new(terminal_id));
             terminals.push(terminal);
             continue;
@@ -668,6 +783,7 @@ fn restore_tab(
                         std::time::Instant::now(),
                     );
                 }
+                restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
                 panes.insert(*id, PaneState::new(terminal_id.clone()));
                 terminal_runtimes.insert(terminal_id, runtime);
                 terminals.push(terminal);
@@ -720,6 +836,7 @@ fn restore_tab(
         return (None, failed_imports);
     };
     let layout = TileLayout::from_saved(node, focus);
+    todo_links.register_pane_ids(&id_map, &surviving);
 
     (
         Some((
@@ -1000,6 +1117,186 @@ mod tests {
             .to_string()
     }
 
+    #[test]
+    fn restore_remaps_a_todo_link_to_the_new_pane_id() {
+        // old raw 10 and 11 are two panes in the saved session; 11 is the link target
+        let id_map: std::collections::HashMap<u32, PaneId> = std::collections::HashMap::from([
+            (10, PaneId::from_raw(101)),
+            (11, PaneId::from_raw(102)),
+        ]);
+
+        let resolved = resolve_todo_link(&id_map, Some(11), Some("infra".to_string()));
+
+        assert_eq!(
+            resolved,
+            Some(crate::terminal::todo::TodoLink {
+                pane: Some(PaneId::from_raw(102)),
+                label: "infra".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn restore_turns_an_unmapped_todo_link_into_a_dead_link() {
+        let id_map: std::collections::HashMap<u32, PaneId> =
+            std::collections::HashMap::from([(10, PaneId::from_raw(101))]);
+
+        let resolved = resolve_todo_link(&id_map, Some(999), Some("gone".to_string()));
+
+        assert_eq!(
+            resolved,
+            Some(crate::terminal::todo::TodoLink {
+                pane: None,
+                label: "gone".into()
+            }),
+            "an unresolvable target must keep its label, not vanish or retarget"
+        );
+    }
+
+    #[test]
+    fn restore_leaves_unlinked_todos_unlinked() {
+        let id_map: std::collections::HashMap<u32, PaneId> = std::collections::HashMap::new();
+
+        assert_eq!(resolve_todo_link(&id_map, None, None), None);
+    }
+
+    #[tokio::test]
+    async fn restore_rehydrates_todos_and_resolves_cross_tab_links() {
+        let cwd = std::env::current_dir().unwrap();
+        let todo = |id: u64, text: &str, link_pane: Option<u32>, link_label: Option<&str>| {
+            super::super::snapshot::PaneTodoSnapshot {
+                id,
+                text: text.into(),
+                done: false,
+                priority: crate::terminal::todo::TodoPriority::Normal,
+                link_pane,
+                link_label: link_label.map(str::to_string),
+                created_at_unix: 100,
+                updated_at_unix: 100,
+            }
+        };
+        let owner_pane = super::super::snapshot::PaneSnapshot {
+            cwd: cwd.clone(),
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: None,
+            launch_argv: None,
+            todos: vec![
+                todo(4, "linked", Some(20), Some("infra")),
+                todo(5, "dead link", Some(999), Some("gone")),
+                todo(6, "unlinked", None, None),
+            ],
+            next_todo_id: 7,
+        };
+        let target_pane = super::super::snapshot::PaneSnapshot {
+            cwd: cwd.clone(),
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: None,
+            launch_argv: None,
+            todos: Vec::new(),
+            next_todo_id: 1,
+        };
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("w1".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::from([(10, 1), (20, 2)]),
+                next_public_pane_number: 3,
+                public_tab_numbers: vec![1, 2],
+                next_public_tab_number: 3,
+                tabs: vec![
+                    TabSnapshot {
+                        custom_name: None,
+                        layout: LayoutSnapshot::Pane(10),
+                        panes: HashMap::from([(10, owner_pane)]),
+                        zoomed: false,
+                        focused: Some(10),
+                        root_pane: Some(10),
+                    },
+                    TabSnapshot {
+                        custom_name: None,
+                        layout: LayoutSnapshot::Pane(20),
+                        panes: HashMap::from([(20, target_pane)]),
+                        zoomed: false,
+                        focused: Some(20),
+                        root_pane: Some(20),
+                    },
+                ],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (workspaces, mut terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        let workspace = workspaces.first().expect("workspace should restore");
+        let owner = workspace.tabs[0].root_pane;
+        let target = workspace.tabs[1].root_pane;
+        let owner_terminal_id = workspace.tabs[0].panes[&owner].attached_terminal_id.clone();
+        let todos = terminals[&owner_terminal_id].todos();
+
+        assert_eq!(todos.len(), 3, "no todo may be dropped by restore");
+        assert_eq!(
+            todos[0].link,
+            Some(crate::terminal::todo::TodoLink {
+                pane: Some(target),
+                label: "infra".into(),
+            }),
+            "a live link must follow its target to the new pane id"
+        );
+        assert_eq!(
+            todos[1].link,
+            Some(crate::terminal::todo::TodoLink {
+                pane: None,
+                label: "gone".into(),
+            }),
+            "an unresolvable target must keep its label as a dead link"
+        );
+        assert_eq!(todos[2].link, None);
+        assert_eq!(
+            terminals[&workspace.tabs[1].panes[&target].attached_terminal_id]
+                .todos()
+                .len(),
+            0,
+            "todos must not leak onto the linked pane"
+        );
+
+        let next = terminals
+            .get_mut(&owner_terminal_id)
+            .expect("restored terminal should exist")
+            .add_todo(
+                "after restore",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                200,
+            )
+            .unwrap();
+        assert_eq!(next.id, 7, "the saved id counter must survive restore");
+    }
+
     #[cfg(windows)]
     fn test_restore_shell() -> &'static str {
         "C:\\Windows\\System32\\whoami.exe"
@@ -1273,6 +1570,8 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             launch_argv: None,
+                            todos: Vec::new(),
+                            next_todo_id: 1,
                         },
                     )]),
                     zoomed: false,
@@ -1354,6 +1653,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                todos: Vec::new(),
+                                next_todo_id: 1,
                             },
                         ),
                         (
@@ -1365,6 +1666,8 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 launch_argv: None,
+                                todos: Vec::new(),
+                                next_todo_id: 1,
                             },
                         ),
                     ]),
@@ -1418,6 +1721,8 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     launch_argv: None,
+                    todos: Vec::new(),
+                    next_todo_id: 1,
                 },
             )
         };
@@ -1433,6 +1738,8 @@ mod tests {
                 value: "codex-session".into(),
             }),
             launch_argv: None,
+            todos: Vec::new(),
+            next_todo_id: 1,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1584,6 +1891,8 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             launch_argv: None,
+                            todos: Vec::new(),
+                            next_todo_id: 1,
                         },
                     )]),
                     zoomed: false,
@@ -1745,6 +2054,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                todos: Vec::new(),
+                next_todo_id: 1,
             },
         );
         let history = SessionHistorySnapshot {

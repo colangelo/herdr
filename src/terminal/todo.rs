@@ -215,6 +215,12 @@ impl TerminalState {
             .max()
     }
 
+    /// Restore path only: mutable access for the link post-pass, which cannot
+    /// resolve cross-pane targets until every restored pane has an id.
+    pub(crate) fn todos_mut(&mut self) -> &mut Vec<PaneTodo> {
+        &mut self.todos
+    }
+
     /// Restore path only: install saved todos and the saved id counter.
     pub fn restore_todos(&mut self, todos: Vec<PaneTodo>, next_todo_id: u64) {
         let highest = todos.iter().map(|todo| todo.id).max().unwrap_or(0);
