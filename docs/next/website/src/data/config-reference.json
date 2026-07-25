@@ -1072,6 +1072,18 @@
           "description": "Override color for unfocused panes' border titles. Same syntax as `accent`. Unset follows `pane_border_inactive_color`, then the theme's muted color."
         },
         {
+          "key": "ui.show_pane_todo_indicator",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show a todo indicator at the far right of a split pane's top border, carrying the pane's outstanding todo count."
+        },
+        {
+          "key": "ui.pane_todo_color",
+          "type": "color",
+          "default": "unset",
+          "description": "Override color for the pane todo indicator while todos are outstanding. Same syntax as `accent`. Unset colors it by the highest outstanding priority (high red, normal yellow, low blue); an all-done indicator is always muted."
+        },
+        {
           "key": "ui.pane_active_bg",
           "type": "color",
           "default": "unset",
