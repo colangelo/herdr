@@ -59,9 +59,9 @@ that already fixes layout references. Storing the internal `PaneId` lets link
 targets ride that same remap.
 
 Public ids (`w1:p3`) come off a per-tab counter and are what the CLI accepts, so
-`--link` takes the public id or a unique agent name and resolves it to a
-`PaneId` at add time. The captured `label` exists so a dead link can still say
-what it meant.
+`--link` takes the public id and resolves it to a `PaneId` at add time. The
+captured `label` exists so a dead link can still say what it meant. Resolving a
+link by a unique live agent name is deferred (see below).
 
 ## Persistence
 
@@ -122,8 +122,14 @@ Target resolution reuses the grammar in `src/cli/pane.rs`
 `HERDR_PANE_ID` environment default. The default matters most: an agent about to
 exit runs `herdr todo add "..."` with no target and it lands on its own pane.
 
-`--link <target>` accepts a public pane id or a unique live agent name, using the
-same uniqueness rule agent commands already enforce; ambiguous names error.
+`--link <target>` accepts a public pane id (`w1:p2`). Resolving a link by a
+unique live agent name, using the same uniqueness rule agent commands already
+enforce, is **deferred out of phase 1**: phase 1 resolves link targets with
+`App::parse_pane_id`, so any agent name — unique or ambiguous — fails with
+`todo_link_unresolved`. That keeps the "Ambiguous link targets are rejected"
+requirement satisfied (an ambiguous name never links), and leaves the unique
+case as a strictly additive follow-up rather than a behaviour change. Phase 2
+picks it up (tasks 4.4); the CLI docs describe pane-id targets only until then.
 
 ## TUI
 

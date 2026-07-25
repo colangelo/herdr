@@ -21,7 +21,7 @@ bindings. Group 7 closes out whichever phase is landing.
 ## 3. Socket API, event, protocol
 
 - [x] 3.1 Add `src/api/schema/todos.rs` with `TodoInfo` and the params types; wire the methods into `src/api/schema.rs` and `src/api/server.rs`
-- [x] 3.2 Implement `todo.list/add/update/remove/clear` handlers in `src/app/api/todos.rs`, including link target resolution (public pane id) and the error codes
+- [x] 3.2 Implement `todo.list/add/update/remove/clear` handlers in `src/app/api/todos.rs`, including link target resolution by public pane id and the error codes
 - [x] 3.3 Emit `todo.changed` on every mutation through `src/api/subscriptions.rs`
 - [x] 3.4 Confirm no `PROTOCOL_VERSION` bump is needed (source 19 already exceeds the 18 released in `v0.7.4-ac`); leave the protocol expectations in `tests/cli/sessions.rs`, `tests/api_ping.rs`, `tests/support/mod.rs` at 19
 - [x] 3.5 Regenerate `docs/next/api/herdr-api.schema.json` and extend `src/api/schema/tests.rs`
@@ -31,6 +31,7 @@ bindings. Group 7 closes out whichever phase is landing.
 - [x] 4.1 Add `src/cli/todo.rs` with the add/list/done/undone/edit/rm/clear verbs, registered in `src/cli/spec.rs` and `src/main.rs`
 - [x] 4.2 Reuse the pane target grammar (`--pane`, `--current`, `HERDR_PANE_ID` default) from `src/cli/pane.rs`; add `--priority`, `--link`, `--unlink`, `--all`, `--json`
 - [x] 4.3 Tests for target resolution and flag parsing, mirroring the existing `parse_pane_current_args` tests
+- [ ] 4.4 Resolve `--link` targets by unique live agent name as well as public pane id, erroring on ambiguous names (deferred out of phase 1: phase 1 resolves links with `App::parse_pane_id`, so every agent name — unique or ambiguous — returns `todo_link_unresolved`; see `design.md`)
 
 ## 5. Pane indicator
 
