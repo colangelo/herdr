@@ -653,6 +653,7 @@ impl App {
             notification_log: state::NotificationLog::default(),
             notification_center: None,
             pane_todos: None,
+            pane_todo_edit: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -2041,6 +2042,9 @@ impl App {
             Mode::PaneTodos => {
                 self.handle_pane_todos_key_via_api(key_event);
             }
+            Mode::PaneTodoEdit => {
+                self.handle_pane_todo_edit_key_via_api(key_event);
+            }
             Mode::Resize => {
                 self.handle_resize_key_via_api(key);
             }
@@ -2353,6 +2357,7 @@ mod tests {
             Mode::Onboarding,
             Mode::ReleaseNotes,
             Mode::ProductAnnouncement,
+            Mode::PaneTodoEdit,
         ] {
             assert!(!mode.wants_ascii_input(), "{mode:?} should keep the IME");
         }

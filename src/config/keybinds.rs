@@ -340,6 +340,7 @@ pub struct Keybinds {
     pub open_notification_target: ActionKeybinds,
     pub open_notification_center: ActionKeybinds,
     pub open_pane_todos: ActionKeybinds,
+    pub add_pane_todo: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
@@ -514,6 +515,7 @@ impl Config {
             open_notification_target: empty_action!(),
             open_notification_center: empty_action!(),
             open_pane_todos: empty_action!(),
+            add_pane_todo: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
             previous_agent: empty_action!(),
@@ -656,6 +658,7 @@ impl Config {
                 source
             );
             apply_action!(keybinds.open_pane_todos, open_pane_todos, source);
+            apply_action!(keybinds.add_pane_todo, add_pane_todo, source);
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
             apply_action!(keybinds.previous_agent, previous_agent, source);
@@ -1663,6 +1666,30 @@ next_tab = "prefix+n"
         assert!(
             Config::default().collect_diagnostics().is_empty(),
             "prefix+ctrl+t must not collide with an existing default"
+        );
+    }
+
+    #[test]
+    fn add_pane_todo_is_unset_by_default_and_maps_when_bound() {
+        assert!(Config::default()
+            .keybinds()
+            .add_pane_todo
+            .bindings
+            .is_empty());
+
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+add_pane_todo = "prefix+ctrl+y"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            binding_triggers(&config.keybinds().add_pane_todo),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('y'),
+                KeyModifiers::CONTROL
+            ))]
         );
     }
 

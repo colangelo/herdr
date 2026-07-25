@@ -29,7 +29,7 @@ mod widgets;
 use self::dialogs::{
     render_confirm_close_overlay, render_new_linked_worktree_overlay,
     render_open_existing_worktree_overlay, render_pane_move_target_picker_overlay,
-    render_remove_worktree_overlay, render_rename_overlay,
+    render_pane_todo_edit_overlay, render_remove_worktree_overlay, render_rename_overlay,
 };
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
@@ -87,8 +87,9 @@ pub(crate) use self::{
         new_linked_worktree_inner_rect, open_existing_worktree_button_rects,
         open_existing_worktree_inner_rect, open_existing_worktree_max_visible_rows,
         open_existing_worktree_visible_start, pane_move_target_button_rects,
-        pane_move_target_inner_rect, remove_worktree_button_rects, remove_worktree_popup_rect,
-        rename_button_rects,
+        pane_move_target_inner_rect, pane_todo_edit_rects, remove_worktree_button_rects,
+        remove_worktree_popup_rect, rename_button_rects, PaneTodoEditRects,
+        PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     },
     settings::{
         settings_button_rects, settings_popup_height, settings_show_primary_action,
@@ -569,6 +570,7 @@ pub fn render_with_runtime_registry(
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::NotificationCenter => render_notification_center(app, frame),
         Mode::PaneTodos => render_pane_todo_panel(app, frame),
+        Mode::PaneTodoEdit => render_pane_todo_edit_overlay(app, frame, frame.area()),
         Mode::Terminal => {}
     }
 }
@@ -1812,6 +1814,25 @@ mod tests {
         assert!(panes
             .iter()
             .any(|(key, label)| key == "prefix+ctrl+t" && label.as_ref() == "pane todos"));
+    }
+
+    #[test]
+    fn keybind_help_shows_unset_for_the_add_pane_todo_action() {
+        let app = crate::app::state::AppState::test_new();
+        let groups = keybind_help_groups(&app);
+        let panes = groups
+            .iter()
+            .find(|(name, _)| *name == "panes")
+            .expect("panes group")
+            .1
+            .clone();
+
+        assert!(
+            panes
+                .iter()
+                .any(|(key, label)| key == "unset" && label.as_ref() == "add pane todo"),
+            "an unbound action is still discoverable in the help panel"
+        );
     }
 
     #[test]

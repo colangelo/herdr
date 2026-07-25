@@ -150,9 +150,6 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::PaneClearScrollback(target))
     }
 
-    // The panel reads and edits todos; the surface that authors a new one is
-    // the edit modal in phase-2 task 4, which is the first caller.
-    #[allow(dead_code)]
     pub(crate) fn runtime_todo_add(&mut self, id: &'static str, params: TodoAddParams) -> String {
         self.dispatch_runtime_mutation(id, Method::TodoAdd(params))
     }

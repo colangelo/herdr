@@ -344,6 +344,12 @@
           "description": "Open the focused pane's todo panel."
         },
         {
+          "key": "keys.add_pane_todo",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Open the todo editor on a new todo for the focused pane. Unbound by default."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",

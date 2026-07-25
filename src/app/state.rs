@@ -861,6 +861,7 @@ pub enum Mode {
     Navigator,
     NotificationCenter,
     PaneTodos,
+    PaneTodoEdit,
 }
 
 impl Mode {
@@ -1559,6 +1560,30 @@ pub struct PaneTodoPanelState {
     pub hovered_button: Option<PaneTodoPanelButton>,
 }
 
+/// The edit modal's link control. `Keep` leaves whatever the todo already has
+/// — including a dead link, which the store preserves — untouched; the other
+/// two are explicit choices. These map exactly onto `todo.update`'s
+/// `link_pane_id` / `clear_link` pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneTodoEditLink {
+    Keep,
+    Clear,
+    Set(PaneId),
+}
+
+/// TUI-only state for the pane todo edit modal: the in-progress buffer until
+/// save. Deliberately its own `text` rather than the shared `name_input`, so a
+/// cancelled rename can never leak into a todo save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneTodoEditState {
+    pub pane_id: PaneId,
+    /// `None` while composing a brand-new todo.
+    pub todo_id: Option<u64>,
+    pub text: String,
+    pub priority: crate::terminal::todo::TodoPriority,
+    pub link: PaneTodoEditLink,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingAgentNotification {
     pub pane_id: PaneId,
@@ -1713,6 +1738,8 @@ pub struct AppState {
     pub notification_center: Option<NotificationCenterState>,
     /// TUI-only panel state; `Some` while `Mode::PaneTodos`.
     pub pane_todos: Option<PaneTodoPanelState>,
+    /// TUI-only edit buffer; `Some` while `Mode::PaneTodoEdit`.
+    pub pane_todo_edit: Option<PaneTodoEditState>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
     pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
@@ -2046,6 +2073,132 @@ impl AppState {
         Some((ws_idx, pane_id))
     }
 
+    /// Open the edit modal on an existing todo, prefilled from the store.
+    pub(crate) fn open_pane_todo_edit(&mut self, pane_id: PaneId, todo_id: u64) {
+        let Some(todo) = self
+            .pane_terminal(pane_id)
+            .and_then(|terminal| terminal.todos().iter().find(|todo| todo.id == todo_id))
+            .cloned()
+        else {
+            return;
+        };
+        self.pane_todo_edit = Some(PaneTodoEditState {
+            pane_id,
+            todo_id: Some(todo.id),
+            text: todo.text,
+            priority: todo.priority,
+            link: PaneTodoEditLink::Keep,
+        });
+        self.mode = Mode::PaneTodoEdit;
+    }
+
+    /// Open the edit modal on a brand-new todo for a pane.
+    pub(crate) fn open_new_pane_todo(&mut self, pane_id: PaneId) {
+        self.pane_todo_edit = Some(PaneTodoEditState {
+            pane_id,
+            todo_id: None,
+            text: String::new(),
+            priority: crate::terminal::todo::TodoPriority::default(),
+            link: PaneTodoEditLink::Keep,
+        });
+        self.mode = Mode::PaneTodoEdit;
+    }
+
+    pub(crate) fn close_pane_todo_edit(&mut self) {
+        self.pane_todo_edit = None;
+    }
+
+    /// Panes a todo can link to: every other pane of its own workspace, in tab
+    /// then layout order, labelled the way that pane's border is.
+    pub(crate) fn pane_link_candidates(&self, pane_id: PaneId) -> Vec<(PaneId, String)> {
+        let Some(workspace) = self
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.pane_state(pane_id).is_some())
+        else {
+            return Vec::new();
+        };
+        workspace
+            .tabs
+            .iter()
+            .flat_map(|tab| tab.layout.pane_ids())
+            .filter(|candidate| *candidate != pane_id)
+            .map(|candidate| {
+                let label = self
+                    .pane_terminal(candidate)
+                    .and_then(|terminal| terminal.border_label(true))
+                    .or_else(|| {
+                        workspace
+                            .public_pane_number(candidate)
+                            .map(|number| format!("pane {number}"))
+                    })
+                    .unwrap_or_else(|| "pane".to_string());
+                (candidate, label)
+            })
+            .collect()
+    }
+
+    pub(crate) fn cycle_pane_todo_edit_priority(&mut self) {
+        let Some(edit) = self.pane_todo_edit.as_mut() else {
+            return;
+        };
+        edit.priority = match edit.priority {
+            crate::terminal::todo::TodoPriority::Low => crate::terminal::todo::TodoPriority::Normal,
+            crate::terminal::todo::TodoPriority::Normal => {
+                crate::terminal::todo::TodoPriority::High
+            }
+            crate::terminal::todo::TodoPriority::High => crate::terminal::todo::TodoPriority::Low,
+        };
+    }
+
+    /// Cycle the link control: keep → clear → each linkable pane → keep.
+    pub(crate) fn cycle_pane_todo_edit_link(&mut self) {
+        let Some(pane_id) = self.pane_todo_edit.as_ref().map(|edit| edit.pane_id) else {
+            return;
+        };
+        let candidates = self.pane_link_candidates(pane_id);
+        let Some(edit) = self.pane_todo_edit.as_mut() else {
+            return;
+        };
+        edit.link = match edit.link {
+            PaneTodoEditLink::Keep => PaneTodoEditLink::Clear,
+            PaneTodoEditLink::Clear => match candidates.first() {
+                Some((candidate, _)) => PaneTodoEditLink::Set(*candidate),
+                None => PaneTodoEditLink::Keep,
+            },
+            PaneTodoEditLink::Set(current) => candidates
+                .iter()
+                .position(|(candidate, _)| *candidate == current)
+                .and_then(|idx| candidates.get(idx + 1))
+                .map(|(candidate, _)| PaneTodoEditLink::Set(*candidate))
+                .unwrap_or(PaneTodoEditLink::Keep),
+        };
+    }
+
+    /// What the modal's link row shows for the current choice.
+    pub(crate) fn pane_todo_edit_link_label(&self) -> String {
+        let Some(edit) = self.pane_todo_edit.as_ref() else {
+            return String::new();
+        };
+        match edit.link {
+            PaneTodoEditLink::Clear => "none".to_string(),
+            PaneTodoEditLink::Keep => edit
+                .todo_id
+                .and_then(|todo_id| {
+                    let terminal = self.pane_terminal(edit.pane_id)?;
+                    let todo = terminal.todos().iter().find(|todo| todo.id == todo_id)?;
+                    todo.link.as_ref().map(|link| link.label.clone())
+                })
+                .unwrap_or_else(|| "none".to_string()),
+            PaneTodoEditLink::Set(target) => self
+                .pane_link_candidates(edit.pane_id)
+                .into_iter()
+                .find(|(candidate, _)| *candidate == target)
+                .map(|(_, label)| label)
+                .unwrap_or_else(|| "pane".to_string()),
+        }
+    }
+
     pub fn agent_border_labels_enabled(&self) -> bool {
         self.show_agent_labels_on_pane_borders
     }
@@ -2375,6 +2528,7 @@ impl AppState {
             notification_log: NotificationLog::default(),
             notification_center: None,
             pane_todos: None,
+            pane_todo_edit: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -2578,6 +2732,10 @@ impl AppState {
             assert!(
                 self.pane_todos.is_none(),
                 "empty app state must not keep a pane todo panel"
+            );
+            assert!(
+                self.pane_todo_edit.is_none(),
+                "empty app state must not keep a pane todo edit buffer"
             );
             assert!(
                 self.selection.is_none(),
@@ -2883,12 +3041,87 @@ mod tests {
             Mode::Navigator,
             Mode::NotificationCenter,
             Mode::PaneTodos,
+            Mode::PaneTodoEdit,
         ] {
             assert!(
                 !mode.honors_key_repeat(),
                 "{mode:?} must not honor key repeat"
             );
         }
+    }
+
+    #[test]
+    fn the_edit_link_control_cycles_keep_clear_then_each_candidate() {
+        let mut state = AppState::test_new();
+        let mut workspace = crate::workspace::Workspace::test_new("links");
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.test_split(ratatui::layout::Direction::Vertical);
+        state.workspaces = vec![workspace];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+
+        let candidates = state.pane_link_candidates(pane_id);
+        assert_eq!(
+            candidates.len(),
+            2,
+            "two sibling panes are linkable, the todo's own pane is not"
+        );
+
+        state.open_new_pane_todo(pane_id);
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").link,
+            PaneTodoEditLink::Keep
+        );
+
+        state.cycle_pane_todo_edit_link();
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").link,
+            PaneTodoEditLink::Clear
+        );
+        assert_eq!(state.pane_todo_edit_link_label(), "none");
+
+        // Clear hands off to the first candidate, and each further press
+        // advances one candidate rather than sticking on the current one.
+        for (candidate, label) in &candidates {
+            state.cycle_pane_todo_edit_link();
+            assert_eq!(
+                state.pane_todo_edit.as_ref().expect("edit state").link,
+                PaneTodoEditLink::Set(*candidate)
+            );
+            assert_eq!(&state.pane_todo_edit_link_label(), label);
+        }
+
+        // Past the last candidate the cycle wraps back to keep.
+        state.cycle_pane_todo_edit_link();
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").link,
+            PaneTodoEditLink::Keep
+        );
+    }
+
+    #[test]
+    fn the_edit_link_control_wraps_straight_back_when_a_pane_is_alone() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("links")];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+
+        state.open_new_pane_todo(pane_id);
+        state.cycle_pane_todo_edit_link();
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").link,
+            PaneTodoEditLink::Clear
+        );
+
+        // The only pane is the todo's own, so there is nothing to link to.
+        assert!(state.pane_link_candidates(pane_id).is_empty());
+        state.cycle_pane_todo_edit_link();
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").link,
+            PaneTodoEditLink::Keep
+        );
     }
 
     fn test_toast(kind: ToastKind, title: &str, target: Option<ToastTarget>) -> ToastNotification {
