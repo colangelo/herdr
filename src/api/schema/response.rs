@@ -225,6 +225,15 @@ pub enum ResponseResult {
     NotificationCleared {
         cleared: u64,
     },
+    TodoList {
+        todos: Vec<super::todos::TodoInfo>,
+    },
+    Todo {
+        todo: super::todos::TodoInfo,
+    },
+    TodoCleared {
+        removed: u32,
+    },
     ClientWindowTitle {
         changed: bool,
         reason: ClientWindowTitleReason,

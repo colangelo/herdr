@@ -212,6 +212,10 @@ impl ActiveSubscription {
                 event_kind: crate::api::schema::EventKind::NotificationPosted,
                 last_sequence: 0,
             })),
+            Subscription::TodoChanged {} => Ok(Self::Event(ActiveEventSubscription {
+                event_kind: crate::api::schema::EventKind::TodoChanged,
+                last_sequence: 0,
+            })),
             Subscription::PaneOutputMatched {
                 pane_id,
                 source,

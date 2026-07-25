@@ -272,6 +272,173 @@ fn notification_show_sound_defaults_to_none() {
 }
 
 #[test]
+fn todo_requests_use_dot_method_names_and_round_trip() {
+    let requests = vec![
+        (
+            "todo.list",
+            Request {
+                id: "req_todo_list".into(),
+                method: Method::TodoList(TodoListParams {
+                    pane_id: Some("w1:p2".into()),
+                }),
+            },
+        ),
+        (
+            "todo.add",
+            Request {
+                id: "req_todo_add".into(),
+                method: Method::TodoAdd(TodoAddParams {
+                    pane_id: "w1:p2".into(),
+                    text: "rerun deploy".into(),
+                    priority: Some(crate::terminal::todo::TodoPriority::High),
+                    link_pane_id: Some("w1:p3".into()),
+                }),
+            },
+        ),
+        (
+            "todo.update",
+            Request {
+                id: "req_todo_update".into(),
+                method: Method::TodoUpdate(TodoUpdateParams {
+                    pane_id: "w1:p2".into(),
+                    id: 7,
+                    text: Some("rerun deploy twice".into()),
+                    done: Some(true),
+                    priority: Some(crate::terminal::todo::TodoPriority::Low),
+                    link_pane_id: None,
+                    clear_link: true,
+                }),
+            },
+        ),
+        (
+            "todo.remove",
+            Request {
+                id: "req_todo_remove".into(),
+                method: Method::TodoRemove(TodoRemoveParams {
+                    pane_id: "w1:p2".into(),
+                    id: 7,
+                }),
+            },
+        ),
+        (
+            "todo.clear",
+            Request {
+                id: "req_todo_clear".into(),
+                method: Method::TodoClear(TodoClearParams {
+                    pane_id: "w1:p2".into(),
+                    done_only: true,
+                }),
+            },
+        ),
+    ];
+
+    for (wire_name, request) in requests {
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["method"], wire_name);
+        assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request);
+    }
+}
+
+#[test]
+fn todo_optional_params_default_when_omitted() {
+    let json = r#"{"id":"req_1","method":"todo.add","params":{"pane_id":"w1:p2","text":"note"}}"#;
+    let request: Request = serde_json::from_str(json).unwrap();
+    let Method::TodoAdd(params) = request.method else {
+        panic!("wrong method parsed");
+    };
+    assert_eq!(params.priority, None);
+    assert_eq!(params.link_pane_id, None);
+
+    let json = r#"{"id":"req_2","method":"todo.clear","params":{"pane_id":"w1:p2"}}"#;
+    let request: Request = serde_json::from_str(json).unwrap();
+    let Method::TodoClear(params) = request.method else {
+        panic!("wrong method parsed");
+    };
+    assert!(!params.done_only);
+
+    let json = r#"{"id":"req_3","method":"todo.list","params":{}}"#;
+    let request: Request = serde_json::from_str(json).unwrap();
+    let Method::TodoList(params) = request.method else {
+        panic!("wrong method parsed");
+    };
+    assert_eq!(params.pane_id, None);
+}
+
+#[test]
+fn todo_changed_event_and_subscription_use_the_dot_name() {
+    assert_eq!(EventKind::TodoChanged.dot_name(), "todo.changed");
+
+    let subscription: Subscription = serde_json::from_str(r#"{"type":"todo.changed"}"#).unwrap();
+    assert_eq!(subscription, Subscription::TodoChanged {});
+
+    let event = EventEnvelope {
+        event: EventKind::TodoChanged,
+        data: EventData::TodoChanged {
+            pane_id: "w1:p2".into(),
+        },
+    };
+    let json = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["event"], "todo_changed");
+    assert_eq!(json["data"]["type"], "todo_changed");
+    assert_eq!(json["data"]["pane_id"], "w1:p2");
+    assert_eq!(
+        serde_json::from_value::<EventEnvelope>(json).unwrap(),
+        event
+    );
+}
+
+#[test]
+fn todo_responses_round_trip() {
+    let todo = TodoInfo {
+        pane_id: "w1:p2".into(),
+        id: 3,
+        text: "rerun deploy".into(),
+        done: false,
+        priority: crate::terminal::todo::TodoPriority::High,
+        link_pane_id: Some("w1:p3".into()),
+        link_label: Some("infra".into()),
+        link_alive: true,
+        created_at_unix: 100,
+        updated_at_unix: 200,
+    };
+
+    let single = SuccessResponse {
+        id: "req_todo".into(),
+        result: ResponseResult::Todo { todo: todo.clone() },
+    };
+    let json = serde_json::to_value(&single).unwrap();
+    assert_eq!(json["result"]["type"], "todo");
+    assert_eq!(json["result"]["todo"]["priority"], "high");
+    assert_eq!(
+        serde_json::from_value::<SuccessResponse>(json).unwrap(),
+        single
+    );
+
+    let listed = SuccessResponse {
+        id: "req_todo_list".into(),
+        result: ResponseResult::TodoList { todos: vec![todo] },
+    };
+    let json = serde_json::to_value(&listed).unwrap();
+    assert_eq!(json["result"]["type"], "todo_list");
+    assert_eq!(
+        serde_json::from_value::<SuccessResponse>(json).unwrap(),
+        listed
+    );
+
+    let cleared = SuccessResponse {
+        id: "req_todo_clear".into(),
+        result: ResponseResult::TodoCleared { removed: 2 },
+    };
+    let json = serde_json::to_value(&cleared).unwrap();
+    assert_eq!(json["result"]["type"], "todo_cleared");
+    assert_eq!(json["result"]["removed"], 2);
+    assert_eq!(
+        serde_json::from_value::<SuccessResponse>(json).unwrap(),
+        cleared
+    );
+}
+
+#[test]
 fn client_window_title_requests_round_trip() {
     let set = Request {
         id: "req_title_set".into(),

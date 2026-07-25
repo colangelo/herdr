@@ -31,6 +31,7 @@ pub const MAX_TODO_TEXT_LEN: usize = 500;
     Ord,
     serde::Serialize,
     serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum TodoPriority {
