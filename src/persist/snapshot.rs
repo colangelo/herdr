@@ -107,6 +107,40 @@ pub struct PaneSnapshot {
     pub agent_session: Option<PaneAgentSessionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    /// Pane todos, in stored (insertion) order. Omitted for panes with no
+    /// todos so sessions written before this field keep serializing identically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub todos: Vec<PaneTodoSnapshot>,
+    #[serde(
+        default = "default_next_todo_id",
+        skip_serializing_if = "is_initial_todo_id"
+    )]
+    pub next_todo_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneTodoSnapshot {
+    pub id: u64,
+    pub text: String,
+    #[serde(default)]
+    pub done: bool,
+    #[serde(default)]
+    pub priority: crate::terminal::todo::TodoPriority,
+    /// Old raw pane id of the link target; remapped on restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_pane: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_label: Option<String>,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+}
+
+fn default_next_todo_id() -> u64 {
+    1
+}
+
+fn is_initial_todo_id(id: &u64) -> bool {
+    *id == default_next_todo_id()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -359,6 +393,10 @@ fn capture_tab(
                     value: session.session_ref.value.clone(),
                 })
         });
+        let todos = terminal.map(capture_pane_todos).unwrap_or_default();
+        let next_todo_id = terminal
+            .map(|terminal| terminal.next_todo_id)
+            .unwrap_or_else(default_next_todo_id);
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -368,6 +406,8 @@ fn capture_tab(
                 managed_agent_kind,
                 agent_session,
                 launch_argv,
+                todos,
+                next_todo_id,
             },
         );
     }
@@ -379,6 +419,29 @@ fn capture_tab(
         focused: Some(tab.layout.focused().raw()),
         root_pane: Some(tab.root_pane.raw()),
     }
+}
+
+/// Capture a pane's todos. The link target is stored as the pane's current raw
+/// id, matching how the rest of the snapshot refers to panes; restore remaps it.
+fn capture_pane_todos(terminal: &crate::terminal::TerminalState) -> Vec<PaneTodoSnapshot> {
+    terminal
+        .todos()
+        .iter()
+        .map(|todo| PaneTodoSnapshot {
+            id: todo.id,
+            text: todo.text.clone(),
+            done: todo.done,
+            priority: todo.priority,
+            link_pane: todo
+                .link
+                .as_ref()
+                .and_then(|link| link.pane)
+                .map(|pane| pane.raw()),
+            link_label: todo.link.as_ref().map(|link| link.label.clone()),
+            created_at_unix: todo.created_at_unix,
+            updated_at_unix: todo.updated_at_unix,
+        })
+        .collect()
 }
 
 /// Capture pane screen history separately from the structural session snapshot.
@@ -648,6 +711,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                todos: Vec::new(),
+                next_todo_id: 1,
             },
         );
         panes.insert(
@@ -659,6 +724,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                todos: Vec::new(),
+                next_todo_id: 1,
             },
         );
 
@@ -1196,6 +1263,125 @@ mod tests {
     }
 
     #[test]
+    fn pane_snapshot_round_trips_todos() {
+        let snapshot = PaneSnapshot {
+            cwd: std::path::PathBuf::from("/tmp"),
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: None,
+            launch_argv: None,
+            todos: vec![PaneTodoSnapshot {
+                id: 3,
+                text: "rerun the deploy".into(),
+                done: false,
+                priority: crate::terminal::todo::TodoPriority::High,
+                link_pane: Some(11),
+                link_label: Some("infra".into()),
+                created_at_unix: 100,
+                updated_at_unix: 200,
+            }],
+            next_todo_id: 4,
+        };
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let back: PaneSnapshot = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back.todos.len(), 1);
+        assert_eq!(back.todos[0].id, 3);
+        assert_eq!(back.todos[0].text, "rerun the deploy");
+        assert_eq!(
+            back.todos[0].priority,
+            crate::terminal::todo::TodoPriority::High
+        );
+        assert_eq!(back.todos[0].link_pane, Some(11));
+        assert_eq!(back.todos[0].link_label.as_deref(), Some("infra"));
+        assert_eq!(back.next_todo_id, 4);
+    }
+
+    #[test]
+    fn pane_snapshot_without_todos_omits_the_field() {
+        let snapshot = PaneSnapshot {
+            cwd: std::path::PathBuf::from("/tmp"),
+            label: None,
+            agent_name: None,
+            managed_agent_kind: None,
+            agent_session: None,
+            launch_argv: None,
+            todos: Vec::new(),
+            next_todo_id: 1,
+        };
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+
+        assert!(
+            !json.contains("todos"),
+            "todo-free panes must serialize as before: {json}"
+        );
+        assert!(
+            !json.contains("next_todo_id"),
+            "todo-free panes must serialize as before: {json}"
+        );
+    }
+
+    #[test]
+    fn pane_snapshot_loads_session_files_written_before_todos_existed() {
+        let json = r#"{"cwd":"/tmp"}"#;
+
+        let snapshot: PaneSnapshot = serde_json::from_str(json).unwrap();
+
+        assert!(snapshot.todos.is_empty());
+        assert_eq!(snapshot.next_todo_id, 1, "counter must default to 1, not 0");
+    }
+
+    #[test]
+    fn capture_contract_tracks_pane_todos_and_link_targets() {
+        let mut state = state_with_workspaces(&["todos"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let second = state.workspaces[0].test_split(Direction::Horizontal);
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal
+            .add_todo(
+                "rerun the deploy",
+                crate::terminal::todo::TodoPriority::High,
+                Some(crate::terminal::todo::TodoLink {
+                    pane: Some(second),
+                    label: "infra".into(),
+                }),
+                100,
+            )
+            .unwrap();
+        terminal
+            .add_todo("plain", crate::terminal::todo::TodoPriority::Low, None, 101)
+            .unwrap();
+
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+
+        assert_eq!(pane.todos.len(), 2);
+        assert_eq!(pane.todos[0].text, "rerun the deploy");
+        assert_eq!(
+            pane.todos[0].priority,
+            crate::terminal::todo::TodoPriority::High
+        );
+        assert_eq!(pane.todos[0].link_pane, Some(second.raw()));
+        assert_eq!(pane.todos[0].link_label.as_deref(), Some("infra"));
+        assert_eq!(pane.todos[1].link_pane, None);
+        assert_eq!(pane.todos[1].link_label, None);
+        assert_eq!(pane.next_todo_id, 3);
+        assert!(
+            snapshot.workspaces[0].tabs[0].panes[&second.raw()]
+                .todos
+                .is_empty(),
+            "todos belong to the pane that owns them"
+        );
+    }
+
+    #[test]
     fn restore_falls_back_to_home_when_cwd_missing() {
         let mut panes = HashMap::new();
         panes.insert(
@@ -1207,6 +1393,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                todos: Vec::new(),
+                next_todo_id: 1,
             },
         );
         panes.insert(
@@ -1220,6 +1408,8 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 launch_argv: None,
+                todos: Vec::new(),
+                next_todo_id: 1,
             },
         );
 
