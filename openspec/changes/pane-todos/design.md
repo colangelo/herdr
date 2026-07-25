@@ -41,8 +41,9 @@ persist. Storing them on the terminal also means todos follow the work through
 `break_pane` and `move_pane_to_tab`, which preserve the running terminal.
 
 **Sorting is a view concern**: the
-display order is priority descending, then `done` items sunk to the bottom, then
-creation order. Keeping the stored order stable means an edit that changes
+display order sinks `done` items to the bottom first, then sorts by priority
+descending, then by creation order. `done` is the primary key, so an outstanding
+low-priority todo still ranks above a completed high-priority one. Keeping the stored order stable means an edit that changes
 priority cannot renumber ids or lose the original sequence, and the API returns
 a deterministic list independent of how the TUI chooses to sort it.
 

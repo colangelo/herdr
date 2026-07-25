@@ -8,7 +8,7 @@ bindings. Group 7 closes out whichever phase is landing.
 
 - [x] 1.1 Add `PaneTodo`, `TodoPriority`, `TodoLink` in `src/terminal/todo.rs` and the todo list + monotonic id counter to `TerminalState` in `src/terminal/state.rs` (not `PaneState`, which is viewport-only and is not what `PaneSnapshot` captures)
 - [x] 1.2 Add store operations (add, update, remove, clear, toggle done) enforcing the 50-todo and 500-character limits with explicit error variants
-- [x] 1.3 Add the presentation-order helper (priority desc → not-done first → creation order), keeping stored order as insertion order
+- [x] 1.3 Add the presentation-order helper (not-done first → priority desc → creation order), keeping stored order as insertion order
 - [x] 1.4 Unit tests on `TerminalState` (where the todos live, so no `AppState` or PTY is involved): add/update/remove/clear, ordering, limits, id monotonicity across removal
 
 ## 2. Persistence and link remapping
