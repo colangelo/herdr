@@ -30,7 +30,7 @@ This plan covers **Phase 2 (TUI)** only — OpenSpec task groups 5, 6, the defer
 - **Every new keybinding gets a `help_entry`** in `src/ui/keybind_help.rs`, including `add_pane_todo`, which ships unbound — the panel renders `unset`, and that is how users discover it. A shortcut absent from the help panel is incomplete.
 - Reuse the existing UI language. The notification center is the reference for the panel; the rename modal (`render_rename_overlay`, `rename_button_rects`) is the reference for the edit modal; `expanded_sidebar_toggle_rect` is the reference for the indicator.
 - Commit style: lowercase conventional commits, no emojis, no AI co-author or "Generated with" lines.
-- Test filter: `cargo nextest run --locked --no-fail-fast <filter>`. Run `just check` before the final commit.
+- Test filter: `cargo nextest run --locked --no-fail-fast <filter>`. Run `just check` before the final commit — and note that `just check` and `just test` are wider than cargo: their `python3 -m unittest` line runs the maintenance scripts, including `scripts/test_config_reference_check.py`. A commit that adds a config key without its `docs/next/.../config-reference.json` row leaves the tree red, so every task commits green on its own, not just the last one.
 - Known unrelated failure on macOS: `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` fails identically on clean `upstream/master`. Ignore it, never "fix" it, never count it as a regression (fork issue #33).
 - `tests/cli` is `#![cfg(not(target_os = "macos"))]`, so it reports "0 tests run" locally (issue #30). That is expected, not a problem.
 
@@ -55,11 +55,12 @@ This plan covers **Phase 2 (TUI)** only — OpenSpec task groups 5, 6, the defer
 - Modify: `src/app/mod.rs` (`App::new` mapping **and** `apply_live_config`)
 - Modify: `src/main.rs` (`DEFAULT_CONFIG` `[ui]` sample lines)
 - Modify: `src/terminal/todo.rs` (drop the two `#[allow(dead_code)]`)
+- Modify: `docs/next/website/src/data/config-reference.json` (the two `ui.*` rows — `scripts/config_reference_check.py` runs inside `just check`, so the rows ship with the keys, and OpenSpec task 5.2 pairs them anyway)
 
 **Interfaces:**
 - Consumes: `TerminalState::todos()`, `TerminalState::outstanding_todo_count()`, `TerminalState::highest_outstanding_todo_priority()` (all `src/terminal/todo.rs`); `crate::layout::PaneInfo` (`src/layout.rs:34`); `Workspace::pane_state(PaneId) -> Option<&PaneState>` (`src/workspace.rs:1175`); `AppState::pane_title_color(bool) -> Color` (`src/app/state.rs:1959`); `super::text::truncate_end` / `display_width_u16` (`src/ui/text.rs:11`/`:7`).
 - Produces, relied on by Tasks 2–5:
-  - `pub(crate) struct PaneTodoIndicator { pub rect: Rect, pub label: String, pub outstanding: usize, pub priority: Option<TodoPriority> }` in `src/ui/panes.rs`
+  - `pub(crate) struct PaneTodoIndicator { pub rect: Rect, pub label: String, pub priority: Option<TodoPriority> }` in `src/ui/panes.rs` — the label already carries the outstanding count, so no caller needs it as a separate field
   - `pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<PaneTodoIndicator>` — the single shared definition
   - `impl AppState { pub(crate) fn pane_terminal(&self, pane_id: PaneId) -> Option<&crate::terminal::TerminalState> }`
   - `impl AppState { pub fn pane_todo_indicator_color(&self, priority: Option<TodoPriority>) -> Color }`
@@ -147,7 +148,6 @@ Append to the existing `#[cfg(test)] mod tests` in `src/ui/panes.rs` (it already
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
 
         assert_eq!(indicator.label, " ▾ 3 ");
-        assert_eq!(indicator.outstanding, 3);
         assert_eq!(indicator.priority, Some(TodoPriority::High));
     }
 
@@ -431,14 +431,15 @@ pub(crate) struct PaneTodoIndicator {
     /// Exactly the cells the label is drawn into.
     pub rect: Rect,
     pub label: String,
-    pub outstanding: usize,
     /// Highest outstanding priority; `None` once every todo is done.
     pub priority: Option<crate::terminal::todo::TodoPriority>,
 }
 
 /// `▾ N` for N outstanding todos, a bare `▾` once they are all done, and
 /// nothing at all for a pane with no todos — a quiet pane keeps exactly the
-/// border it has today. Same spacing grammar as the notification `◆`.
+/// border it has today. Same spacing grammar as the notification `◆`. The
+/// count is at most two digits because `add_todo` caps a pane at
+/// `MAX_TODOS_PER_PANE` (50).
 fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String> {
     if total == 0 {
         return None;
@@ -446,26 +447,41 @@ fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String>
     if outstanding == 0 {
         return Some(" ▾ ".to_string());
     }
-    if outstanding > 99 {
-        return Some(" ▾ 99+ ".to_string());
-    }
     Some(format!(" ▾ {outstanding} "))
 }
 
+/// The entry point for a caller holding only a pane id — the mouse hit-test,
+/// which must read the same cells the renderer drew. It lands in phase-2 task
+/// 3; until then the bin target reaches this only from tests, so it carries
+/// the same scoped allow as its `src/ui.rs` re-export and both go away
+/// together.
+#[allow(dead_code)]
 pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<PaneTodoIndicator> {
+    pane_todo_indicator_for(app, info, app.pane_terminal(info.id)?)
+}
+
+/// [`pane_todo_indicator`] for a caller that already holds the pane's
+/// terminal. The render path resolves it from the workspace it was handed, so
+/// it must not pay `AppState::pane_terminal`'s scan of every workspace once
+/// per pane per frame.
+fn pane_todo_indicator_for(
+    app: &AppState,
+    info: &PaneInfo,
+    terminal: &crate::terminal::TerminalState,
+) -> Option<PaneTodoIndicator> {
     // No top border means no place to put it: a single-pane tab or
     // `ui.pane_borders = false` draws no chrome at all, and the keybinding is
     // the discoverable path there.
     if !app.show_pane_todo_indicator || !info.borders.contains(Borders::TOP) {
         return None;
     }
-    let terminal = app.pane_terminal(info.id)?;
-    let outstanding = terminal.outstanding_todo_count();
-    let label = pane_todo_indicator_label(terminal.todos().len(), outstanding)?;
+    let label =
+        pane_todo_indicator_label(terminal.todos().len(), terminal.outstanding_todo_count())?;
     let width = display_width_u16(&label);
-    // Leave both corner glyphs plus one cell of border; below that the pane is
-    // too narrow for any chrome and nothing is drawn.
-    if width == 0 || info.rect.width <= width.saturating_add(3) {
+    // The label plus both corner glyphs is the whole requirement: the title is
+    // laid out in what is left over and drops itself when that is too narrow,
+    // so the control is what survives a squeeze.
+    if width == 0 || info.rect.width < width.saturating_add(2) {
         return None;
     }
     let x = info
@@ -477,7 +493,6 @@ pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<Pan
     Some(PaneTodoIndicator {
         rect: Rect::new(x, info.rect.y, width, 1),
         label,
-        outstanding,
         priority: terminal.highest_outstanding_todo_priority(),
     })
 }
@@ -497,18 +512,21 @@ Rewrite the body of `render_pane_border_titles` (`:630-669`). Note the shape cha
             continue;
         }
 
+        // One lookup feeds both the indicator and the title.
+        let terminal = ws
+            .pane_state(info.id)
+            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id));
+
         // The indicator claims the far right of the border before the title is
         // laid out, so a narrow pane truncates the title instead of dropping
         // the control.
-        let indicator = pane_todo_indicator(app, info);
+        let indicator = terminal.and_then(|terminal| pane_todo_indicator_for(app, info, terminal));
         let reserved = indicator
             .as_ref()
             .map(|indicator| indicator.rect.width)
             .unwrap_or(0);
 
-        if let Some(title) = ws
-            .pane_state(info.id)
-            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
+        if let Some(title) = terminal
             .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
             .and_then(|label| {
                 pane_border_title(
@@ -562,6 +580,8 @@ Rewrite the body of `render_pane_border_titles` (`:630-669`). Note the shape cha
     },
 ```
 
+The re-export and `pane_todo_indicator` itself both carry a scoped, commented allow until Task 3's hit-test calls them: the renderer takes the `pane_todo_indicator_for` path, so in the bin target the pane-id entry point has no production caller yet. **Task 3 removes both allows** — `#[allow(unused_imports)]` in `src/ui.rs` and `#[allow(dead_code)]` on `pane_todo_indicator` in `src/ui/panes.rs` — as part of landing the hit-test.
+
 **3g. `src/terminal/todo.rs`** — delete the `#[allow(dead_code)]` on `outstanding_todo_count` (`:205`) and `highest_outstanding_todo_priority` (`:210`) together with the three-line comment above them (`:202-204`). Both now have real readers.
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -569,12 +589,13 @@ Rewrite the body of `render_pane_border_titles` (`:630-669`). Note the shape cha
 Run: `cargo nextest run --locked --no-fail-fast ui::panes`
 Run: `cargo nextest run --locked --no-fail-fast config::model`
 Run: `cargo clippy --all-targets -- -D warnings`
-Expected: green. Clippy matters here because removing `#[allow(dead_code)]` is only safe once the readers exist.
+Run: `python3 -m unittest scripts.test_config_reference_check`
+Expected: green. Clippy matters here because removing `#[allow(dead_code)]` is only safe once the readers exist, and the unittest wraps `scripts/config_reference_check.py`, which fails the moment a `ui.*` key exists without its reference row.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/ui/panes.rs src/ui.rs src/app/state.rs src/app/mod.rs src/config/model.rs src/main.rs src/terminal/todo.rs
+git add src/ui/panes.rs src/ui.rs src/app/state.rs src/app/mod.rs src/config/model.rs src/main.rs src/terminal/todo.rs docs/next/website/src/data/config-reference.json
 git commit -m "feat: show a pane todo indicator on the top border"
 ```
 
@@ -3618,26 +3639,15 @@ The pane todo panel (`prefix+ctrl+t`, or click the `▾ N` indicator at the far 
 **Do not touch `ja/keyboard.mdx` or `zh-cn/keyboard.mdx`, and do not touch `configuration.mdx` at all.** Both are deliberate, and both were checked against the tooling rather than assumed:
 
 - Translation parity is *file set + heading outline*, nothing more: `scripts/docs_translation_parity.py` compares the `*.mdx` names per locale and the list of heading levels (`heading_outline`), and `just release-docs-check` runs it over both `docs/next/website/src/content/docs` and `website/src/content/docs`. Adding table rows and a paragraph under existing headings changes no heading, so the check stays green. The localized keyboard pages already omit the whole notification-center row and paragraph, so half-translating one new feature into them would make them *less* consistent, not more. (The "extend existing pages" rule in the constraints still holds for the opposite reason: a **new** `.mdx` would need `ja/` and `zh-cn/` files with an identical heading outline, which is real work.)
-- `configuration.mdx` does not enumerate `ui.pane_*` keys. Its "UI and sidebar" section (`:255-257`) is one paragraph that says *"Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings."* — `ui.pane_borders`, `ui.pane_title_active_color`, and the rest live only in `config-reference.json`. The two new `ui.*` options follow that pattern, so the reference rows below are their documentation, and there is no configuration.mdx prose to translate.
+- `configuration.mdx` does not enumerate `ui.pane_*` keys. Its "UI and sidebar" section (`:255-257`) is one paragraph that says *"Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings."* — `ui.pane_borders`, `ui.pane_title_active_color`, and the rest live only in `config-reference.json`. The two new `ui.*` options follow that pattern, so their reference rows (shipped in Task 1) are their documentation, and there is no configuration.mdx prose to translate.
 
-`docs/next/website/src/data/config-reference.json` — four rows, or `python3 scripts/config_reference_check.py` fails (release-blocking, run by `just release-docs-check`, not by `just check`). The file is **not** a flat array: it is `{"sections": [{"id", "title", "keys": [...]}, …]}`, and each row goes in the `keys` array of its section. `reference_entries` flattens every section, so placement does not affect the check — it affects where the row renders on `/docs/config-reference/`, so put each one where its neighbours are:
+`docs/next/website/src/data/config-reference.json` — two rows here, or `python3 scripts/config_reference_check.py` fails. That script is **not** release-only: `scripts/test_config_reference_check.py` wraps it and both `just test` and `just check` run it in their `python3 -m unittest` line, so a key without its row breaks the tree on the commit that adds the key. The two `ui.*` rows therefore ship with Task 1, and only the two `keys.*` rows are left for here (`keys.open_pane_todos` lands in Task 3 and `keys.add_pane_todo` in Task 4 — add each row in the same commit as its key if that commit is the one that makes the check fail).
 
-- `ui.show_pane_todo_indicator` and `ui.pane_todo_color` → the `"id": "ui"` section ("UI and sidebar"), after the existing `ui.pane_title_inactive_color` row, with the other `ui.pane_*` entries.
+The file is **not** a flat array: it is `{"sections": [{"id", "title", "keys": [...]}, …]}`, and each row goes in the `keys` array of its section. `reference_entries` flattens every section, so placement does not affect the check — it affects where the row renders on `/docs/config-reference/`, so put each one where its neighbours are:
+
 - `keys.open_pane_todos` and `keys.add_pane_todo` → the `"id": "keys"` section ("Keybindings"), after the existing `keys.close_pane` row.
 
 ```json
-{
-  "key": "ui.show_pane_todo_indicator",
-  "type": "boolean",
-  "default": "true",
-  "description": "Show a todo indicator at the far right of a split pane's top border, carrying the pane's outstanding todo count."
-},
-{
-  "key": "ui.pane_todo_color",
-  "type": "color",
-  "default": "unset",
-  "description": "Override colour for the pane todo indicator while todos are outstanding. Same syntax as `accent`; unset colours it by the highest outstanding priority."
-},
 {
   "key": "keys.open_pane_todos",
   "type": "keybinding",
@@ -3652,7 +3662,7 @@ The pane todo panel (`prefix+ctrl+t`, or click the `▾ N` indicator at the far 
 }
 ```
 
-Match the `"type"` string the existing colour rows use (check `ui.pane_title_active_color`) rather than inventing one.
+Match the `"type"` string the existing keybinding rows use (check `keys.close_pane`) rather than inventing one.
 
 - [ ] **Step 7: Tick the OpenSpec tasks**
 
