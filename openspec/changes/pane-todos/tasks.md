@@ -6,7 +6,7 @@ bindings. Group 7 closes out whichever phase is landing.
 
 ## 1. Todo store in server state
 
-- [ ] 1.1 Add `PaneTodo`, `TodoPriority`, `TodoLink` and the per-pane todo list to `PaneState` in `src/app/state.rs`, with a per-pane monotonic id counter
+- [ ] 1.1 Add `PaneTodo`, `TodoPriority`, `TodoLink` in `src/pane/todo.rs` and the todo list + monotonic id counter to `TerminalState` in `src/terminal/state.rs` (not `PaneState`, which is viewport-only and is not what `PaneSnapshot` captures)
 - [ ] 1.2 Add store operations (add, update, remove, clear, toggle done) enforcing the 50-todo and 500-character limits with explicit error variants
 - [ ] 1.3 Add the presentation-order helper (priority desc → not-done first → creation order), keeping stored order as insertion order
 - [ ] 1.4 Unit tests via `AppState::test_new()`: add/update/remove/clear, ordering, limits, id monotonicity across removal, plus `Workspace::assert_invariants_for_test()` after mutations
