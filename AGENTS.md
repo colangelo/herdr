@@ -193,7 +193,15 @@ Published stable-release documentation lives in `docs/versions/`. Release CI see
 
 During release review, finalize `docs/next` and run `just release-docs-check`. Do not copy draft docs into preview or published versions manually. Preview CI snapshots the selected commit. After a stable GitHub Release succeeds, release CI seeds a new version from the exact tag, updates `latest.json`, and deploys them together. Normal feature/fix work should not edit root `README.md`, root `CHANGELOG.md`, published version docs, or `website/latest.json` unless it is a focused correction to already-published documentation or explicitly requested.
 
-Put local PRDs, planning notes, and exploratory specs under `.local/prd/`; `.local/` is ignored and locally controlled.
+Put throwaway scratch notes under `.local/prd/`; `.local/` is ignored and locally controlled. Anything that shapes an implementation does not belong there — see Planning below.
+
+## Planning
+
+**OpenSpec is the house workflow for everything between "we agreed to build it" and "we start writing code."** Any change big enough to need a written plan gets an OpenSpec change at `openspec/changes/<change-name>/`, committed before implementation starts: `proposal.md`, `design.md`, `specs/<capability>/spec.md`, `tasks.md`, and the step-by-step implementation plan. Validate with `openspec validate <change-name> --strict`.
+
+The point is structure we can rely on and review later. A plan in a gitignored scratch directory is invisible in worktrees, absent on other machines, and unreviewable in a diff, so it does not count as planned work.
+
+Exploratory conversation before that point is unconstrained — the Superpowers brainstorming skill is fine for working out what to build. But its outputs get written into the OpenSpec change, not into `docs/superpowers/`, `.local/prd/`, or any other parallel location. Do not invent a second home for planning artifacts.
 
 ## Commit Style
 
