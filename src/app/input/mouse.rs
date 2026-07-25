@@ -4891,6 +4891,131 @@ mod tests {
         app
     }
 
+    /// Opens the edit modal on the pane's only todo, with a screen big enough
+    /// for the modal to have real geometry.
+    fn app_with_pane_todo_edit_open() -> (crate::app::App, crate::layout::PaneId) {
+        let mut app = app_for_pane_todo_indicator();
+        let pane_id = app.state.view.pane_infos[0].id;
+        let todo_id = app
+            .state
+            .pane_terminal(pane_id)
+            .expect("pane terminal")
+            .todos()[0]
+            .id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        (app, pane_id)
+    }
+
+    /// The whole modal mouse path runs through `pane_todo_edit_regions()`.
+    /// Without a test that clicks through `handle_mouse`, that function could
+    /// return `None` and every click in the modal would silently do nothing
+    /// while the suite stayed green.
+    #[test]
+    fn clicking_the_edit_modal_controls_hits_the_regions_that_are_drawn() {
+        let (mut app, _pane_id) = app_with_pane_todo_edit_open();
+        let rects = app
+            .state
+            .pane_todo_edit_regions()
+            .expect("the open modal must have regions");
+        let click = |app: &mut crate::app::App, rect: Rect| {
+            app.state.handle_mouse(
+                &mut app.terminal_runtimes,
+                mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    rect.x + rect.width / 2,
+                    rect.y,
+                ),
+            )
+        };
+
+        let before = app
+            .state
+            .pane_todo_edit
+            .as_ref()
+            .expect("edit state")
+            .priority;
+        let action = click(&mut app, rects.priority);
+        assert!(action.is_none(), "the priority row is handled in place");
+        assert_ne!(
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .priority,
+            before,
+            "clicking the priority row must cycle the priority"
+        );
+
+        let before = app.state.pane_todo_edit.as_ref().expect("edit state").link;
+        let action = click(&mut app, rects.link);
+        assert!(action.is_none(), "the link row is handled in place");
+        assert_ne!(
+            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            before,
+            "clicking the link row must cycle the link"
+        );
+
+        assert!(
+            matches!(
+                click(&mut app, rects.save),
+                Some(MouseAction::PaneTodoEditModal(ModalAction::Save))
+            ),
+            "the save button must report Save"
+        );
+        assert!(
+            matches!(
+                click(&mut app, rects.cancel),
+                Some(MouseAction::PaneTodoEditModal(ModalAction::Cancel))
+            ),
+            "the cancel button must report Cancel"
+        );
+    }
+
+    /// The regions the mouse layer uses are composed in screen space from
+    /// `pane_todo_edit_inner()`; a test that recomputes them locally would not
+    /// notice that composition breaking.
+    #[test]
+    fn edit_modal_regions_sit_inside_the_modal_and_do_not_overlap() {
+        let (app, _pane_id) = app_with_pane_todo_edit_open();
+        let inner = app
+            .state
+            .pane_todo_edit_inner()
+            .expect("the open modal must have an inner rect");
+        let rects = app
+            .state
+            .pane_todo_edit_regions()
+            .expect("the open modal must have regions");
+
+        for (name, rect) in [
+            ("input", rects.input),
+            ("priority", rects.priority),
+            ("link", rects.link),
+            ("save", rects.save),
+            ("cancel", rects.cancel),
+        ] {
+            assert!(
+                rect.x >= inner.x
+                    && rect.y >= inner.y
+                    && rect.x + rect.width <= inner.x + inner.width
+                    && rect.y + rect.height <= inner.y + inner.height,
+                "{name} {rect:?} must sit inside the modal body {inner:?}"
+            );
+        }
+
+        assert_ne!(
+            rects.priority.y, rects.link.y,
+            "priority and link must be different rows, or a click lands on the wrong control"
+        );
+        assert!(
+            !rect_contains(
+                rects.cancel,
+                rects.save.x + rects.save.width / 2,
+                rects.save.y
+            ),
+            "the save button must not overlap cancel"
+        );
+    }
+
     /// Spec: "the cells that respond to a click are exactly the cells drawn".
     #[test]
     fn clicking_the_pane_todo_indicator_toggles_the_panel() {
