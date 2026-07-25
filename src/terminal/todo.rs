@@ -6,11 +6,6 @@
 //! also means they follow the work through `break_pane` / `move_pane_to_tab`,
 //! which preserve the running terminal.
 
-// The store lands before its consumers: session persistence, the `todo.*`
-// socket API, and the `herdr todo` CLI wire it up in the following commits of
-// this change, so the bin target still sees parts of it as unreached.
-#![allow(dead_code)]
-
 use crate::layout::PaneId;
 use crate::terminal::state::TerminalState;
 
@@ -204,10 +199,15 @@ impl TerminalState {
         ordered
     }
 
+    // Phase 1 ships the store, persistence, socket API, and CLI; the only
+    // readers of these two summaries are the phase-2 pane indicator and todo
+    // panel (tasks 5.x/6.x), so the bin target still sees them as unreached.
+    #[allow(dead_code)]
     pub fn outstanding_todo_count(&self) -> usize {
         self.todos.iter().filter(|todo| !todo.done).count()
     }
 
+    #[allow(dead_code)]
     pub fn highest_outstanding_todo_priority(&self) -> Option<TodoPriority> {
         self.todos
             .iter()
