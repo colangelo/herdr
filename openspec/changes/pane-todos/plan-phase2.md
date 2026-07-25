@@ -57,7 +57,7 @@ This plan covers **Phase 2 (TUI)** only — OpenSpec task groups 5, 6, the defer
 - Modify: `src/terminal/todo.rs` (drop the two `#[allow(dead_code)]`)
 
 **Interfaces:**
-- Consumes: `TerminalState::todos()`, `TerminalState::outstanding_todo_count()`, `TerminalState::highest_outstanding_todo_priority()` (all `src/terminal/todo.rs`); `crate::layout::PaneInfo` (`src/layout.rs:32`); `Workspace::pane_state(PaneId) -> Option<&PaneState>` (`src/workspace.rs:1175`); `AppState::pane_title_color(bool) -> Color` (`src/app/state.rs:1959`); `super::text::truncate_end` / `display_width_u16` (`src/ui/text.rs:11`/`:7`).
+- Consumes: `TerminalState::todos()`, `TerminalState::outstanding_todo_count()`, `TerminalState::highest_outstanding_todo_priority()` (all `src/terminal/todo.rs`); `crate::layout::PaneInfo` (`src/layout.rs:34`); `Workspace::pane_state(PaneId) -> Option<&PaneState>` (`src/workspace.rs:1175`); `AppState::pane_title_color(bool) -> Color` (`src/app/state.rs:1959`); `super::text::truncate_end` / `display_width_u16` (`src/ui/text.rs:11`/`:7`).
 - Produces, relied on by Tasks 2–5:
   - `pub(crate) struct PaneTodoIndicator { pub rect: Rect, pub label: String, pub outstanding: usize, pub priority: Option<TodoPriority> }` in `src/ui/panes.rs`
   - `pub(crate) fn pane_todo_indicator(app: &AppState, info: &PaneInfo) -> Option<PaneTodoIndicator>` — the single shared definition
@@ -553,7 +553,7 @@ Rewrite the body of `render_pane_border_titles` (`:630-669`). Note the shape cha
     }
 ```
 
-**3f. `src/ui.rs`** — extend the `panes` re-export (`:82`):
+**3f. `src/ui.rs`** — extend the `panes` re-export, which is the `panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},` line at `:107` (inside the second `pub(crate) use self::{...}` group, `:101-111`):
 
 ```rust
     panes::{
@@ -606,7 +606,13 @@ git commit -m "feat: show a pane todo indicator on the top border"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `src/ui/todo_panel.rs` containing *only* the test module for now, so the file compiles as soon as the implementation lands:
+Create `src/ui/todo_panel.rs` containing *only* the test module for now, so the file compiles as soon as the implementation lands — **and declare it in the same step**, next to the other `mod` lines in `src/ui.rs`:
+
+```rust
+mod todo_panel;
+```
+
+Without that `mod` line the new file is not part of the crate at all, so Step 2 would report "0 tests run" instead of failing: the same silent-zero-tests trap `tests/cli` sets on macOS. Step 3d only adds the re-exports and the render arm.
 
 ```rust
 #[cfg(test)]
@@ -696,14 +702,21 @@ mod tests {
 
     #[test]
     fn done_rows_are_dimmed_and_struck() {
-        let app = app_with_open_panel(&[("finished", true, TodoPriority::Normal)]);
+        // Two todos on purpose: `open_pane_todos` starts with `selected: 0`,
+        // and a selected row is painted by the selection branch (accent band),
+        // never the done branch. Done todos sink, so row 1 is the done one and
+        // row 0 keeps the cursor.
+        let app = app_with_open_panel(&[
+            ("still open", false, TodoPriority::Normal),
+            ("finished", true, TodoPriority::Normal),
+        ]);
         let (list, _) = app
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
         let buffer = draw(&app);
 
         // Column 3 is the first text cell after the three-cell state block.
-        let cell = &buffer[(list.x + 3, list.y)];
+        let cell = &buffer[(list.x + 3, list.y + 1)];
         assert_eq!(cell.style().fg, Some(app.palette.overlay0));
         assert!(cell
             .style()
@@ -713,7 +726,15 @@ mod tests {
 
     #[test]
     fn a_dead_link_chip_renders_dimmed_and_a_live_one_does_not() {
-        let mut app = app_with_open_panel(&[("go look", false, TodoPriority::Normal)]);
+        // The live/dead distinction only exists on an unselected row: a
+        // selected row's chip takes the accent band like the rest of the row.
+        // The decoy is High priority so it sorts to row 0 and holds the
+        // starting selection, while `todos()` keeps insertion order, so the
+        // linked todo is still `todos()[0]` and lands on row 1.
+        let mut app = app_with_open_panel(&[
+            ("go look", false, TodoPriority::Normal),
+            ("decoy", false, TodoPriority::High),
+        ]);
         let pane_id = app.workspaces[0].tabs[0].root_pane;
         let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
             .attached_terminal_id
@@ -739,7 +760,8 @@ mod tests {
         let (list, _) = app
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
-        let row = Rect::new(list.x, list.y, list.width, 1);
+        // Row 1: the linked todo, which is not the selected row.
+        let row = Rect::new(list.x, list.y + 1, list.width, 1);
         let (chip, _) = pane_todo_link_chip(row, "infra").expect("chip should fit");
         let buffer = draw(&app);
         assert!(row_text(&buffer, chip).contains('→'));
@@ -797,6 +819,33 @@ mod tests {
 
         assert_eq!(list.y + list.height, buttons.row_y());
         assert_eq!(buttons.row_y(), rect.y + rect.height - 2);
+
+        // A short todo pins the panel to its 30-cell minimum, and 28 inner
+        // cells cannot hold all three boxes (12 + 14 + 11 plus two 2-cell gaps
+        // = 41), so `toggle` drops first — the same degradation the
+        // notification center applies to its `mark read` box at the same
+        // `clamp(30, 60)` minimum.
+        assert!(buttons.toggle.is_none());
+
+        let buffer = draw(&app);
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
+        assert!(footer.contains("c clear done"));
+        assert!(footer.contains("esc close"));
+    }
+
+    #[test]
+    fn a_wide_panel_shows_all_three_footer_buttons() {
+        // 40 cells of text push the panel to 46 (40 + borders + glyph block +
+        // trailing space), whose 44 inner cells clear the 41 all three boxes
+        // need.
+        let wide = "x".repeat(40);
+        let app = app_with_open_panel(&[(wide.as_str(), false, TodoPriority::Normal)]);
+        let rect = app.pane_todo_panel_rect().expect("panel rect should exist");
+        let buttons = app
+            .pane_todo_panel_buttons()
+            .expect("footer buttons should exist");
+
+        assert!(buttons.toggle.is_some());
 
         let buffer = draw(&app);
         let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
@@ -1340,11 +1389,7 @@ const PANE_TODO_PANEL_MAX_ROWS: u16 = 12;
     }
 ```
 
-**3d. `src/ui.rs`** — declare the module next to the other `mod` lines, re-export for the mouse layer, and add the render arm to the `match app.mode` (`:523`):
-
-```rust
-mod todo_panel;
-```
+**3d. `src/ui.rs`** — the `mod todo_panel;` line already landed in Step 1; here add the re-export for the mouse layer and the render arm in the `match app.mode` (`:523`):
 
 ```rust
 pub(crate) use self::todo_panel::{pane_todo_link_chip, pane_todo_panel_button_rects,
@@ -1734,20 +1779,28 @@ Add to `src/app/input/mouse.rs`'s `#[cfg(test)] mod tests` (uses `app_for_mouse_
             .state
             .pane_todo_panel_buttons()
             .expect("footer buttons should exist");
-        let panel = app
-            .state
-            .pane_todo_panel_rect()
-            .expect("panel rect should exist");
 
-        app.state.handle_mouse(
+        // Aim at the gap between two boxes rather than at a column guessed
+        // from the panel's edge: `centered_button_row` centres the row, so
+        // `panel.x + 1` lands *on* the leftmost box at this panel width and
+        // the test would pass without ever reaching the inert path.
+        let gap_col = buttons.clear_done.x + buttons.clear_done.width;
+        assert_eq!(
+            buttons.hit(gap_col, buttons.row_y()),
+            None,
+            "the near-miss column must really miss every button"
+        );
+
+        let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                panel.x + 1,
+                gap_col,
                 buttons.row_y(),
             ),
         );
 
+        assert!(action.is_none(), "a near-miss triggers no action at all");
         assert!(
             app.state.pane_todos.is_some(),
             "missing a footer button must not dismiss the panel"
@@ -2135,7 +2188,7 @@ Extend the `MouseAction` enum (`:30`) with `PaneTodo(PaneTodoAction)`, and the `
             }
 ```
 
-**3f. `src/app/input/navigate.rs`** — variant in `pub(crate) enum NavigateAction` (`:1690` area): `OpenPaneTodos,`; row in `non_indexed_action_for_key`'s table (`:1805` area): `(&kb.open_pane_todos, NavigateAction::OpenPaneTodos),`; the `App` arm next to `OpenNotificationCenter` (`:438`):
+**3f. `src/app/input/navigate.rs`** — variant in `pub(crate) enum NavigateAction` (`:1690` area): `OpenPaneTodos,`; row in `non_indexed_action_for_key`'s table (the fn is at `:1778`; put it next to the `open_notification_center` row at `:1841`): `(&kb.open_pane_todos, NavigateAction::OpenPaneTodos),`; the `App` arm next to `OpenNotificationCenter` (`:438`):
 
 ```rust
             NavigateAction::OpenPaneTodos => self.open_focused_pane_todos(),
@@ -2223,7 +2276,7 @@ git commit -m "feat: drive the pane todo panel from the keyboard and mouse"
 - Modify: `src/ui/keybind_help.rs` (`add pane todo` entry)
 
 **Interfaces:**
-- Consumes: `runtime_todo_add` / `runtime_todo_update` (Task 3); `TerminalState::border_label(bool)` (`src/terminal/state.rs:1996`); `Workspace::public_pane_number(PaneId) -> Option<usize>` (`src/workspace.rs:1049`); `Layout::pane_ids() -> Vec<PaneId>` (`src/layout.rs:310`); `render_modal_shell` / `render_modal_header` / `render_action_button` / `action_button_row_rects` (`src/ui/widgets.rs`); `AppState::onboarding_modal_inner(u16, u16)` (`src/app/input/overlays.rs:356`); `MAX_TODO_TEXT_LEN` (`src/terminal/todo.rs:16`).
+- Consumes: `runtime_todo_add` / `runtime_todo_update` (Task 3); `TerminalState::border_label(bool)` (`src/terminal/state.rs:1996`); `Workspace::public_pane_number(PaneId) -> Option<usize>` (`src/workspace.rs:1049`); `TileLayout::pane_ids(&self) -> Vec<PaneId>` (`src/layout.rs:310`) — reached as `tab.layout.pane_ids()`, because `Tab::layout` is `pub layout: TileLayout` (`src/workspace/tab.rs:43`); there is no type named `Layout` in the crate; `render_modal_shell` / `render_modal_header` / `render_action_button` / `action_button_row_rects` (`src/ui/widgets.rs`); `AppState::onboarding_modal_inner(u16, u16)` (`src/app/input/overlays.rs:356`); `MAX_TODO_TEXT_LEN` (`src/terminal/todo.rs:16`).
 - Produces, relied on by Task 5:
   - `pub enum PaneTodoEditLink { Keep, Clear, Set(PaneId) }`
   - `pub struct PaneTodoEditState { pub pane_id: PaneId, pub todo_id: Option<u64>, pub text: String, pub priority: TodoPriority, pub link: PaneTodoEditLink }`
@@ -3149,8 +3202,7 @@ This task closes OpenSpec task 2.3 — the one scenario Phase 1 deliberately def
 - Modify: `src/app/input/modal.rs` (`confirm_close_accept_via_api` branch, `confirm_close_cancel` clears the token)
 - Modify: `src/ui/dialogs.rs` (`confirm_close_overlay_text` pane branch)
 - Modify: `docs/next/CHANGELOG.md`
-- Modify: `docs/next/website/src/content/docs/keyboard.mdx` + `ja/` + `zh-cn/`
-- Modify: `docs/next/website/src/content/docs/configuration.mdx` + `ja/` + `zh-cn/`
+- Modify: `docs/next/website/src/content/docs/keyboard.mdx` (English only — see Step 6 for why the `ja/` and `zh-cn/` copies are left alone)
 - Modify: `docs/next/website/src/data/config-reference.json`
 - Modify: `openspec/changes/pane-todos/tasks.md`
 
@@ -3502,6 +3554,8 @@ pub(super) fn confirm_close_cancel(state: &mut AppState) {
 }
 ```
 
+The `#[cfg(test)]` accept twin `confirm_close_accept` (`:740`) is deliberately **not** changed — see the sharp edge at the end of this plan for why, and do not "fix" it on the way past.
+
 **3e. `src/ui/dialogs.rs`** — at the top of `confirm_close_overlay_text` (`:717`):
 
 ```rust
@@ -3548,20 +3602,28 @@ git commit -m "feat: confirm closing a pane that still has outstanding todos"
 - Pane todos are now visible and editable in the TUI. A split pane with todos shows a `▾ N` indicator at the far right of its top border carrying its outstanding count — a bare `▾` once everything is done, and nothing at all for a pane with no todos — coloured by the highest outstanding priority. Clicking it or pressing `keys.open_pane_todos` (`prefix+ctrl+t`) opens a panel hanging off that pane listing its todos not-done first, then priority, then creation order. `Up`/`Down` or `j`/`k` move the selection, `Enter` or a row click opens the todo for editing, `space` toggles done, `d` removes the selected todo, `c` (or the footer button) clears the done ones, `g` or a click on the `→` chip jumps to a todo's linked pane, and `Esc`/`q` closes. Links whose target is gone keep their label, render dimmed, and are inert. The edit modal changes text, cycles priority with `Tab`, and cycles the link with `Ctrl+L`, with explicit save and cancel; `keys.add_pane_todo` (unbound by default) opens it on a new todo for the focused pane. Closing a pane that still has outstanding todos now asks for confirmation first — over the socket API too, where `pane.close` answers `confirmation_required`. New options: `ui.show_pane_todo_indicator` (default `true`) and `ui.pane_todo_color`.
 ```
 
-`docs/next/website/src/content/docs/keyboard.mdx` — add two rows to the panes table and a paragraph after the notification center one, then mirror the same edit into `ja/keyboard.mdx` and `zh-cn/keyboard.mdx` (translate the prose; keep the key names verbatim). `release-docs-check` enforces translation parity, which is why this **extends** existing pages instead of adding an `.mdx`.
+`docs/next/website/src/content/docs/keyboard.mdx` — two rows in the **Panes** table (header at `:36`, rows `:38-48`), directly after the "Close pane" row (`:39`) so the pane-scoped actions stay together and above the layout/copy-mode rows:
 
 ```markdown
 | Pane todos | `prefix+ctrl+t` |
 | Add pane todo | unset |
 ```
 
+and one paragraph immediately after the notification-center paragraph (`:73`) and before *"The full keymap and the binding syntax live in…"* (`:75`), so the two panel explanations sit together:
+
 ```markdown
 The pane todo panel (`prefix+ctrl+t`, or click the `▾ N` indicator at the far right of a split pane's top border) lists that pane's todos, not-done first, then by priority, then in creation order. `Up`/`Down` or `j`/`k` move the selection, `Enter` (or a row click) opens the todo for editing, `space` toggles done, `d` removes it, `c` clears the done ones, `g` (or a click on the `→` chip) jumps to the todo's linked pane, and `Esc`/`q` closes. A link whose target pane is gone keeps its label but is dimmed and inert. In the edit modal, `Tab` cycles priority, `Ctrl+L` cycles the link target, `Enter` saves, and `Esc` cancels back to the panel. `keys.add_pane_todo` is unbound by default; bind it to compose a new todo for the focused pane without opening the panel. Panes with no todos show no indicator, and a pane with no top border (a single-pane tab, or `ui.pane_borders = false`) is reached through the keybinding.
 ```
 
-`docs/next/website/src/content/docs/configuration.mdx` (+ `ja/`, `zh-cn/`) — document `ui.show_pane_todo_indicator` and `ui.pane_todo_color` next to the other `pane_*` UI options.
+**Do not touch `ja/keyboard.mdx` or `zh-cn/keyboard.mdx`, and do not touch `configuration.mdx` at all.** Both are deliberate, and both were checked against the tooling rather than assumed:
 
-`docs/next/website/src/data/config-reference.json` — four rows, or `python3 scripts/config_reference_check.py` fails (release-blocking, run by `just release-docs-check`, not by `just check`):
+- Translation parity is *file set + heading outline*, nothing more: `scripts/docs_translation_parity.py` compares the `*.mdx` names per locale and the list of heading levels (`heading_outline`), and `just release-docs-check` runs it over both `docs/next/website/src/content/docs` and `website/src/content/docs`. Adding table rows and a paragraph under existing headings changes no heading, so the check stays green. The localized keyboard pages already omit the whole notification-center row and paragraph, so half-translating one new feature into them would make them *less* consistent, not more. (The "extend existing pages" rule in the constraints still holds for the opposite reason: a **new** `.mdx` would need `ja/` and `zh-cn/` files with an identical heading outline, which is real work.)
+- `configuration.mdx` does not enumerate `ui.pane_*` keys. Its "UI and sidebar" section (`:255-257`) is one paragraph that says *"Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings."* — `ui.pane_borders`, `ui.pane_title_active_color`, and the rest live only in `config-reference.json`. The two new `ui.*` options follow that pattern, so the reference rows below are their documentation, and there is no configuration.mdx prose to translate.
+
+`docs/next/website/src/data/config-reference.json` — four rows, or `python3 scripts/config_reference_check.py` fails (release-blocking, run by `just release-docs-check`, not by `just check`). The file is **not** a flat array: it is `{"sections": [{"id", "title", "keys": [...]}, …]}`, and each row goes in the `keys` array of its section. `reference_entries` flattens every section, so placement does not affect the check — it affects where the row renders on `/docs/config-reference/`, so put each one where its neighbours are:
+
+- `ui.show_pane_todo_indicator` and `ui.pane_todo_color` → the `"id": "ui"` section ("UI and sidebar"), after the existing `ui.pane_title_inactive_color` row, with the other `ui.pane_*` entries.
+- `keys.open_pane_todos` and `keys.add_pane_todo` → the `"id": "keys"` section ("Keybindings"), after the existing `keys.close_pane` row.
 
 ```json
 {
@@ -3649,10 +3711,10 @@ git commit -m "docs: document the pane todo indicator, panel, and keybindings"
 | `fn render_pane_border_titles(&AppState, &Workspace, &[PaneInfo], &mut Frame)` | `src/ui/panes.rs:624` (private) |
 | `fn pane_border_title(&str, u16, bool) -> Option<String>` | `src/ui/panes.rs:26` |
 | `fn render_panes(...)` resolves `ws` from `app.active` | `src/ui/panes.rs:304-309` |
-| `pub struct PaneInfo { id, rect, inner_rect, scrollbar_rect, borders, is_focused }` | `src/layout.rs:32` |
+| `pub struct PaneInfo { id, rect, inner_rect, scrollbar_rect, borders, is_focused }` | `src/layout.rs:34` |
 | `Workspace::pane_state(PaneId) -> Option<&PaneState>` | `src/workspace.rs:1175` |
 | `Workspace::public_pane_number(PaneId) -> Option<usize>` | `src/workspace.rs:1049` |
-| `Layout::pane_ids() -> Vec<PaneId>` | `src/layout.rs:310` |
+| `TileLayout::pane_ids(&self) -> Vec<PaneId>` (the struct is `TileLayout`, `src/layout.rs:106`; `Tab::layout` is `pub layout: TileLayout`, `src/workspace/tab.rs:43`) | `src/layout.rs:310` |
 | `TerminalState::border_label(bool) -> Option<String>` | `src/terminal/state.rs:1996` |
 | `TerminalState::{todos, todos_in_display_order, outstanding_todo_count, highest_outstanding_todo_priority}` | `src/terminal/todo.rs:113/191/206/211` |
 | `AppState::pane_title_color(bool) -> Color` | `src/app/state.rs:1959` |
@@ -3698,5 +3760,6 @@ git commit -m "docs: document the pane todo indicator, panel, and keybindings"
 **Known sharp edges, called out rather than hidden.**
 - If a pane close would *both* close a worktree group and discard outstanding todos, the worktree prompt wins and accepting it closes the workspace without a second todo prompt. That mirrors the existing precedence, and the user has already been warned about the larger destruction.
 - `confirm_close_cancel` returns to `Mode::Navigate` even when a pane was focused. That is pre-existing behaviour, left alone.
+- Only the `via_api` accept path learns about `confirm_close_pane`. Its `#[cfg(test)]` pure-state twin `confirm_close_accept` (`src/app/input/modal.rs:740`) still calls `state.close_selected_workspace()` unconditionally, and the `#[cfg(test)]` `handle_confirm_close_key` (`:754`) routes Enter there, so a *test* that answers a pending pane confirmation through that twin closes the whole workspace instead of the pane. Nothing in production reaches it — the real key path is `handle_confirm_close_key_via_api` (`:1215`) → `confirm_close_accept_via_api` (`:1169`) — and Task 5's tests deliberately use `App::confirm_close_accept_via_api` and `AppState::close_pane` instead. Teaching the twin about the token would mean duplicating `public_pane_id` + `runtime_pane_close` in pure state, which is exactly the second implementation this plan avoids elsewhere.
 - Clicking inside the edit modal but off a control cancels it, matching `render_rename_overlay`'s `unwrap_or(ModalAction::Cancel)`. Parity with the existing modal was chosen over a local fix.
 - `pane_todos` / `pane_todo_edit` / `confirm_close_pane` get empty-state invariants but **not** live-pane assertions: all three resolve their pane on every read and go quiet when it is gone. `rename_pane_target` is asserted because a save consumes it. `App::close_pane` additionally calls `forget_pane_todo_ui` so the common single-pane close cleans up eagerly.
