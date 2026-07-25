@@ -21,6 +21,7 @@ mod sidebar;
 mod status;
 mod tab_surface;
 mod tabs;
+mod todo_panel;
 // pub(crate): the CLI reuses text helpers (e.g. relative_time_label).
 pub(crate) mod text;
 mod widgets;
@@ -74,6 +75,13 @@ pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
 };
 use self::tabs::render_tab_bar;
+use self::todo_panel::render_pane_todo_panel;
+pub(crate) use self::todo_panel::{pane_todo_panel_button_rects, PaneTodoPanelButtonRects};
+// The chip's cells have exactly one definition, so a click can never land on
+// cells the renderer did not draw. Until that hit-test lands (phase-2 task 3)
+// the bin target reaches the chip only through the renderer inside the module.
+#[allow(unused_imports)]
+pub(crate) use self::todo_panel::pane_todo_link_chip;
 pub(crate) use self::{
     dialogs::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
@@ -562,6 +570,7 @@ pub fn render_with_runtime_registry(
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::NotificationCenter => render_notification_center(app, frame),
+        Mode::PaneTodos => render_pane_todo_panel(app, frame),
         Mode::Terminal => {}
     }
 }

@@ -860,6 +860,7 @@ pub enum Mode {
     KeybindHelp,
     Navigator,
     NotificationCenter,
+    PaneTodos,
 }
 
 impl Mode {
@@ -892,6 +893,7 @@ impl Mode {
                 | Mode::GlobalMenu
                 | Mode::KeybindHelp
                 | Mode::NotificationCenter
+                | Mode::PaneTodos
         )
     }
 
@@ -1536,6 +1538,27 @@ pub struct NotificationCenterState {
     pub hovered_button: Option<NotificationCenterButton>,
 }
 
+/// Footer buttons of the pane todo panel, in render order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneTodoPanelButton {
+    Toggle,
+    ClearDone,
+    Close,
+}
+
+/// TUI-only state for the pane todo panel. The todos themselves are
+/// server-owned on `TerminalState`; only the cursor and the hover live here,
+/// and neither is persisted or exposed over the API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneTodoPanelState {
+    /// Pane whose todos the panel is showing.
+    pub pane_id: PaneId,
+    /// Index into the pane's presentation-order list.
+    pub selected: usize,
+    /// Which footer button the pointer is over, if any.
+    pub hovered_button: Option<PaneTodoPanelButton>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingAgentNotification {
     pub pane_id: PaneId,
@@ -1688,6 +1711,8 @@ pub struct AppState {
     pub notification_log: NotificationLog,
     /// TUI-only dropdown panel state; `Some` while `Mode::NotificationCenter`.
     pub notification_center: Option<NotificationCenterState>,
+    /// TUI-only panel state; `Some` while `Mode::PaneTodos`.
+    pub pane_todos: Option<PaneTodoPanelState>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
     pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
@@ -1950,6 +1975,84 @@ impl AppState {
         self.notification_log
             .entries_newest_first()
             .nth(center.selected)
+    }
+
+    /// Open the todo panel for a pane. The selection starts at the top of the
+    /// presentation order, which is the most urgent outstanding todo.
+    // Opened by the indicator click and the `keys.open_pane_todos` action, both
+    // of which land in phase-2 task 3; until then only tests reach it.
+    #[allow(dead_code)]
+    pub(crate) fn open_pane_todos(&mut self, pane_id: PaneId) {
+        self.pane_todos = Some(PaneTodoPanelState {
+            pane_id,
+            selected: 0,
+            hovered_button: None,
+        });
+        self.mode = Mode::PaneTodos;
+    }
+
+    /// Closes the panel only. Every caller pairs this with `leave_modal` or an
+    /// explicit mode, exactly like `close_notification_center`.
+    // Called from the panel's close/escape handling in phase-2 task 3.
+    #[allow(dead_code)]
+    pub(crate) fn close_pane_todos(&mut self) {
+        self.pane_todos = None;
+    }
+
+    /// A pane's todos in presentation order. Empty when the pane or its
+    /// terminal is gone, which is what lets the panel self-heal instead of
+    /// holding a stale target.
+    pub(crate) fn pane_todos_in_display_order(
+        &self,
+        pane_id: PaneId,
+    ) -> Vec<&crate::terminal::todo::PaneTodo> {
+        self.pane_terminal(pane_id)
+            .map(|terminal| terminal.todos_in_display_order())
+            .unwrap_or_default()
+    }
+
+    /// Move (or, with `0`, re-clamp) the panel selection.
+    // Driven by the panel's key and mouse handling in phase-2 task 3.
+    #[allow(dead_code)]
+    pub(crate) fn pane_todos_move_selection(&mut self, delta: isize) {
+        let Some(pane_id) = self.pane_todos.as_ref().map(|panel| panel.pane_id) else {
+            return;
+        };
+        let len = self.pane_todos_in_display_order(pane_id).len();
+        let Some(panel) = self.pane_todos.as_mut() else {
+            return;
+        };
+        if len == 0 {
+            panel.selected = 0;
+            return;
+        }
+        panel.selected = panel.selected.saturating_add_signed(delta).min(len - 1);
+    }
+
+    /// The selected todo, cloned so callers can mutate through the API without
+    /// holding a borrow of the store.
+    // The mutation funnel that reads it lands in phase-2 task 3.
+    #[allow(dead_code)]
+    pub(crate) fn selected_pane_todo(&self) -> Option<crate::terminal::todo::PaneTodo> {
+        let panel = self.pane_todos.as_ref()?;
+        self.pane_todos_in_display_order(panel.pane_id)
+            .get(panel.selected)
+            .map(|todo| (*todo).clone())
+    }
+
+    /// Resolve a todo's link. `None` is a dead link: either the stored target
+    /// was already unresolvable at restore, or the pane has since closed.
+    /// One definition, so the dimmed chip and the inert click agree.
+    pub(crate) fn pane_todo_link_target(
+        &self,
+        todo: &crate::terminal::todo::PaneTodo,
+    ) -> Option<(usize, PaneId)> {
+        let pane_id = todo.link.as_ref()?.pane?;
+        let ws_idx = self
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.pane_state(pane_id).is_some())?;
+        Some((ws_idx, pane_id))
     }
 
     pub fn agent_border_labels_enabled(&self) -> bool {
@@ -2280,6 +2383,7 @@ impl AppState {
             toast: None,
             notification_log: NotificationLog::default(),
             notification_center: None,
+            pane_todos: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -2474,6 +2578,15 @@ impl AppState {
             assert!(
                 self.rename_pane_target.is_none(),
                 "empty app state must not keep rename pane target"
+            );
+            // Deliberately only the empty-state assertion: with panes around,
+            // the panel resolves its pane on every read and renders nothing
+            // once it is gone, so asserting liveness would encode a stronger
+            // contract than the code keeps. `rename_pane_target` is asserted
+            // more strongly because a save consumes it.
+            assert!(
+                self.pane_todos.is_none(),
+                "empty app state must not keep a pane todo panel"
             );
             assert!(
                 self.selection.is_none(),
@@ -2778,6 +2891,7 @@ mod tests {
             Mode::KeybindHelp,
             Mode::Navigator,
             Mode::NotificationCenter,
+            Mode::PaneTodos,
         ] {
             assert!(
                 !mode.honors_key_repeat(),
