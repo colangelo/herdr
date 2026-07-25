@@ -1582,6 +1582,9 @@ pub struct PaneTodoEditState {
     pub text: String,
     pub priority: crate::terminal::todo::TodoPriority,
     pub link: PaneTodoEditLink,
+    /// Only meaningful while editing an existing todo; a todo being composed
+    /// is never already done, and `todo.add` has no `done` to carry it.
+    pub done: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2120,6 +2123,7 @@ impl AppState {
             text: todo.text,
             priority: todo.priority,
             link: PaneTodoEditLink::Keep,
+            done: todo.done,
         });
         self.mode = Mode::PaneTodoEdit;
     }
@@ -2132,6 +2136,7 @@ impl AppState {
             text: String::new(),
             priority: crate::terminal::todo::TodoPriority::default(),
             link: PaneTodoEditLink::Keep,
+            done: false,
         });
         self.mode = Mode::PaneTodoEdit;
     }
@@ -2168,6 +2173,19 @@ impl AppState {
                 (candidate, label)
             })
             .collect()
+    }
+
+    /// Toggle the done state of the todo being edited. Inert while composing a
+    /// new todo: `todo.add` carries no `done`, so there would be nothing to
+    /// save it to.
+    pub(crate) fn toggle_pane_todo_edit_done(&mut self) {
+        let Some(edit) = self.pane_todo_edit.as_mut() else {
+            return;
+        };
+        if edit.todo_id.is_none() {
+            return;
+        }
+        edit.done = !edit.done;
     }
 
     pub(crate) fn cycle_pane_todo_edit_priority(&mut self) {
