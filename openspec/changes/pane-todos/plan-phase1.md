@@ -448,7 +448,7 @@ impl TerminalState {
         before - self.todos.len()
     }
 
-    /// Presentation order: priority descending, not-done before done, then
+    /// Presentation order: not-done before done, then priority descending, then
     /// creation order. Stored order stays insertion order.
     pub fn todos_in_display_order(&self) -> Vec<&PaneTodo> {
         let mut ordered: Vec<&PaneTodo> = self.todos.iter().collect();
