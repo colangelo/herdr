@@ -216,6 +216,35 @@ Also push master to the internal mirror: `git push internal master`.
 | Build failed mid-matrix after tag push | Fix, then re-run the workflow for the same tag (`gh run rerun <id>`). If the fix needs a commit, cut `-ac.2`. |
 | `brew install` gets old version | `brew update` first; formula lives in colangelo/homebrew-tap Formula/herdr.rb. |
 
+## Versioned release docs are upstream-only (decided 2026-07-25)
+
+Upstream v0.7.5+ ships a versioned docs system: `docs/versions/` snapshots
+plus `website/scripts/docs-versions.mjs`, a `Website` workflow, and a
+`update-latest-json` release job that snapshots the tagged `docs/next`,
+promotes it to stable, and deploys it.
+
+**The fork does not adopt it.** `docs-versions.mjs check` asserts
+`docs/versions/manifest.json`.`current` == `website/latest.json`.`version`.
+Upstream's manifest tracks their herdr.dev releases (0.7.5), while the fork's
+`latest.json` is deliberately fork-scoped to its own `-ac` releases (0.7.1) —
+so the two are permanently out of step and the check always fails here.
+
+Consequences, all intentional — do NOT "fix" them by re-syncing the manifest:
+
+- `release-docs-check` omits the `docs-versions.mjs check` line (see the
+  comment in `justfile`). `just website-build`, which the same recipe runs,
+  still renders and validates every version snapshot, so a genuinely broken
+  docs tree is still caught.
+- The `Website` workflow is **disabled** on colangelo/herdr (`gh workflow
+  disable Website`); it runs that same check on every push touching
+  `website/**` or `docs/versions/**` and would sit red forever.
+- Upstream's `update-latest-json` job stays removed; the fork's own
+  fork-scoped `update-latest-json` publishes `website/latest.json`.
+
+The fork distributes through GitHub Releases + colangelo/homebrew-tap and
+publishes no website, so versioned docs buy it nothing. Revisit only if the
+fork starts publishing its own docs site.
+
 ## Known behavior (not bugs)
 
 - The fork binary's self-update checker compares against upstream's herdr.dev
