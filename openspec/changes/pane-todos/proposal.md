@@ -23,7 +23,7 @@ priority, and outlive any single agent occupancy of the pane.
 - **Pane-scoped todo list in server state**: each pane carries an ordered list
   of todos — monotonic per-pane `id`, text, `done` flag, priority
   (high/normal/low), an optional link to another pane, and created/updated
-  timestamps. The list lives on `PaneState` as pure data, testable through
+  timestamps. The list lives on `TerminalState` as pure data, testable through
   `AppState::test_new()` without PTYs. Bounded at 50 todos per pane and 500
   characters per todo, enforced server-side with explicit errors rather than
   silent truncation, because agents write these unattended.
