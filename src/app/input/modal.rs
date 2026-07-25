@@ -2775,6 +2775,17 @@ mod tests {
             crate::terminal::todo::TodoPriority::Normal,
         )]);
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        // The link has to point somewhere else: linking a todo to its own pane
+        // cannot tell "focus moved" apart from "focus never changed". Split,
+        // then focus back to the pane holding the todo.
+        let sibling = app.state.workspaces[0].test_split(ratatui::layout::Direction::Vertical);
+        app.state.ensure_test_terminals();
+        app.state.workspaces[0].tabs[0].layout.focus_pane(pane_id);
+        assert_eq!(
+            app.state.workspaces[0].focused_pane_id(),
+            Some(pane_id),
+            "the jump has to start away from the linked pane"
+        );
         let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
             .attached_terminal_id
             .clone();
@@ -2787,7 +2798,7 @@ mod tests {
                 todo_id,
                 crate::terminal::todo::TodoUpdate {
                     link: Some(Some(crate::terminal::todo::TodoLink {
-                        pane: Some(pane_id),
+                        pane: Some(sibling),
                         label: "infra".into(),
                     })),
                     ..Default::default()
@@ -2798,6 +2809,11 @@ mod tests {
 
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('g')));
 
+        assert_eq!(
+            app.state.workspaces[0].focused_pane_id(),
+            Some(sibling),
+            "following the link focuses the linked pane"
+        );
         assert!(app.state.pane_todos.is_none(), "the panel closes on a jump");
         assert_eq!(app.state.mode, Mode::Terminal);
     }

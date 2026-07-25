@@ -204,13 +204,17 @@ impl AppState {
         // `find_border_at` treats that row as a split-drag hitbox. Answering
         // here returns before the `Down(Left)` arm ever reaches the drag, so
         // the glyph stays clickable. `Mode::PaneTodos` is in the allowlist so
-        // the glyph toggles the panel shut again. The hit-test resolves every
-        // pane's terminal, so it is only paid on a click, never on motion.
+        // the glyph toggles the panel shut again, but only outside the panel:
+        // the panel is drawn over the pane borders, so a cell it covers
+        // belongs to the panel and not to the indicator underneath it. The
+        // hit-test resolves every pane's terminal, so it is only paid on a
+        // click, never on motion.
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
             && matches!(
                 self.mode,
                 Mode::Terminal | Mode::Navigate | Mode::Resize | Mode::PaneTodos
             )
+            && !self.pane_todo_panel_covers(mouse.column, mouse.row)
         {
             if let Some(pane_id) = self.pane_todo_indicator_at(mouse.column, mouse.row) {
                 if self.mode == Mode::PaneTodos {
@@ -1619,6 +1623,14 @@ impl AppState {
         let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
         let y = anchor.y.saturating_add(1).min(bottom_y).max(screen.y);
         Some(Rect::new(x, y, panel_w, panel_h))
+    }
+
+    /// Whether an open panel is drawn over this cell. `render_pane_todo_panel`
+    /// runs after the tab surface, so the panel owns every cell it covers even
+    /// when a pane border - and its todo indicator - sits underneath.
+    fn pane_todo_panel_covers(&self, col: u16, row: u16) -> bool {
+        self.pane_todo_panel_rect()
+            .is_some_and(|rect| rect_contains(rect, col, row))
     }
 
     /// Full inner rect (panel minus borders), covering list and footer.
@@ -4681,36 +4693,195 @@ mod tests {
         }
     }
 
+    fn add_pane_todo(app: &mut crate::app::App, pane_id: crate::layout::PaneId, text: &str) {
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(text, crate::terminal::todo::TodoPriority::Normal, None, 100)
+            .expect("todo should be added");
+    }
+
+    /// Two stacked panes laid out by `compute_view`, both carrying todos. The
+    /// lower pane's top border is the interesting row: it is a split-drag
+    /// hitbox, it holds that pane's indicator, and the upper pane's panel is
+    /// tall enough to be drawn across it.
+    fn app_for_stacked_pane_todos() -> (
+        crate::app::App,
+        crate::layout::PaneId,
+        crate::layout::PaneId,
+    ) {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("todos")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.workspaces[0].test_split(Direction::Vertical);
+        app.state.ensure_test_terminals();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let mut infos = app.state.view.pane_infos.clone();
+        assert_eq!(infos.len(), 2, "the split must lay out two panes");
+        infos.sort_by_key(|info| info.rect.y);
+        let (upper, lower) = (infos[0].id, infos[1].id);
+        for idx in 0..9 {
+            add_pane_todo(&mut app, upper, &format!("todo {idx}"));
+        }
+        add_pane_todo(&mut app, lower, "down here");
+        (app, upper, lower)
+    }
+
+    fn pane_indicator(app: &crate::app::App, pane_id: crate::layout::PaneId) -> Rect {
+        let info = app
+            .state
+            .pane_info_by_id(pane_id)
+            .cloned()
+            .expect("the pane should be laid out");
+        crate::ui::pane_todo_indicator(&app.state, &info)
+            .expect("a pane with todos draws an indicator")
+            .rect
+    }
+
     #[test]
     fn a_border_click_beside_the_indicator_still_starts_a_split_drag_or_focus() {
-        let mut app = app_for_pane_todo_indicator();
-        let indicator = crate::ui::pane_todo_indicator(&app.state, &app.state.view.pane_infos[0])
-            .expect("indicator should exist");
+        let (mut app, _upper, lower) = app_for_stacked_pane_todos();
+        let indicator = pane_indicator(&app, lower);
+        let beside = indicator.x - 1;
+        assert!(
+            app.state.find_border_at(beside, indicator.y).is_some(),
+            "precondition: the cell beside the indicator is a split-drag hitbox"
+        );
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                indicator.rect.x - 1,
-                indicator.rect.y,
+                beside,
+                indicator.y,
             ),
         );
 
+        assert!(
+            matches!(
+                app.state.drag.as_ref().map(|drag| &drag.target),
+                Some(DragTarget::PaneSplit { .. })
+            ),
+            "the indicator's early return must leave the split drag alone"
+        );
         assert!(
             app.state.pane_todos.is_none(),
             "only the drawn cells open the panel"
         );
     }
 
+    /// Regression: the panel is drawn after the tab surface, so it covers pane
+    /// borders and the indicators sitting on them. A covered cell must act on
+    /// the panel row drawn there, not on the indicator underneath it.
+    #[test]
+    fn a_panel_drawn_over_an_indicator_keeps_the_click() {
+        let (mut app, upper, lower) = app_for_stacked_pane_todos();
+        let indicator = pane_indicator(&app, lower);
+        app.state.open_pane_todos(upper);
+        let (list, _) = app
+            .state
+            .pane_todo_panel_list_window()
+            .expect("panel list window should exist");
+        assert!(
+            rect_contains(list, indicator.x, indicator.y),
+            "precondition: panel list {list:?} must cover indicator {indicator:?}"
+        );
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                indicator.x,
+                indicator.y,
+            ),
+        );
+
+        assert!(
+            matches!(action, Some(MouseAction::PaneTodo(PaneTodoAction::Edit))),
+            "the drawn panel row wins over the covered indicator"
+        );
+        assert_eq!(
+            app.state.pane_todos.as_ref().map(|panel| panel.pane_id),
+            Some(upper),
+            "a covered indicator must not dismiss the panel"
+        );
+    }
+
+    /// The other half of the same rule: an indicator the panel does not cover
+    /// keeps toggling the panel shut.
+    #[test]
+    fn an_indicator_outside_the_panel_still_toggles_it_shut() {
+        let (mut app, upper, _lower) = app_for_stacked_pane_todos();
+        let indicator = pane_indicator(&app, upper);
+        app.state.open_pane_todos(upper);
+        assert!(
+            !app.state.pane_todo_panel_covers(indicator.x, indicator.y),
+            "precondition: the panel hangs below the border it was opened from"
+        );
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                indicator.x,
+                indicator.y,
+            ),
+        );
+
+        assert!(
+            app.state.pane_todos.is_none(),
+            "an uncovered indicator closes the panel it opened"
+        );
+    }
+
+    /// Give the pane's only todo a link, so the row draws a chip.
+    fn link_pane_todo(app: &mut crate::app::App, pane_id: crate::layout::PaneId, label: &str) {
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        let todo_id = terminal.todos()[0].id;
+        terminal
+            .update_todo(
+                todo_id,
+                crate::terminal::todo::TodoUpdate {
+                    link: Some(Some(crate::terminal::todo::TodoLink {
+                        pane: Some(pane_id),
+                        label: label.into(),
+                    })),
+                    ..Default::default()
+                },
+                200,
+            )
+            .expect("todo should be updated");
+    }
+
     #[test]
     fn clicking_a_panel_row_opens_the_edit_view_and_the_chip_follows_the_link() {
         let mut app = app_for_pane_todo_indicator();
         let pane_id = app.state.view.pane_infos[0].id;
+        link_pane_todo(&mut app, pane_id, "infra");
         app.state.open_pane_todos(pane_id);
         let (list, _) = app
             .state
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
+        let (chip, _) =
+            crate::ui::pane_todo_link_chip(Rect::new(list.x, list.y, list.width, 1), "infra")
+                .expect("a linked row draws a chip");
+        assert!(
+            !rect_contains(chip, list.x + 4, list.y),
+            "the body column must really miss the chip {chip:?}"
+        );
 
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
@@ -4725,6 +4896,24 @@ mod tests {
             matches!(action, Some(MouseAction::PaneTodo(PaneTodoAction::Edit))),
             "a row click edits, mirroring Enter"
         );
+
+        for col in chip.x..chip.x + chip.width {
+            let action = app.state.handle_mouse(
+                &mut app.terminal_runtimes,
+                mouse(
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                    col,
+                    list.y,
+                ),
+            );
+            assert!(
+                matches!(
+                    action,
+                    Some(MouseAction::PaneTodo(PaneTodoAction::FollowLink))
+                ),
+                "column {col} of the drawn chip must follow the link"
+            );
+        }
     }
 
     #[test]
