@@ -1,8 +1,8 @@
-Build order is phased. **Phase 1** is groups 1–5 plus 6.1–6.3: server state,
-persistence, API, CLI, indicator, and a read-only panel. That is independently
-useful and independently testable — an agent can record its next steps and you
-can see and follow them. **Phase 2** is 6.4–6.6: in-TUI editing and the
-bindings. Group 7 closes out whichever phase is landing.
+Build order was phased. **Phase 1** (`plan-phase1.md`) shipped groups 1-4: the
+todo store, persistence, the socket API, and the CLI — a complete headless
+feature. **Phase 2** (`plan-phase2.md`) shipped groups 5, 6, and 2.3: the pane
+indicator, the panel, the edit modal, the keybindings, and the pane-close
+confirmation. Group 7 is the docs and final validation.
 
 ## 1. Todo store in server state
 
@@ -15,7 +15,7 @@ bindings. Group 7 closes out whichever phase is landing.
 
 - [x] 2.1 Add `PaneTodoSnapshot` and the `todos` field to `PaneSnapshot` (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`), storing link targets as old raw pane ids
 - [x] 2.2 Remap todo link targets through `id_map` in `src/persist/restore.rs`; unresolvable targets become dead links that keep their label
-- [ ] 2.3 Confirm pane close when outstanding todos remain, reusing the existing confirm modal (deferred to phase 2 with the rest of the UI work)
+- [x] 2.3 Confirm pane close when outstanding todos remain, reusing the existing confirm modal (deferred to phase 2 with the rest of the UI work)
 - [x] 2.4 Tests: snapshot round-trip with and without todos, a session file predating the field, link remap, and the unresolvable-link path
 
 ## 3. Socket API, event, protocol
@@ -31,26 +31,26 @@ bindings. Group 7 closes out whichever phase is landing.
 - [x] 4.1 Add `src/cli/todo.rs` with the add/list/done/undone/edit/rm/clear verbs, registered in `src/cli/spec.rs` and `src/main.rs`
 - [x] 4.2 Reuse the pane target grammar (`--pane`, `--current`, `HERDR_PANE_ID` default) from `src/cli/pane.rs`; add `--priority`, `--link`, `--unlink`, `--all`, `--json`
 - [x] 4.3 Tests for target resolution and flag parsing, mirroring the existing `parse_pane_current_args` tests
-- [ ] 4.4 Resolve `--link` targets by unique live agent name as well as public pane id, erroring on ambiguous names (deferred out of phase 1: phase 1 resolves links with `App::parse_pane_id`, so every agent name — unique or ambiguous — returns `todo_link_unresolved`; see `design.md`)
+- [x] 4.4 Resolve `--link` targets by unique live agent name as well as public pane id, erroring on ambiguous names (deferred out of phase 1: phase 1 resolves links with `App::parse_pane_id`, so every agent name — unique or ambiguous — returns `todo_link_unresolved`; see `design.md`)
 
 ## 5. Pane indicator
 
-- [ ] 5.1 Add `pane_todo_indicator_rect()` and render the `▾N` glyph at the far right of the pane top border in `src/ui/panes.rs`, reserving its cells before title layout
-- [ ] 5.2 Color by highest outstanding priority; add `ui.show_pane_todo_indicator` and `ui.pane_todo_color` to `src/config/model.rs` and the config reference
-- [ ] 5.3 Hit-test the same rect in `src/app/input/mouse.rs`
-- [ ] 5.4 Tests: drawn cells equal `pane_todo_indicator_rect`, hidden when empty, count counts only outstanding todos, narrow-pane fallback
+- [x] 5.1 Add `pane_todo_indicator_rect()` and render the `▾N` glyph at the far right of the pane top border in `src/ui/panes.rs`, reserving its cells before title layout
+- [x] 5.2 Color by highest outstanding priority; add `ui.show_pane_todo_indicator` and `ui.pane_todo_color` to `src/config/model.rs` and the config reference
+- [x] 5.3 Hit-test the same rect in `src/app/input/mouse.rs`
+- [x] 5.4 Tests: drawn cells equal `pane_todo_indicator_rect`, hidden when empty, count counts only outstanding todos, narrow-pane fallback
 
 ## 6. Panel and edit modal
 
-- [ ] 6.1 Add `Mode::PaneTodos` and `src/ui/todo_panel.rs` rendering rows (priority glyph, text, link chip), done rows dimmed and struck, dead links inert
-- [ ] 6.2 Panel input in `src/app/input/modal.rs`: selection, toggle done, remove, clear done, open edit, follow link, close
-- [ ] 6.3 Follow-link jumps via `focus_pane_in_workspace`; clicking the link chip does the same
-- [ ] 6.4 Edit modal on the existing dialog structure: text input, `Tab` priority cycle, link set/clear, save/cancel
-- [ ] 6.5 Add `keys.open_pane_todos` (default `prefix+ctrl+t`) and `keys.add_pane_todo` (unbound) with `help_entry` rows in `src/ui/keybind_help.rs`
-- [ ] 6.6 Tests: panel row rendering and ordering, key handling, dead-link inertness, help panel lists both actions
+- [x] 6.1 Add `Mode::PaneTodos` and `src/ui/todo_panel.rs` rendering rows (priority glyph, text, link chip), done rows dimmed and struck, dead links inert
+- [x] 6.2 Panel input in `src/app/input/modal.rs`: selection, toggle done, remove, clear done, open edit, follow link, close
+- [x] 6.3 Follow-link jumps via `focus_pane_in_workspace`; clicking the link chip does the same
+- [x] 6.4 Edit modal on the existing dialog structure: text input, `Tab` priority cycle, link set/clear, save/cancel
+- [x] 6.5 Add `keys.open_pane_todos` (default `prefix+ctrl+t`) and `keys.add_pane_todo` (unbound) with `help_entry` rows in `src/ui/keybind_help.rs`
+- [x] 6.6 Tests: panel row rendering and ordering, key handling, dead-link inertness, help panel lists both actions
 
 ## 7. Docs and validation
 
-- [ ] 7.1 Stage the changelog entry and config-reference updates under `docs/next/`, extending existing pages rather than adding new `.mdx` that would need ja/zh-cn translations
-- [ ] 7.2 Document the `herdr todo` verbs and the `todo.*` socket methods on the existing CLI and socket API pages
-- [ ] 7.3 Run `just check` and dogfood the feature in a live herdr build before marking the change complete
+- [x] 7.1 Stage the changelog entry and config-reference updates under `docs/next/`, extending existing pages rather than adding new `.mdx` that would need ja/zh-cn translations
+- [x] 7.2 Document the `herdr todo` verbs and the `todo.*` socket methods on the existing CLI and socket API pages
+- [ ] 7.3 Dogfood the feature in a live herdr build before marking the change complete (`just check` is green apart from the known macOS `live_handoff` failure, fork issue #33)
