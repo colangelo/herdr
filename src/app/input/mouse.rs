@@ -26,6 +26,7 @@ use super::{
 };
 
 const NOTIFICATION_PANEL_MAX_ROWS: u16 = 12;
+const PANE_TODO_PANEL_MAX_ROWS: u16 = 12;
 
 pub(super) enum MouseAction {
     NewWorkspace,
@@ -1510,6 +1511,100 @@ impl AppState {
             inner.height.saturating_sub(footer),
         );
         let selected = self.notification_center.as_ref()?.selected;
+        let visible = list.height as usize;
+        let start = selected.saturating_sub(visible.saturating_sub(1));
+        Some((list, start))
+    }
+
+    /// Panel rect, hanging off the pane's top border at its right edge so it
+    /// drops out of the indicator. `None` unless the panel is open, so render
+    /// and hit-test go quiet together.
+    pub(crate) fn pane_todo_panel_rect(&self) -> Option<Rect> {
+        let panel = self.pane_todos.as_ref()?;
+        // A panel whose pane has gone renders nothing and hit-tests to
+        // nothing; the next Esc closes it.
+        self.pane_terminal(panel.pane_id)?;
+        let screen = self.screen_rect();
+        if screen.width == 0 || screen.height == 0 {
+            return None;
+        }
+        let anchor = self
+            .pane_info_by_id(panel.pane_id)
+            .map(|info| info.rect)
+            .unwrap_or(self.view.terminal_area);
+        let todos = self.pane_todos_in_display_order(panel.pane_id);
+        let content_width = todos
+            .iter()
+            .take(PANE_TODO_PANEL_MAX_ROWS as usize)
+            .map(|todo| {
+                let link_width = todo
+                    .link
+                    .as_ref()
+                    .map(|link| crate::ui::text::display_width(&link.label) + 4)
+                    .unwrap_or(0);
+                crate::ui::text::display_width(&todo.text) + link_width
+            })
+            .max()
+            .unwrap_or(16);
+        // borders + state glyph block + trailing space
+        let panel_w = ((content_width + 2 + 3 + 1) as u16)
+            .clamp(30, 60)
+            .min(screen.width.max(1));
+        let rows = (todos.len().max(1) as u16).min(PANE_TODO_PANEL_MAX_ROWS);
+        let footer = if todos.is_empty() { 0 } else { 1 };
+        let panel_h = (rows + 2 + footer).min(screen.height.max(1));
+        let right = anchor.x.saturating_add(anchor.width);
+        let x = right.saturating_sub(panel_w).max(screen.x);
+        let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
+        let y = anchor.y.saturating_add(1).min(bottom_y).max(screen.y);
+        Some(Rect::new(x, y, panel_w, panel_h))
+    }
+
+    /// Full inner rect (panel minus borders), covering list and footer.
+    fn pane_todo_panel_inner(&self) -> Option<Rect> {
+        let rect = self.pane_todo_panel_rect()?;
+        Some(Rect::new(
+            rect.x + 1,
+            rect.y + 1,
+            rect.width.saturating_sub(2),
+            rect.height.saturating_sub(2),
+        ))
+    }
+
+    /// The footer button row, present only when there is something to act on.
+    pub(crate) fn pane_todo_panel_buttons(&self) -> Option<crate::ui::PaneTodoPanelButtonRects> {
+        let panel = self.pane_todos.as_ref()?;
+        if self.pane_todos_in_display_order(panel.pane_id).is_empty() {
+            return None;
+        }
+        crate::ui::pane_todo_panel_button_rects(self.pane_todo_panel_inner()?)
+    }
+
+    /// Y of the footer row. Clicks in this row but outside a button are inert
+    /// rather than closing, so a near-miss does not dismiss the panel.
+    // The click routing that reads it lands in phase-2 task 3.
+    #[allow(dead_code)]
+    fn pane_todo_panel_footer_row_y(&self) -> Option<u16> {
+        self.pane_todo_panel_buttons()
+            .map(|buttons| buttons.row_y())
+    }
+
+    /// The panel's list rect (footer excluded) and the first visible index.
+    /// Shared by render and hit-testing so they agree on which row is where.
+    pub(crate) fn pane_todo_panel_list_window(&self) -> Option<(Rect, usize)> {
+        let inner = self.pane_todo_panel_inner()?;
+        let footer = if self.pane_todo_panel_buttons().is_some() {
+            1
+        } else {
+            0
+        };
+        let list = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(footer),
+        );
+        let selected = self.pane_todos.as_ref()?.selected;
         let visible = list.height as usize;
         let start = selected.saturating_sub(visible.saturating_sub(1));
         Some((list, start))
