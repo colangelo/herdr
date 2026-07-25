@@ -77,6 +77,12 @@ impl TodoLinkRestore {
             else {
                 continue;
             };
+            // The label was installed by `restore_pane_todos` from the
+            // snapshot. `capture_pane_todos` always writes `link_pane` and
+            // `link_label` together or neither, so a pending link always has a
+            // label here. A hand-edited session file carrying a target with no
+            // label drops the link rather than inventing one; the todo itself
+            // is still kept.
             let label = todo.link.as_ref().map(|link| link.label.clone());
             todo.link = resolve_todo_link(&id_map, Some(link.old_raw_pane), label);
         }
