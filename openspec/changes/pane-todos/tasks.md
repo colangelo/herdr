@@ -6,31 +6,31 @@ bindings. Group 7 closes out whichever phase is landing.
 
 ## 1. Todo store in server state
 
-- [ ] 1.1 Add `PaneTodo`, `TodoPriority`, `TodoLink` in `src/pane/todo.rs` and the todo list + monotonic id counter to `TerminalState` in `src/terminal/state.rs` (not `PaneState`, which is viewport-only and is not what `PaneSnapshot` captures)
-- [ ] 1.2 Add store operations (add, update, remove, clear, toggle done) enforcing the 50-todo and 500-character limits with explicit error variants
-- [ ] 1.3 Add the presentation-order helper (priority desc → not-done first → creation order), keeping stored order as insertion order
-- [ ] 1.4 Unit tests via `AppState::test_new()`: add/update/remove/clear, ordering, limits, id monotonicity across removal, plus `Workspace::assert_invariants_for_test()` after mutations
+- [x] 1.1 Add `PaneTodo`, `TodoPriority`, `TodoLink` in `src/terminal/todo.rs` and the todo list + monotonic id counter to `TerminalState` in `src/terminal/state.rs` (not `PaneState`, which is viewport-only and is not what `PaneSnapshot` captures)
+- [x] 1.2 Add store operations (add, update, remove, clear, toggle done) enforcing the 50-todo and 500-character limits with explicit error variants
+- [x] 1.3 Add the presentation-order helper (priority desc → not-done first → creation order), keeping stored order as insertion order
+- [x] 1.4 Unit tests on `TerminalState` (where the todos live, so no `AppState` or PTY is involved): add/update/remove/clear, ordering, limits, id monotonicity across removal
 
 ## 2. Persistence and link remapping
 
-- [ ] 2.1 Add `PaneTodoSnapshot` and the `todos` field to `PaneSnapshot` (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`), storing link targets as old raw pane ids
-- [ ] 2.2 Remap todo link targets through `id_map` in `src/persist/restore.rs`; unresolvable targets become dead links that keep their label
-- [ ] 2.3 Confirm pane close when outstanding todos remain, reusing the existing confirm modal
-- [ ] 2.4 Tests: snapshot round-trip with and without todos, a session file predating the field, link remap, and the unresolvable-link path
+- [x] 2.1 Add `PaneTodoSnapshot` and the `todos` field to `PaneSnapshot` (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`), storing link targets as old raw pane ids
+- [x] 2.2 Remap todo link targets through `id_map` in `src/persist/restore.rs`; unresolvable targets become dead links that keep their label
+- [ ] 2.3 Confirm pane close when outstanding todos remain, reusing the existing confirm modal (deferred to phase 2 with the rest of the UI work)
+- [x] 2.4 Tests: snapshot round-trip with and without todos, a session file predating the field, link remap, and the unresolvable-link path
 
 ## 3. Socket API, event, protocol
 
-- [ ] 3.1 Add `src/api/schema/todos.rs` with `TodoInfo` and the params types; wire the methods into `src/api/schema.rs` and `src/api/server.rs`
-- [ ] 3.2 Implement `todo.list/add/update/remove/clear` handlers in `src/app/api.rs`, including link target resolution (public pane id or unique agent name) and the error codes
-- [ ] 3.3 Emit `todo.changed` on every mutation through `src/api/subscriptions.rs`
-- [ ] 3.4 Confirm no `PROTOCOL_VERSION` bump is needed (source 19 already exceeds the 18 released in `v0.7.4-ac`); leave the protocol expectations in `tests/cli/sessions.rs`, `tests/api_ping.rs`, `tests/support/mod.rs` at 19
-- [ ] 3.5 Regenerate `docs/next/api/herdr-api.schema.json` and extend `src/api/schema/tests.rs`
+- [x] 3.1 Add `src/api/schema/todos.rs` with `TodoInfo` and the params types; wire the methods into `src/api/schema.rs` and `src/api/server.rs`
+- [x] 3.2 Implement `todo.list/add/update/remove/clear` handlers in `src/app/api/todos.rs`, including link target resolution (public pane id) and the error codes
+- [x] 3.3 Emit `todo.changed` on every mutation through `src/api/subscriptions.rs`
+- [x] 3.4 Confirm no `PROTOCOL_VERSION` bump is needed (source 19 already exceeds the 18 released in `v0.7.4-ac`); leave the protocol expectations in `tests/cli/sessions.rs`, `tests/api_ping.rs`, `tests/support/mod.rs` at 19
+- [x] 3.5 Regenerate `docs/next/api/herdr-api.schema.json` and extend `src/api/schema/tests.rs`
 
 ## 4. CLI
 
-- [ ] 4.1 Add `src/cli/todo.rs` with the add/list/done/undone/edit/rm/clear verbs, registered in `src/cli/spec.rs` and `src/main.rs`
-- [ ] 4.2 Reuse the pane target grammar (`--pane`, `--current`, `HERDR_PANE_ID` default) from `src/cli/pane.rs`; add `--priority`, `--link`, `--unlink`, `--all`, `--json`
-- [ ] 4.3 Tests for target resolution and flag parsing, mirroring the existing `parse_pane_current_args` tests
+- [x] 4.1 Add `src/cli/todo.rs` with the add/list/done/undone/edit/rm/clear verbs, registered in `src/cli/spec.rs` and `src/main.rs`
+- [x] 4.2 Reuse the pane target grammar (`--pane`, `--current`, `HERDR_PANE_ID` default) from `src/cli/pane.rs`; add `--priority`, `--link`, `--unlink`, `--all`, `--json`
+- [x] 4.3 Tests for target resolution and flag parsing, mirroring the existing `parse_pane_current_args` tests
 
 ## 5. Pane indicator
 
