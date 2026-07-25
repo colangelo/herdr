@@ -46,6 +46,8 @@ Panes:
 | Cycle layout preset (even-h → even-v → tiled) | `prefix+space` |
 | Copy mode | `prefix+[` |
 | Copy mode, scrolled up a page / half page / line | `prefix+PageUp` / `prefix+ctrl+u` / `prefix+ctrl+k` |
+| Pane todos | `prefix+ctrl+t` |
+| Add a pane todo | unset |
 
 Tabs:
 
@@ -71,6 +73,10 @@ Workspaces and session:
 | Jump to the current toast's pane | `prefix+o` |
 
 The notification center (`prefix+ctrl+n`, or click the `◆` indicator at the top right of the tab bar) lists recent notifications newest-first. Unread entries show a kind-colored dot and a bold title; the `◆` unread count only goes down as you visit them — opening the panel changes nothing. With `ui.notification_center_position = "bottom-right"` the indicator floats in the frame's bottom-right corner instead, and the panel opens above it. Inside it, `Up`/`Down` or `j`/`k` move the selection, `Enter` jumps to the selected notification's pane, marks it read, and closes, `Esc` or `q` closes, and clicking a row does the same as `Enter` for that row. `r` (or the "mark read" button) marks everything read while keeping the history; `c` (or the "clear all" button) empties the log. Notifications without a pane target are not actionable and stay unread.
+
+A pane with todos shows a `▾` indicator with its outstanding count at the right end of its top border; a pane whose todos are all done shows a dimmed `▾`, and a pane with none shows nothing. `prefix+ctrl+t`, or a click on the indicator, opens that pane's todo panel. Inside it, `Up`/`Down` or `j`/`k` move the selection, `Enter` (or a row click) opens the todo for editing, `Space` toggles done, `g` follows a linked todo to its pane, `d` removes the selected todo, `c` clears the completed ones, and `Esc` or `q` closes. A todo linked to a pane that no longer exists renders dimmed and does nothing when followed. In the edit view, `Tab` cycles the priority, `ctrl+l` cycles the link between keep, none, and each linkable pane, `Enter` saves, and `Esc` cancels. `keys.add_pane_todo` is unset by default and opens the edit view on a new todo. Set `ui.show_pane_todo_indicator = false` to hide the indicator, and `ui.pane_todo_color` to override its color.
+
+Closing a pane that still has outstanding todos asks for confirmation first; a pane whose todos are all done closes without a prompt.
 
 The full keymap and the binding syntax live in the [keybinding reference](/docs/configuration/#keybindings).
 
