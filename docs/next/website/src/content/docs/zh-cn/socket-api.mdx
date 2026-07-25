@@ -280,7 +280,7 @@ herdr notification show "build failed" --body "api workspace" --position top-lef
 {"id":"req_tlist","result":{"type":"todo_list","todos":[{"pane_id":"w1:p2","id":3,"text":"rerun the deploy","done":false,"priority":"high","link_pane_id":"w1:p1","link_label":"infra","link_alive":true,"created_at_unix":1789000000,"updated_at_unix":1789000100}]}}
 ```
 
-待办按展示顺序返回:优先级从高到低(`high`、`normal`、`low`)→ 未完成在前 → 创建顺序。每条都带有自己的 `pane_id`,因此整个会话的列表也不会有歧义。`link_pane_id` 和 `link_label` 只出现在带链接的待办上。链接的窗格消失后 `link_alive` 变为 `false`,标签仍然保留,所以失效的链接仍读得懂,并且永远不会解析到别的窗格。
+待办按展示顺序返回:未完成在前 → 优先级从高到低(`high`、`normal`、`low`)→ 创建顺序。每条都带有自己的 `pane_id`,因此整个会话的列表也不会有歧义。`link_pane_id` 和 `link_label` 只出现在带链接的待办上。链接的窗格消失后 `link_alive` 变为 `false`,标签仍然保留,所以失效的链接仍读得懂,并且永远不会解析到别的窗格。
 
 给窗格添加待办:
 

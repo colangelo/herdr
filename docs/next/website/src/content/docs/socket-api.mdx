@@ -466,10 +466,10 @@ List one pane's todos, or every pane's when `pane_id` is omitted:
 {"id":"req_tlist","result":{"type":"todo_list","todos":[{"pane_id":"w1:p2","id":3,"text":"rerun the deploy","done":false,"priority":"high","link_pane_id":"w1:p1","link_label":"infra","link_alive":true,"created_at_unix":1789000000,"updated_at_unix":1789000100}]}}
 ```
 
-Todos come back in display order: highest priority first (`high`, `normal`,
-`low`), outstanding before done, then creation order. Every entry names its own
-`pane_id`, so a whole-session listing stays unambiguous. `link_pane_id` and
-`link_label` appear only on linked todos. `link_alive` is `false` once the
+Todos come back in display order: outstanding before done, then highest
+priority first (`high`, `normal`, `low`), then creation order. Every entry names
+its own `pane_id`, so a whole-session listing stays unambiguous. `link_pane_id`
+and `link_label` appear only on linked todos. `link_alive` is `false` once the
 linked pane is gone; the label is kept so a dead link can still say what it
 meant, and it never resolves to some other pane.
 
