@@ -1890,9 +1890,6 @@ impl AppState {
 
     /// Open the todo panel for a pane. The selection starts at the top of the
     /// presentation order, which is the most urgent outstanding todo.
-    // Opened by the indicator click and the `keys.open_pane_todos` action, both
-    // of which land in phase-2 task 3; until then only tests reach it.
-    #[allow(dead_code)]
     pub(crate) fn open_pane_todos(&mut self, pane_id: PaneId) {
         self.pane_todos = Some(PaneTodoPanelState {
             pane_id,
@@ -1904,8 +1901,6 @@ impl AppState {
 
     /// Closes the panel only. Every caller pairs this with `leave_modal` or an
     /// explicit mode, exactly like `close_notification_center`.
-    // Called from the panel's close/escape handling in phase-2 task 3.
-    #[allow(dead_code)]
     pub(crate) fn close_pane_todos(&mut self) {
         self.pane_todos = None;
     }
@@ -1923,8 +1918,6 @@ impl AppState {
     }
 
     /// Move (or, with `0`, re-clamp) the panel selection.
-    // Driven by the panel's key and mouse handling in phase-2 task 3.
-    #[allow(dead_code)]
     pub(crate) fn pane_todos_move_selection(&mut self, delta: isize) {
         let Some(pane_id) = self.pane_todos.as_ref().map(|panel| panel.pane_id) else {
             return;
@@ -1942,8 +1935,6 @@ impl AppState {
 
     /// The selected todo, cloned so callers can mutate through the API without
     /// holding a borrow of the store.
-    // The mutation funnel that reads it lands in phase-2 task 3.
-    #[allow(dead_code)]
     pub(crate) fn selected_pane_todo(&self) -> Option<crate::terminal::todo::PaneTodo> {
         let panel = self.pane_todos.as_ref()?;
         self.pane_todos_in_display_order(panel.pane_id)
