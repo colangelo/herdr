@@ -662,6 +662,7 @@ impl App {
             toast: None,
             notification_log: state::NotificationLog::default(),
             notification_center: None,
+            pane_todos: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -2096,6 +2097,8 @@ impl App {
             Mode::NotificationCenter => {
                 self.handle_notification_center_key_via_api(key_event);
             }
+            // Inert until phase-2 task 3 wires the panel's key handling.
+            Mode::PaneTodos => {}
             Mode::Resize => {
                 self.handle_resize_key_via_api(key);
             }
@@ -2392,6 +2395,7 @@ mod tests {
             Mode::ContextMenu,
             Mode::GlobalMenu,
             Mode::KeybindHelp,
+            Mode::PaneTodos,
         ] {
             assert!(mode.wants_ascii_input(), "{mode:?} should want ASCII");
         }

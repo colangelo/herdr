@@ -119,6 +119,8 @@ impl App {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
                 Mode::NotificationCenter => self.handle_notification_center_key_via_api(key_event),
+                // Inert until phase-2 task 3 wires the panel's key handling.
+                Mode::PaneTodos => {}
                 Mode::Terminal => unreachable!(),
             },
         }
