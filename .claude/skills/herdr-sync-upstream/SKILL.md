@@ -52,12 +52,38 @@ Known conflict patterns:
   hunks (see §4 checklist) rather than fighting the diff.
 - `docs/next/CHANGELOG.md` — conflicts on nearly every fork docs commit, because
   both sides edit `## Unreleased`. Resolve by merging per `###` heading (upstream
-  entries first, then fork entries). **Automate this carefully:** a naive
-  section-merger that keys only on `###` will happily merge across a `## [X.Y.Z]`
-  release boundary and fold upstream's Unreleased entries into a released
-  section. After the rebase, verify with
-  `grep '^## ' docs/next/CHANGELOG.md | sort | uniq -d` (must be empty) and
-  confirm the version sections are in reverse-chronological order.
+  entries first, then fork entries), keeping ONE block per heading in the
+  `Added` / `Changed` / `Fixed` order the released sections already use.
+  **Automate this carefully** — two distinct ways it has gone wrong:
+  1. A naive merger keying only on `###` merges across a `## [X.Y.Z]` release
+     boundary and folds upstream's Unreleased entries into a released section.
+  2. A resolution that keeps *both* sides' blocks leaves two `### Fixed` blocks
+     in one section with the first entries duplicated between them. Hit on the
+     2026-07-25 sync and only caught 2026-07-26, by eye: `## Unreleased` had
+     `Added / Fixed / Changed / Fixed`, with two entries appearing twice.
+
+  This is not cosmetic. `SECTION_RE` in `scripts/changelog.py` matches only
+  `##`, so `prepare_release` copies the Unreleased body **verbatim** into the new
+  version section — duplicate headings and repeated entries ship in the real
+  release notes. `just check` does not catch it (`scripts.test_changelog` tests
+  the tooling, not the document).
+
+  After the rebase, verify BOTH:
+
+  ```bash
+  # 1. no duplicate ## version headings; sections reverse-chronological
+  grep '^## ' docs/next/CHANGELOG.md | sort | uniq -d     # must be empty
+  # 2. no repeated ### block or entry inside any one section — silence is pass
+  awk '/^## /{s=$0; split("",h); split("",e); next} /^### /{if (h[$0]++) print "dup heading in " s ": " $0; next} /^- /{if (e[$0]++) print "dup entry in " s ": " substr($0,1,50)}' docs/next/CHANGELOG.md
+  ```
+
+  (One line on purpose — verified on macOS stock awk 20200816. A heredoc here
+  breaks on paste, because its closing delimiter ends up indented.)
+
+  When repairing an already-duplicated section, rebuild it programmatically with
+  assertions on every line index rather than editing by eye, then prove nothing
+  was lost:
+  `diff <(grep '^- ' OLD | sort -u) <(grep '^- ' NEW | sort -u)` must be empty.
 - `justfile` `test`/`check` recipes — both sides add `scripts.test_*` modules to
   the same `python3 -m unittest` line: take the union.
 - `tests/cli/sessions.rs` — asserts a hardcoded protocol number. Keep the fork's
@@ -105,6 +131,12 @@ Then run `just check`. Use `cargo nextest run --locked --no-fail-fast` for the
 test stage — nextest cancels the run on first failure by default, so a single
 failure hides the other ~1600 tests and you cannot tell a one-off from a broad
 breakage.
+
+`just check` does NOT validate the changelog document, so run the two
+`docs/next/CHANGELOG.md` duplicate checks from §2 here as well — a bad merge
+resolution there is silent until it reaches published release notes. Note also
+that `just check` omits `release-docs-check`; run that separately before any
+release.
 
 **Before blaming the rebase for a test failure, get an upstream baseline.**
 Build clean `upstream/master` in a scratch worktree and run the same test
