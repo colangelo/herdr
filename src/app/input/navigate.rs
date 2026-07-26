@@ -850,7 +850,18 @@ impl App {
 
     fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId)> {
         let entries = crate::ui::agent_panel_entries(&self.state);
-        let target = entries.get(idx)?;
+        // An out-of-range jump is otherwise completely silent: the keypress
+        // resolves to nothing and leaves no trace, which makes "the shortcut
+        // does nothing" indistinguishable from the key never arriving.
+        let Some(target) = entries.get(idx) else {
+            tracing::debug!(
+                idx,
+                jump_symbol = ?crate::config::jump_symbol(idx),
+                entries = entries.len(),
+                "focus_agent: no agent panel entry at index"
+            );
+            return None;
+        };
         Some((target.ws_idx, target.pane_id))
     }
 
