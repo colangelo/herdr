@@ -280,21 +280,41 @@ impl IndexedKeybind {
     }
 }
 
-/// Jump symbol for an indexed entry: rows 1-9 use digits, rows 10-35 continue
-/// with letters a-z. Beyond that there is no symbol. Single source of truth
-/// for indexed keybind matching and the sidebar jump labels.
+/// Letters macOS Latin keyboard layouts consume as Option dead keys for
+/// combining diacriticals, so `alt+<letter>` never reaches the application.
+/// Measured on ABC: option+e emits U+00B4 (´) and option+i / option+u emit
+/// nothing at all, arming a pending accent instead — even with Ghostty's
+/// `macos-option-as-alt`, which defeats the plain Option translation but not
+/// dead-key composition. Advertising these as jump letters promises a shortcut
+/// that cannot be pressed, so they are skipped in the sequence entirely.
+const MACOS_DEAD_KEY_LETTERS: [char; 4] = ['e', 'i', 'n', 'u'];
+
+/// The letters used for indexed jump entries, in order. Pure cross-platform
+/// policy — both branches compile everywhere — so this is one of the cases
+/// `cfg!` is preferred over a `#[cfg]` split.
+fn jump_letters() -> impl Iterator<Item = char> {
+    ('a'..='z')
+        .filter(|letter| !(cfg!(target_os = "macos") && MACOS_DEAD_KEY_LETTERS.contains(letter)))
+}
+
+/// Jump symbol for an indexed entry: rows 1-9 use digits, then rows continue
+/// with [`jump_letters`]. Beyond that there is no symbol. Single source of
+/// truth for indexed keybind matching and the sidebar jump labels — both
+/// directions derive from `jump_letters`, so a label can never advertise a
+/// letter that matching does not accept.
 pub fn jump_symbol(index: usize) -> Option<char> {
     match index {
         0..=8 => char::from_digit(index as u32 + 1, 10),
-        9..=34 => char::from_u32('a' as u32 + (index as u32 - 9)),
-        _ => None,
+        _ => jump_letters().nth(index - 9),
     }
 }
 
 fn index_for_jump_symbol(symbol: char) -> Option<usize> {
     match symbol {
         '1'..='9' => Some(symbol as usize - '1' as usize),
-        'a'..='z' => Some(9 + symbol as usize - 'a' as usize),
+        'a'..='z' => jump_letters()
+            .position(|letter| letter == symbol)
+            .map(|pos| 9 + pos),
         _ => None,
     }
 }
@@ -2171,12 +2191,29 @@ focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]
         );
         assert_eq!(kb.focus_agent[9].label, "prefix+alt+a");
 
-        // Letter keys resolve to indices 9..34, continuing after digits 0..8.
+        // `a..z` still expands to all 26 bindings, so a binding's position in
+        // this vec is NOT its resolved jump index — the index comes from the
+        // pressed letter's place in `jump_letters()`, which skips the letters
+        // macOS cannot deliver.
         let alt_key = |c| TerminalKey::new(KeyCode::Char(c), KeyModifiers::ALT);
         assert_eq!(kb.focus_agent[9].matched_index(&alt_key('a')), Some(9));
         assert_eq!(kb.focus_agent[10].matched_index(&alt_key('b')), Some(10));
-        assert_eq!(kb.focus_agent[34].matched_index(&alt_key('z')), Some(34));
+
+        // `z` is the last letter binding either way; only the index it resolves
+        // to moves (34 with all 26 letters, 30 on macOS with four skipped).
+        let last_index = 9 + jump_letters().count() - 1;
+        assert_eq!(
+            kb.focus_agent[9 + 25].matched_index(&alt_key('z')),
+            Some(last_index)
+        );
         assert_eq!(kb.focus_agent[9].matched_index(&alt_key('b')), None);
+
+        // A dead-key binding still exists but is inert: nothing can resolve it,
+        // which is honest, because the keypress never arrives.
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.focus_agent[9 + 4].label, "prefix+alt+e");
+            assert_eq!(kb.focus_agent[9 + 4].matched_index(&alt_key('e')), None);
+        }
     }
 
     #[test]
@@ -2184,8 +2221,50 @@ focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]
         assert_eq!(jump_symbol(0), Some('1'));
         assert_eq!(jump_symbol(8), Some('9'));
         assert_eq!(jump_symbol(9), Some('a'));
-        assert_eq!(jump_symbol(34), Some('z'));
-        assert_eq!(jump_symbol(35), None);
+
+        // `z` always closes the sequence; only its index moves.
+        let last = 9 + jump_letters().count() - 1;
+        assert_eq!(jump_symbol(last), Some('z'));
+        assert_eq!(jump_symbol(last + 1), None);
+    }
+
+    /// The label and the matcher must agree for every index, or the sidebar
+    /// advertises a letter that the keypress path refuses.
+    #[test]
+    fn jump_symbol_round_trips_through_index_for_every_entry() {
+        for index in 0..(9 + jump_letters().count()) {
+            let symbol = jump_symbol(index).expect("every in-range index has a symbol");
+            assert_eq!(
+                index_for_jump_symbol(symbol),
+                Some(index),
+                "symbol {symbol:?} for index {index} did not round-trip"
+            );
+        }
+    }
+
+    /// macOS Option dead keys never arrive, so they must not appear as labels
+    /// and must not resolve to an index.
+    #[test]
+    fn macos_dead_key_letters_are_absent_from_the_jump_sequence() {
+        let letters: Vec<char> = jump_letters().collect();
+        for dead in MACOS_DEAD_KEY_LETTERS {
+            if cfg!(target_os = "macos") {
+                assert!(
+                    !letters.contains(&dead),
+                    "{dead:?} is an Option dead key and must be skipped on macOS"
+                );
+                assert_eq!(
+                    index_for_jump_symbol(dead),
+                    None,
+                    "{dead:?} must not resolve to a jump index on macOS"
+                );
+            } else {
+                assert!(
+                    letters.contains(&dead),
+                    "{dead:?} is reachable off macOS and must be kept"
+                );
+            }
+        }
     }
 
     #[test]
