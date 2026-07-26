@@ -162,6 +162,17 @@ switch_workspace = "prefix+shift+1..9"
 focus_agent = "prefix+alt+1..9"
 ```
 
+A range can also continue past nine with letters, so lists longer than nine entries stay reachable:
+
+```toml
+[keys]
+focus_agent = ["prefix+alt+1..9", "prefix+alt+a..z"]
+```
+
+Entries 1–9 take the digits, then the letters continue from entry 10.
+
+On **macOS**, the letters `e`, `i`, `n`, and `u` are **skipped**. Those are Option dead keys on ABC and most Latin layouts — Option+e produces `´` and Option+i produces a pending `ˆ` rather than `alt+e` or `alt+i`, so the keypress never reaches Herdr. Ghostty's `macos-option-as-alt` does not change this: it defeats the plain Option translation but not dead-key composition. Skipping them means every jump letter Herdr shows is one you can actually press, at the cost of the entry-to-letter mapping differing from Linux and Windows, which keep the full `a..z`. So on macOS entry 14 is `alt+f`, not `alt+e`.
+
 The legacy `[keys.indexed]` table is still parsed for compatibility, but new configs should prefer the explicit action fields.
 
 ## Custom command keybindings
