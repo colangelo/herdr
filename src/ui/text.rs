@@ -8,6 +8,12 @@ pub(crate) fn display_width_u16(text: &str) -> u16 {
     display_width(text).min(u16::MAX as usize) as u16
 }
 
+/// Columns one character occupies. Zero-width and unassigned characters count
+/// as nothing, matching how [`display_width`] measures a whole string.
+pub(crate) fn char_display_width(ch: char) -> usize {
+    UnicodeWidthChar::width(ch).unwrap_or(0)
+}
+
 pub(crate) fn truncate_end(text: &str, max_width: usize) -> String {
     if display_width(text) <= max_width {
         return text.to_string();

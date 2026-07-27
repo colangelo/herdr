@@ -12,6 +12,9 @@ use crate::{
     },
     input::TerminalKey,
     layout::NavDirection,
+    // Aliased: `ratatui::layout::Direction` is already in scope here and means
+    // something entirely different.
+    ui::text_field::{word_class, Direction as Motion},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,10 +195,13 @@ pub(crate) fn handle_navigator_key(
             }
             KeyCode::Up => state.move_navigator_selection_from(terminal_runtimes, -1),
             KeyCode::Down => state.move_navigator_selection_from(terminal_runtimes, 1),
-            KeyCode::Char('n') if key.modifiers == KeyModifiers::CONTROL => {
+            // `ctrl+j` / `ctrl+k` move here as well as in the list state, so
+            // reaching for the search never demotes the picker to arrow keys.
+            // Plain `j` / `k` stay list-only: here they are text.
+            KeyCode::Char('n' | 'j') if key.modifiers == KeyModifiers::CONTROL => {
                 state.move_navigator_selection_from(terminal_runtimes, 1)
             }
-            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
+            KeyCode::Char('p' | 'k') if key.modifiers == KeyModifiers::CONTROL => {
                 state.move_navigator_selection_from(terminal_runtimes, -1)
             }
             KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
@@ -260,12 +266,21 @@ pub(crate) fn handle_navigator_key(
             state.navigator.state_filter = Some(NavigatorStateFilter::Done);
             state.select_first_navigator_match_from(terminal_runtimes);
         }
-        KeyCode::Char('j') | KeyCode::Down => {
+        // Spelled out rather than left to these arms carrying no modifier
+        // guard: `ctrl+j` / `ctrl+k` move in both picker states by design, not
+        // by accident.
+        KeyCode::Char('j')
+            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::CONTROL =>
+        {
             state.move_navigator_selection_from(terminal_runtimes, 1)
         }
-        KeyCode::Char('k') | KeyCode::Up => {
+        KeyCode::Char('k')
+            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::CONTROL =>
+        {
             state.move_navigator_selection_from(terminal_runtimes, -1)
         }
+        KeyCode::Down => state.move_navigator_selection_from(terminal_runtimes, 1),
+        KeyCode::Up => state.move_navigator_selection_from(terminal_runtimes, -1),
         KeyCode::Char('d') if key.modifiers == KeyModifiers::CONTROL => state
             .move_navigator_selection_by_lines_from(
                 terminal_runtimes,
@@ -643,20 +658,6 @@ fn delete_rename_input_char(state: &mut AppState) {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WordDeleteClass {
-    Word,
-    Separator,
-}
-
-fn word_delete_class(ch: char) -> WordDeleteClass {
-    if ch.is_alphanumeric() || ch == '_' {
-        WordDeleteClass::Word
-    } else {
-        WordDeleteClass::Separator
-    }
-}
-
 fn delete_rename_input_word(state: &mut AppState) {
     if state.name_input_replace_on_type {
         clear_rename_input(state);
@@ -666,50 +667,107 @@ fn delete_rename_input_word(state: &mut AppState) {
 }
 
 /// Delete trailing whitespace, then the run of like-classed characters before
-/// it. Shared by the rename modal and the todo edit modal.
+/// it. The word class is `TextField`'s, so "a word" means the same thing in
+/// the append-only rename input as it does in a cursor-bearing field.
 fn delete_last_word(buffer: &mut String) {
     while buffer.chars().last().is_some_and(char::is_whitespace) {
         buffer.pop();
     }
-    let Some(class) = buffer.chars().last().map(word_delete_class) else {
+    let Some(class) = buffer.chars().last().map(word_class) else {
         return;
     };
     while buffer
         .chars()
         .last()
-        .is_some_and(|ch| !ch.is_whitespace() && word_delete_class(ch) == class)
+        .is_some_and(|ch| !ch.is_whitespace() && word_class(ch) == class)
     {
         buffer.pop();
     }
 }
 
+/// Translate a key into a call on the todo field. The keymap lives here and
+/// the buffer lives in `TextField`, so this is only ever a lookup table.
+///
+/// The chords are readline's, with one substitution forced by how terminals
+/// report keys: undo is offered on `ctrl+_`, `ctrl+-`, and `ctrl+/` at once.
+/// Herdr's own parser turns the legacy `0x1F` byte into `ctrl+-`
+/// (`src/input/parse.rs`), so that arm is what makes undo reachable without
+/// the enhanced keyboard protocol; the other two are how the same physical
+/// chords arrive once a terminal reports them individually.
 fn handle_pane_todo_edit_text_key(state: &mut AppState, key: KeyEvent) {
     let Some(edit) = state.pane_todo_edit.as_mut() else {
         return;
     };
+    let text = &mut edit.text;
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => edit.text.clear(),
-        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => edit.text.clear(),
-        KeyCode::Backspace
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::ALT) =>
-        {
-            delete_last_word(&mut edit.text);
+        // -- motions --
+        KeyCode::Char('a') if ctrl => text.move_home(),
+        KeyCode::Char('e') if ctrl => text.move_end(),
+        KeyCode::Char('b') if ctrl => text.move_char(Motion::Backward),
+        KeyCode::Char('f') if ctrl => text.move_char(Motion::Forward),
+        KeyCode::Char('b') if alt => text.move_word(Motion::Backward),
+        KeyCode::Char('f') if alt => text.move_word(Motion::Forward),
+        KeyCode::Left if ctrl || alt => text.move_word(Motion::Backward),
+        KeyCode::Right if ctrl || alt => text.move_word(Motion::Forward),
+        KeyCode::Left => text.move_char(Motion::Backward),
+        KeyCode::Right => text.move_char(Motion::Forward),
+        KeyCode::Up => text.move_line(Motion::Backward),
+        KeyCode::Down => text.move_line(Motion::Forward),
+        KeyCode::Home => text.move_home(),
+        KeyCode::End => text.move_end(),
+
+        // -- kills and deletes --
+        KeyCode::Char('k') if ctrl => {
+            text.kill_to_end();
         }
-        KeyCode::Char('h' | 'w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            delete_last_word(&mut edit.text);
+        KeyCode::Char('u') if ctrl => {
+            text.kill_to_start();
+        }
+        KeyCode::Char('w') if ctrl => {
+            text.kill_word_backward();
+        }
+        KeyCode::Char('y') if ctrl => {
+            text.yank();
+        }
+        // Undo, on every chord a terminal might deliver 0x1F or its
+        // enhanced-protocol equivalent under.
+        KeyCode::Char('_' | '-' | '/') if ctrl => {
+            text.undo();
+        }
+        KeyCode::Char('d') if ctrl => {
+            text.delete_forward();
+        }
+        KeyCode::Delete => {
+            text.delete_forward();
+        }
+        // cmd+backspace is "delete to the start of the line" on macOS, which
+        // is exactly kill-to-start — and on the single-line text that is the
+        // common case, exactly the whole-buffer clear it used to be.
+        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => {
+            text.kill_to_start();
+        }
+        KeyCode::Backspace if ctrl || alt => {
+            text.kill_word_backward();
+        }
+        // `ctrl+h` is readline's backward-delete-char, and is what many
+        // terminals send for Backspace itself.
+        KeyCode::Char('h') if ctrl => {
+            text.delete_backward();
         }
         KeyCode::Backspace => {
-            edit.text.pop();
+            text.delete_backward();
         }
-        // The length guard sits in the pattern so a full buffer simply stops
-        // matching: stopping at the store's limit means the modal can never
-        // compose a todo the server will reject.
-        KeyCode::Char(c)
-            if key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
-                && edit.text.chars().count() < crate::terminal::todo::MAX_TODO_TEXT_LEN =>
-        {
-            edit.text.push(c);
+
+        // -- insertion --
+        // Enter is a newline, not a commit: a field that accepts newlines
+        // cannot also have Enter mean "done". Save moved to `ctrl+s`.
+        KeyCode::Enter => {
+            text.insert_char('\n');
+        }
+        KeyCode::Char(c) if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+            text.insert_char(c);
         }
         _ => {}
     }
@@ -1192,11 +1250,20 @@ impl App {
         }
     }
 
+    /// Commands before text, like `handle_rename_key_via_api`. Every chord
+    /// claimed here is one the text field does not want: the readline set owns
+    /// `ctrl+d` and `Enter` now, so committing and toggling done moved to
+    /// `ctrl+s` and `ctrl+t`, which are outside it.
     pub(crate) fn handle_pane_todo_edit_key_via_api(&mut self, key: KeyEvent) {
-        // Commands before text, like `handle_rename_key_via_api`. Anything
-        // carrying CTRL/ALT/SUPER can never be swallowed by the text field.
         match key.code {
-            KeyCode::Enter => {
+            // `alt+Enter` is the chord this would ideally be, but only
+            // terminals reporting the enhanced keyboard protocol send it —
+            // so it is accepted alongside `ctrl+s`, never instead of it.
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.save_pane_todo_edit_via_api();
+                return;
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.save_pane_todo_edit_via_api();
                 return;
             }
@@ -1214,8 +1281,9 @@ impl App {
                 return;
             }
             // Space belongs to the text field here, so the panel's `space`
-            // toggle needs a modifier of its own inside the modal.
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // toggle needs a modifier of its own inside the modal — and it
+            // cannot be `ctrl+d`, which is delete-forward.
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.state.toggle_pane_todo_edit_done();
                 return;
             }
@@ -1241,7 +1309,7 @@ impl App {
                 (
                     edit.pane_id,
                     edit.todo_id,
-                    edit.text.trim().to_string(),
+                    edit.text.text().trim().to_string(),
                     edit.priority,
                     edit.link,
                     edit.done,
@@ -2514,6 +2582,44 @@ mod tests {
         assert_eq!(state.mode, Mode::Terminal);
     }
 
+    /// Spec: "the selection moves down and the search text is unchanged", and
+    /// the same chord moves with the search not focused. The search state used
+    /// to offer only the arrows and `ctrl+n` / `ctrl+p`, so reaching for the
+    /// filter demoted an otherwise keyboard-driven list to the arrow keys.
+    #[test]
+    fn ctrl_j_and_ctrl_k_move_the_navigator_in_both_states() {
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let down = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL);
+        let up = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+
+        let mut state = state_with_workspaces(&["alpha", "beta"]);
+        state.mode = Mode::Navigator;
+        state.navigator.search_focused = true;
+        state.navigator.query = "a".into();
+
+        handle_navigator_key(&mut state, &terminal_runtimes, down);
+        assert_eq!(state.navigator.selected, 1);
+        assert_eq!(
+            state.navigator.query, "a",
+            "the chord moves the selection rather than typing into the search"
+        );
+        handle_navigator_key(&mut state, &terminal_runtimes, up);
+        assert_eq!(state.navigator.selected, 0);
+        assert_eq!(state.navigator.query, "a");
+
+        // And in the list state, where they used to work only because the
+        // `j` / `k` arms carried no modifier guard.
+        state.navigator.search_focused = false;
+        handle_navigator_key(&mut state, &terminal_runtimes, down);
+        assert_eq!(state.navigator.selected, 1);
+        handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+        );
+        assert_eq!(state.navigator.selected, 0, "plain j/k still move too");
+    }
+
     #[test]
     fn open_rename_active_tab_can_prefill_default_new_tab_name() {
         let mut state = state_with_workspaces(&["test"]);
@@ -3060,9 +3166,190 @@ mod tests {
         }
     }
 
+    /// What commits a todo edit. Not `Enter`, which now inserts a newline:
+    /// a field that accepts newlines cannot also have Enter mean "done".
+    fn save_key() -> KeyEvent {
+        key(KeyCode::Char('s')).with_control()
+    }
+
     /// Spec: "its text changed and the change saved → the todo's text and
     /// updated timestamp change while its id, done state, and creation
     /// timestamp are preserved".
+    /// The edit buffer's text, for the tests that only care about the string.
+    fn edit_text(app: &App) -> String {
+        app.state
+            .pane_todo_edit
+            .as_ref()
+            .expect("edit state")
+            .text
+            .text()
+            .to_string()
+    }
+
+    fn type_into_edit(app: &mut App, text: &str) {
+        for ch in text.chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+    }
+
+    /// Spec: "the character appears at the start and the rest of the text is
+    /// preserved". The buffer used to be append-only, so a typo three words
+    /// back meant deleting everything after it.
+    #[test]
+    fn typing_lands_at_the_insertion_point_rather_than_the_end() {
+        let mut app =
+            app_with_pane_todos(&[("world", false, crate::terminal::todo::TodoPriority::Normal)]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('a')).with_control());
+        type_into_edit(&mut app, "hello ");
+        assert_eq!(edit_text(&app), "hello world");
+
+        app.handle_pane_todo_edit_key_via_api(save_key());
+        assert_eq!(
+            app.state.selected_pane_todo().expect("a todo").text,
+            "hello world"
+        );
+    }
+
+    /// Spec: "a key belonging to the text field's editing set edits the text
+    /// and neither commits the edit nor toggles done". `ctrl+d` is the case
+    /// that changed hands.
+    #[test]
+    fn ctrl_d_deletes_forward_and_no_longer_toggles_done() {
+        let mut app =
+            app_with_pane_todos(&[("abc", false, crate::terminal::todo::TodoPriority::Normal)]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('a')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+
+        assert_eq!(edit_text(&app), "bc", "ctrl+d took the character ahead");
+        assert!(
+            !app.state.pane_todo_edit.as_ref().expect("edit state").done,
+            "and left the done state alone"
+        );
+    }
+
+    /// The one piece of muscle memory this change breaks, pinned in both
+    /// directions: Enter no longer saves, and `ctrl+s` does.
+    #[test]
+    fn enter_inserts_a_newline_and_ctrl_s_is_what_saves() {
+        let mut app =
+            app_with_pane_todos(&[("first", false, crate::terminal::todo::TodoPriority::Normal)]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        type_into_edit(&mut app, "second");
+        assert_eq!(edit_text(&app), "first\nsecond");
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodoEdit,
+            "Enter added a line rather than committing"
+        );
+        assert_eq!(
+            app.state.selected_pane_todo().expect("a todo").text,
+            "first",
+            "and nothing reached the store"
+        );
+
+        app.handle_pane_todo_edit_key_via_api(save_key());
+        assert_eq!(app.state.mode, Mode::PaneTodos);
+        assert_eq!(
+            app.state.selected_pane_todo().expect("a todo").text,
+            "first\nsecond",
+            "a two-line todo saves through todo.update unchanged"
+        );
+    }
+
+    /// `alt+Enter` is the chord this would ideally be, accepted where the
+    /// terminal reports it — never the only way to save.
+    #[test]
+    fn alt_enter_also_saves_where_a_terminal_reports_it() {
+        let mut app =
+            app_with_pane_todos(&[("draft", false, crate::terminal::todo::TodoPriority::Normal)]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+        type_into_edit(&mut app, "ed");
+
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+
+        assert_eq!(app.state.mode, Mode::PaneTodos);
+        assert_eq!(
+            app.state.selected_pane_todo().expect("a todo").text,
+            "drafted"
+        );
+    }
+
+    /// Spec: "undo is still reachable by a chord that terminal can deliver".
+    /// Herdr's parser turns the legacy `0x1F` byte into `ctrl+-`, so that is
+    /// the arm that carries a terminal without the enhanced protocol.
+    #[test]
+    fn undo_is_reachable_on_every_chord_a_terminal_might_send() {
+        for undo in [
+            KeyCode::Char('_'),
+            // What `0x1F` arrives as with no enhanced keyboard protocol.
+            KeyCode::Char('-'),
+            KeyCode::Char('/'),
+        ] {
+            let mut app = app_with_pane_todos(&[(
+                "keep me",
+                false,
+                crate::terminal::todo::TodoPriority::Normal,
+            )]);
+            app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('u')).with_control());
+            assert_eq!(edit_text(&app), "");
+
+            app.handle_pane_todo_edit_key_via_api(key(undo).with_control());
+            assert_eq!(edit_text(&app), "keep me", "{undo:?} must undo the kill");
+        }
+    }
+
+    /// Spec: "the killed text is restored at the insertion point".
+    #[test]
+    fn kill_and_yank_move_text_around_the_buffer() {
+        let mut app = app_with_pane_todos(&[(
+            "alpha beta",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('w')).with_control());
+        assert_eq!(edit_text(&app), "alpha ");
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('a')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('y')).with_control());
+        assert_eq!(edit_text(&app), "betaalpha ");
+    }
+
+    /// Spec: "further typed characters are ignored rather than composing a
+    /// todo the store would reject" — and newlines count toward the limit like
+    /// any other character.
+    #[test]
+    fn the_field_stops_at_the_stores_limit_counting_newlines() {
+        let mut app = app_with_pane_todos(&[]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.open_new_pane_todo(pane_id);
+
+        for _ in 0..crate::terminal::todo::MAX_TODO_TEXT_LEN {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('x')));
+        }
+        assert_eq!(
+            edit_text(&app).chars().count(),
+            crate::terminal::todo::MAX_TODO_TEXT_LEN
+        );
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('y')));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        assert_eq!(
+            edit_text(&app).chars().count(),
+            crate::terminal::todo::MAX_TODO_TEXT_LEN,
+            "neither a character nor a newline gets past the cap"
+        );
+        assert!(!edit_text(&app).contains('y'));
+        assert!(!edit_text(&app).contains('\n'));
+    }
+
     #[test]
     fn saving_an_edit_changes_text_and_keeps_id_done_and_created_at() {
         let mut app =
@@ -3072,7 +3359,12 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
         assert_eq!(app.state.mode, Mode::PaneTodoEdit);
         assert_eq!(
-            app.state.pane_todo_edit.as_ref().expect("edit state").text,
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .text
+                .text(),
             "draft",
             "the modal opens prefilled"
         );
@@ -3083,7 +3375,7 @@ mod tests {
         for ch in "final".chars() {
             app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
         }
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         let after = app.state.selected_pane_todo().expect("a selected todo");
         assert_eq!(after.text, "final");
@@ -3130,9 +3422,10 @@ mod tests {
     }
 
     /// The panel toggles done with `space`, but inside the modal `space` is
-    /// text, so the same action needs `ctrl+d`.
+    /// text — and `ctrl+d` is delete-forward — so the same action needs
+    /// `ctrl+t`.
     #[test]
-    fn ctrl_d_toggles_done_in_the_edit_modal_and_saves_it() {
+    fn ctrl_t_toggles_done_in_the_edit_modal_and_saves_it() {
         let mut app = app_with_pane_todos(&[(
             "finish me",
             false,
@@ -3144,9 +3437,9 @@ mod tests {
             "the modal opens carrying the todo's current done state"
         );
 
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('t')).with_control());
         assert!(app.state.pane_todo_edit.as_ref().expect("edit state").done);
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         let todo = app
             .state
@@ -3160,8 +3453,8 @@ mod tests {
 
         // And back again, so this is a toggle rather than a one-way latch.
         app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('t')).with_control());
+        app.handle_pane_todo_edit_key_via_api(save_key());
         assert!(
             !app.state
                 .selected_pane_todo()
@@ -3178,7 +3471,7 @@ mod tests {
             crate::terminal::todo::TodoPriority::Normal,
         )]);
         app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('t')).with_control());
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Esc));
 
         assert!(
@@ -3193,7 +3486,7 @@ mod tests {
     /// `todo.add` carries no `done`, so offering the toggle while composing
     /// would promise something the save cannot keep.
     #[test]
-    fn ctrl_d_is_inert_while_composing_a_new_todo() {
+    fn ctrl_t_is_inert_while_composing_a_new_todo() {
         let mut app = app_with_pane_todos(&[(
             "existing",
             false,
@@ -3207,7 +3500,7 @@ mod tests {
             .pane_id;
         app.state.open_new_pane_todo(pane_id);
 
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('d')).with_control());
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('t')).with_control());
 
         assert!(
             !app.state.pane_todo_edit.as_ref().expect("edit state").done,
@@ -3225,7 +3518,7 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('u')).with_control());
 
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         assert_eq!(
             app.state.mode,
@@ -3266,7 +3559,7 @@ mod tests {
         for ch in "write it down".chars() {
             app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
         }
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         let todos = app.state.pane_todos_in_display_order(pane_id);
         assert_eq!(todos.len(), 1);
@@ -3294,7 +3587,7 @@ mod tests {
         for ch in "one too many".chars() {
             app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
         }
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         assert_eq!(
             app.state.mode,
@@ -3302,7 +3595,12 @@ mod tests {
             "the pane is at the todo cap, so the save is refused and the modal stays open"
         );
         assert_eq!(
-            app.state.pane_todo_edit.as_ref().expect("edit state").text,
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .text
+                .text(),
             "one too many",
             "a refused save must not eat what was typed"
         );
@@ -3399,6 +3697,113 @@ mod tests {
             .clone()
     }
 
+    /// The picker is the surface the four keyboard asks are really about, so
+    /// the chords are pinned in its own purpose rather than only in the goto
+    /// one — they are the same code path, but the picker is where a hand
+    /// leaving the home row is most costly.
+    #[test]
+    fn ctrl_j_and_ctrl_k_move_the_link_picker_while_searching() {
+        let (mut app, pane_id, _) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('l')).with_control());
+        assert_eq!(app.state.mode, Mode::Navigator);
+        assert_eq!(
+            app.state.navigator.purpose,
+            crate::app::state::NavigatorPurpose::PaneTodoLink
+        );
+
+        app.state.navigator.search_focused = true;
+        app.state.navigator.selected = 0;
+        handle_navigator_key(
+            &mut app.state,
+            &app.terminal_runtimes,
+            key(KeyCode::Char('j')).with_control(),
+        );
+        assert_eq!(app.state.navigator.selected, 1);
+        assert!(
+            app.state.navigator.query.is_empty(),
+            "the chord moved the selection rather than typing into the search"
+        );
+        handle_navigator_key(
+            &mut app.state,
+            &app.terminal_runtimes,
+            key(KeyCode::Char('k')).with_control(),
+        );
+        assert_eq!(app.state.navigator.selected, 0);
+    }
+
+    /// Spec: "the row shows that pane's public identifier as well as its
+    /// name". It is what the row would stage, so the picker leads with it.
+    #[test]
+    fn picker_pane_rows_carry_the_identifier_they_would_stage() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        // Opening the picker is what expands the workspaces, so the pane rows
+        // only exist once it is open.
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('l')).with_control());
+        let rows = app.state.navigator_rows_from(&app.terminal_runtimes);
+
+        let row = rows
+            .iter()
+            .find(|row| {
+                matches!(
+                    row.target,
+                    crate::app::state::NavigatorTarget::Pane { pane_id, .. }
+                        if pane_id == candidates[0]
+                )
+            })
+            .expect("the sibling pane should have a row");
+        assert_eq!(
+            row.public_pane_id.as_deref(),
+            app.public_pane_id(0, candidates[0]).as_deref(),
+            "and it is the same identifier the save would store"
+        );
+
+        for row in &rows {
+            if !matches!(row.target, crate::app::state::NavigatorTarget::Pane { .. }) {
+                assert!(
+                    row.public_pane_id.is_none(),
+                    "only panes have a public pane identifier"
+                );
+            }
+        }
+    }
+
+    /// The modal's link row leads with the identifier too, so the picker, the
+    /// row, and the panel's chip all say the same thing about a link.
+    #[test]
+    fn the_edit_modals_link_row_leads_with_the_identifier() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        assert_eq!(
+            app.state.pane_todo_edit_link_label(),
+            "none",
+            "an unlinked todo has nothing to address"
+        );
+
+        choose_link_target(&mut app, candidates[0]);
+        let public_id = app
+            .public_pane_id(0, candidates[0])
+            .expect("target pane has a public id");
+        let staged = app.state.pane_todo_edit_link_label();
+        assert!(
+            staged.starts_with(&public_id),
+            "the staged link is addressed first: {staged}"
+        );
+
+        // And the same after a save, where the row reads back from the store.
+        app.handle_pane_todo_edit_key_via_api(save_key());
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        let saved = app.state.pane_todo_edit_link_label();
+        assert!(
+            saved.starts_with(&public_id),
+            "a stored link is addressed first too: {saved}"
+        );
+    }
+
     /// The tri-state link control is only worth having if the choice survives
     /// the save. Without this, `PaneTodoEditLink::Set(_) => public_pane_id(..)`
     /// in `save_pane_todo_edit_via_api` could return `None` and every test
@@ -3434,7 +3839,7 @@ mod tests {
             crate::app::state::PaneTodoEditLink::Set(candidates[0]),
         );
 
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         let saved = stored_todo(&app, pane_id);
         let link = saved.link.expect("the chosen link must reach the store");
@@ -3478,7 +3883,7 @@ mod tests {
         for ch in "water the plants".chars() {
             app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
         }
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         assert_eq!(
             app.state.mode,
@@ -3557,7 +3962,7 @@ mod tests {
         app.state.pane_todo_edit.as_mut().expect("edit state").link =
             crate::app::state::PaneTodoEditLink::Set(target);
 
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         let link = stored_todo(&app, pane_id)
             .link
@@ -3579,7 +3984,7 @@ mod tests {
         // Give the todo a link first, through the same save path.
         app.state.open_pane_todo_edit(pane_id, todo_id);
         choose_link_target(&mut app, candidates[0]);
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
         assert_eq!(
             stored_todo(&app, pane_id)
                 .link
@@ -3595,7 +4000,7 @@ mod tests {
             app.state.pane_todo_edit.as_ref().expect("edit state").link,
             crate::app::state::PaneTodoEditLink::Clear,
         );
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         assert_eq!(
             stored_todo(&app, pane_id).link,
@@ -3612,7 +4017,7 @@ mod tests {
         let todo_id = stored_todo(&app, pane_id).id;
         app.state.open_pane_todo_edit(pane_id, todo_id);
         choose_link_target(&mut app, candidates[0]);
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         // Reopen, change only the text, save with the link left on Keep.
         app.state.open_pane_todo_edit(pane_id, todo_id);
@@ -3621,7 +4026,7 @@ mod tests {
             app.state.pane_todo_edit.as_ref().expect("edit state").link,
             crate::app::state::PaneTodoEditLink::Keep,
         );
-        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+        app.handle_pane_todo_edit_key_via_api(save_key());
 
         let saved = stored_todo(&app, pane_id);
         assert_eq!(

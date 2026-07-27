@@ -24,6 +24,8 @@ mod tabs;
 mod todo_panel;
 // pub(crate): the CLI reuses text helpers (e.g. relative_time_label).
 pub(crate) mod text;
+// pub(crate): pure-data editing state that modal key handling drives.
+pub(crate) mod text_field;
 mod widgets;
 
 use self::dialogs::{
@@ -80,14 +82,15 @@ pub(crate) use self::todo_panel::{pane_todo_panel_button_rects, PaneTodoPanelBut
 // The chip's cells have exactly one definition, so a click can never land on
 // cells the renderer did not draw: the renderer reaches it inside the module
 // and the mouse hit-test reaches it through this re-export.
-pub(crate) use self::todo_panel::pane_todo_link_chip;
+pub(crate) use self::todo_panel::{pane_todo_link_chip, pane_todo_link_chip_text};
 pub(crate) use self::{
     dialogs::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
         new_linked_worktree_inner_rect, open_existing_worktree_button_rects,
         open_existing_worktree_inner_rect, open_existing_worktree_max_visible_rows,
         open_existing_worktree_visible_start, pane_move_target_button_rects,
-        pane_move_target_inner_rect, pane_todo_edit_rects, remove_worktree_button_rects,
+        pane_move_target_inner_rect, pane_todo_edit_column_scroll, pane_todo_edit_line_scroll,
+        pane_todo_edit_rects, pane_todo_edit_text_area, remove_worktree_button_rects,
         remove_worktree_popup_rect, rename_button_rects, PaneTodoEditRects,
         PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     },
@@ -1833,6 +1836,58 @@ mod tests {
                 .any(|(key, label)| key == "unset" && label.as_ref() == "add pane todo"),
             "an unbound action is still discoverable in the help panel"
         );
+    }
+
+    /// Spec: "every action introduced by this feature is listed". The edit
+    /// modal's chords are fixed rather than `KeysConfig` actions, which is
+    /// exactly why they need listing — nothing else advertises them, least of
+    /// all the three that moved.
+    #[test]
+    fn keybind_help_lists_the_todo_editing_chords() {
+        let app = crate::app::state::AppState::test_new();
+        let groups = keybind_help_groups(&app);
+        let modal = groups
+            .iter()
+            .find(|(name, _)| *name == "todo edit modal")
+            .expect("todo edit modal group")
+            .1
+            .clone();
+        let listed = |label: &str| modal.iter().any(|(_, entry)| entry.as_ref() == label);
+        let key_for = |label: &str| {
+            modal
+                .iter()
+                .find(|(_, entry)| entry.as_ref() == label)
+                .map(|(key, _)| key.clone())
+                .unwrap_or_default()
+        };
+
+        // The three that broke muscle memory.
+        assert_eq!(key_for("save todo"), "ctrl+s / alt+enter");
+        assert_eq!(key_for("toggle done"), "ctrl+t");
+        assert_eq!(key_for("kill to line end / start"), "ctrl+k / ctrl+u");
+        assert_eq!(key_for("insert newline"), "enter");
+
+        for action in [
+            "line start / end",
+            "character back / forward",
+            "word back / forward",
+            "delete forward",
+            "kill word back",
+            "yank last kill",
+            "undo",
+        ] {
+            assert!(listed(action), "{action} is not discoverable");
+        }
+
+        let panel = groups
+            .iter()
+            .find(|(name, _)| *name == "pane todos")
+            .expect("pane todos group")
+            .1
+            .clone();
+        assert!(panel
+            .iter()
+            .any(|(key, label)| key == "a" && label.as_ref() == "add todo"));
     }
 
     #[test]

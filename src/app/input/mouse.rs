@@ -654,6 +654,14 @@ impl AppState {
 
                 if self.mode == Mode::PaneTodoEdit {
                     let rects = self.pane_todo_edit_regions()?;
+                    // The text block has an insertion point now, so a click in
+                    // it places the cursor. It used to fall through to the
+                    // catch-all below, which means clicking the text you were
+                    // editing threw the edit away.
+                    if rect_contains(rects.input, mouse.column, mouse.row) {
+                        self.place_pane_todo_edit_cursor(rects.input, mouse.column, mouse.row);
+                        return None;
+                    }
                     if rect_contains(rects.priority, mouse.column, mouse.row) {
                         self.cycle_pane_todo_edit_priority();
                         return None;
@@ -1634,12 +1642,22 @@ impl AppState {
             .iter()
             .take(PANE_TODO_PANEL_MAX_ROWS as usize)
             .map(|todo| {
+                // Sized from the chip's own composition, so the panel widens
+                // for the public identifier the chip now leads with instead of
+                // squeezing the label out to make room for it.
                 let link_width = todo
                     .link
                     .as_ref()
-                    .map(|link| crate::ui::text::display_width(&link.label) + 4)
+                    .map(|link| {
+                        crate::ui::text::display_width(&crate::ui::pane_todo_link_chip_text(
+                            self.pane_todo_link_public_id(todo).as_deref(),
+                            &link.label,
+                        ))
+                    })
                     .unwrap_or(0);
-                crate::ui::text::display_width(&todo.text) + link_width
+                // Only the first line of a multi-line todo is ever drawn.
+                let text = todo.text.split('\n').next().unwrap_or_default();
+                crate::ui::text::display_width(text) + link_width
             })
             .max()
             .unwrap_or(16);
@@ -1691,6 +1709,21 @@ impl AppState {
     pub(crate) fn pane_todo_edit_regions(&self) -> Option<crate::ui::PaneTodoEditRects> {
         self.pane_todo_edit_inner()
             .and_then(crate::ui::pane_todo_edit_rects)
+    }
+
+    /// Map a click in the text block back to an insertion point, through the
+    /// same scroll helpers the renderer draws with — so the cursor lands under
+    /// the pointer whatever the field is scrolled to.
+    pub(crate) fn place_pane_todo_edit_cursor(&mut self, input: Rect, col: u16, row: u16) {
+        let Some(edit) = self.pane_todo_edit.as_mut() else {
+            return;
+        };
+        let text_area = crate::ui::pane_todo_edit_text_area(input);
+        let line = crate::ui::pane_todo_edit_line_scroll(&edit.text, text_area.height)
+            + row.saturating_sub(text_area.y) as usize;
+        let column = crate::ui::pane_todo_edit_column_scroll(&edit.text, text_area.width)
+            + col.saturating_sub(text_area.x) as usize;
+        edit.text.place_cursor(line, column);
     }
 
     /// Y of the footer row. Clicks in this row but outside a button are inert
@@ -1751,8 +1784,13 @@ impl AppState {
         let Some(link) = todo.link.as_ref() else {
             return false;
         };
-        crate::ui::pane_todo_link_chip(Rect::new(list.x, row, list.width, 1), &link.label)
-            .is_some_and(|(chip, _)| rect_contains(chip, col, row))
+        let public_id = self.pane_todo_link_public_id(todo);
+        crate::ui::pane_todo_link_chip(
+            Rect::new(list.x, row, list.width, 1),
+            public_id.as_deref(),
+            &link.label,
+        )
+        .is_some_and(|(chip, _)| rect_contains(chip, col, row))
     }
 
     fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
@@ -4788,6 +4826,59 @@ mod tests {
         );
     }
 
+    /// The text block used to fall through to the catch-all that cancels the
+    /// modal, which was survivable while the buffer had no insertion point to
+    /// click into. Now that it does, clicking the text you are editing must
+    /// move the cursor there rather than throw the edit away.
+    #[test]
+    fn clicking_the_edit_modals_text_places_the_cursor_instead_of_cancelling() {
+        let (mut app, _pane_id) = app_with_pane_todo_edit_open();
+        if let Some(edit) = app.state.pane_todo_edit.as_mut() {
+            edit.text = crate::ui::text_field::TextField::from_text(
+                "first\nsecond",
+                crate::terminal::todo::MAX_TODO_TEXT_LEN,
+            );
+        }
+        let rects = app
+            .state
+            .pane_todo_edit_regions()
+            .expect("the open modal must have regions");
+        let text_area = crate::ui::pane_todo_edit_text_area(rects.input);
+
+        // Third column of the first line, which is where "fi|rst" splits.
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                text_area.x + 2,
+                text_area.y,
+            ),
+        );
+        assert!(action.is_none(), "the text block is handled in place");
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodoEdit,
+            "clicking the text must not cancel the edit"
+        );
+        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        assert_eq!(edit.text.cursor_line(), 0);
+        assert_eq!(edit.text.cursor_column(), 2);
+
+        // Past the end of a line clamps to that line's end rather than
+        // spilling onto the next one.
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                text_area.x + text_area.width - 1,
+                text_area.y + 1,
+            ),
+        );
+        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        assert_eq!(edit.text.cursor_line(), 1);
+        assert_eq!(edit.text.cursor_column(), "second".len());
+    }
+
     /// The regions the mouse layer uses are composed in screen space from
     /// `pane_todo_edit_inner()`; a test that recomputes them locally would not
     /// notice that composition breaking.
@@ -5119,7 +5210,7 @@ mod tests {
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
         let (chip, _) =
-            crate::ui::pane_todo_link_chip(Rect::new(list.x, list.y, list.width, 1), "infra")
+            crate::ui::pane_todo_link_chip(Rect::new(list.x, list.y, list.width, 1), None, "infra")
                 .expect("a linked row draws a chip");
         assert!(
             !rect_contains(chip, list.x + 4, list.y),

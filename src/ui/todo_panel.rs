@@ -116,20 +116,67 @@ pub(crate) fn pane_todo_panel_button_rects(
     None
 }
 
-/// The `→ label` chip at a row's right edge, for a todo that carries a link.
-/// One definition for the renderer and the mouse hit-test, so clicking the
-/// chip and seeing the chip cannot drift apart.
-pub(crate) fn pane_todo_link_chip(row: Rect, label: &str) -> Option<(Rect, String)> {
-    if label.is_empty() || row.width < 16 {
+/// The link chip at a row's right edge, for a todo that carries a link. One
+/// definition for the renderer and the mouse hit-test, so clicking the chip and
+/// seeing the chip cannot drift apart.
+///
+/// A live link leads with the target's public identifier and follows it with
+/// the captured label — `→ w2:pC · claude` — because the identifier is the part
+/// you can act on and the label is the part you recognise. A dead link has no
+/// identifier to lead with, so it keeps its label alone.
+pub(crate) fn pane_todo_link_chip(
+    row: Rect,
+    public_id: Option<&str>,
+    label: &str,
+) -> Option<(Rect, String)> {
+    if (label.is_empty() && public_id.is_none()) || row.width < 16 {
         return None;
     }
-    let budget = (row.width / 3) as usize;
-    let text = format!(" → {} ", truncate_end(label, budget.saturating_sub(4)));
+    // The chip takes what it needs so long as it leaves the todo's own text a
+    // readable minimum, past the three-cell state glyph. The panel sizes
+    // itself from `pane_todo_link_chip_text`, so on an untruncated chip this
+    // budget is not the binding constraint.
+    let budget = (row.width as usize).saturating_sub(3 + CHIP_MIN_TEXT_COLUMNS);
+    // Four cells of frame: the leading space, the arrow and its space, and the
+    // trailing space.
+    let content = budget.saturating_sub(4);
+    // The identifier is short and takes its width off the top; the label is
+    // what gives when the row is narrow.
+    let label = match public_id {
+        Some(id) => truncate_end(label, content.saturating_sub(display_width(id) + 3)),
+        None => truncate_end(label, content),
+    };
+    let text = pane_todo_link_chip_text(public_id, &label);
     let width = display_width_u16(&text);
     if width == 0 || width >= row.width {
         return None;
     }
     Some((Rect::new(row.x + row.width - width, row.y, width, 1), text))
+}
+
+/// Columns the todo's own text keeps whatever its link is called.
+const CHIP_MIN_TEXT_COLUMNS: usize = 8;
+
+/// The chip's text before any truncation. One definition, so the panel sizes
+/// itself for exactly what the chip is going to draw.
+pub(crate) fn pane_todo_link_chip_text(public_id: Option<&str>, label: &str) -> String {
+    match public_id {
+        Some(id) if label.is_empty() => format!(" → {id} "),
+        Some(id) => format!(" → {id} · {label} "),
+        None => format!(" → {label} "),
+    }
+}
+
+/// What a todo shows on its single panel row. A todo may hold more than one
+/// line; the panel lists one row each, so the rest is signalled rather than
+/// shown.
+pub(crate) fn pane_todo_row_text(text: &str, budget: usize) -> String {
+    let Some((first, _)) = text.split_once('\n') else {
+        return truncate_end(text, budget);
+    };
+    let marker = " ⏎";
+    let first = truncate_end(first, budget.saturating_sub(display_width(marker)));
+    format!("{first}{marker}")
 }
 
 /// Three-cell state block, mirroring the notification center's dot column.
@@ -180,10 +227,11 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
             let idx = start + row;
             let row_rect = Rect::new(list.x, list.y + row as u16, list.width, 1);
             let is_selected = idx == panel.selected;
+            let public_id = app.pane_todo_link_public_id(todo);
             let chip = todo
                 .link
                 .as_ref()
-                .and_then(|link| pane_todo_link_chip(row_rect, &link.label));
+                .and_then(|link| pane_todo_link_chip(row_rect, public_id.as_deref(), &link.label));
             let chip_width = chip.as_ref().map(|(rect, _)| rect.width).unwrap_or(0) as usize;
 
             let (glyph_style, text_style, row_style) = if is_selected {
@@ -208,7 +256,7 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
             };
 
             let text_budget = (list.width as usize).saturating_sub(3 + chip_width);
-            let text = truncate_end(&todo.text, text_budget);
+            let text = pane_todo_row_text(&todo.text, text_budget);
             let pad = text_budget.saturating_sub(display_width(&text));
             let line = Line::from(vec![
                 Span::styled(todo_glyph(todo), glyph_style),
@@ -428,7 +476,9 @@ mod tests {
             .expect("panel list window should exist");
         // Row 1: the linked todo, which is not the selected row.
         let row = Rect::new(list.x, list.y + 1, list.width, 1);
-        let (chip, _) = pane_todo_link_chip(row, "infra").expect("chip should fit");
+        let public_id = app.pane_todo_link_public_id(&app.terminals[&terminal_id].todos()[0]);
+        let (chip, _) =
+            pane_todo_link_chip(row, public_id.as_deref(), "infra").expect("chip should fit");
         let buffer = draw(&app);
         assert!(row_text(&buffer, chip).contains('→'));
         assert_eq!(
@@ -452,6 +502,9 @@ mod tests {
                 400,
             )
             .expect("todo should be updated");
+        // Recomputed rather than reused: a dead chip drops the identifier, so
+        // it is shorter and the right-aligned rect moves with it.
+        let (chip, _) = pane_todo_link_chip(row, None, "infra").expect("chip should fit");
         let buffer = draw(&app);
         assert!(row_text(&buffer, chip).contains("infra"));
         assert_eq!(
@@ -459,6 +512,99 @@ mod tests {
             Some(app.palette.overlay0),
             "a dead link is dimmed"
         );
+    }
+
+    /// Spec: "the link is presented with that pane's public identifier first
+    /// and its captured label after it", and "a moved target is addressed by
+    /// where it is now". The identifier is the part you can act on — it is
+    /// what `herdr pane` and a sibling agent's prompt take — so it leads.
+    #[test]
+    fn a_live_link_chip_leads_with_the_public_id_and_a_dead_one_shows_its_label_alone() {
+        let mut app = app_with_open_panel(&[
+            ("go look", false, TodoPriority::Normal),
+            ("decoy", false, TodoPriority::High),
+        ]);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let todo_id = app.terminals[&terminal_id].todos()[0].id;
+        let link = |app: &mut AppState, target: Option<crate::layout::PaneId>, at: u64| {
+            app.terminals
+                .get_mut(&terminal_id)
+                .expect("test terminal should exist")
+                .update_todo(
+                    todo_id,
+                    TodoUpdate {
+                        link: Some(Some(TodoLink {
+                            pane: target,
+                            label: "infra".into(),
+                        })),
+                        ..TodoUpdate::default()
+                    },
+                    at,
+                )
+                .expect("todo should be updated");
+        };
+
+        link(&mut app, Some(pane_id), 300);
+        let public_id = app
+            .session_public_pane_id(pane_id)
+            .expect("a live pane has a public id");
+        let (list, _) = app
+            .pane_todo_panel_list_window()
+            .expect("panel list window should exist");
+        // Row 1: the linked todo, which is not the selected row.
+        let row = Rect::new(list.x, list.y + 1, list.width, 1);
+        let (chip, text) =
+            pane_todo_link_chip(row, Some(&public_id), "infra").expect("chip should fit");
+        assert_eq!(text, format!(" → {public_id} · infra "));
+
+        // The drawn cells are the cells the hit-test is handed, so what looks
+        // clickable is clickable.
+        let buffer = draw(&app);
+        assert_eq!(row_text(&buffer, chip), text);
+
+        link(&mut app, None, 400);
+        let (dead_chip, dead_text) =
+            pane_todo_link_chip(row, None, "infra").expect("chip should fit");
+        assert_eq!(dead_text, " → infra ", "no identifier to lead with");
+        let buffer = draw(&app);
+        assert_eq!(row_text(&buffer, dead_chip), dead_text);
+    }
+
+    /// Spec: "it occupies a single row showing the first line with a marker".
+    /// The panel sizes itself from `todos.len()`, so a todo that grew a second
+    /// line must not grow a second row under it.
+    #[test]
+    fn a_multi_line_todo_occupies_one_row_showing_its_first_line() {
+        let app = app_with_open_panel(&[
+            ("first line\nsecond line", false, TodoPriority::High),
+            ("plain", false, TodoPriority::Normal),
+        ]);
+        let (list, _) = app
+            .pane_todo_panel_list_window()
+            .expect("panel list window should exist");
+        let buffer = draw(&app);
+
+        let row = row_text(&buffer, Rect::new(list.x, list.y, list.width, 1));
+        assert!(row.contains("first line"));
+        assert!(row.contains('⏎'), "the marker says more follows: {row}");
+        assert!(!row.contains("second line"));
+        assert!(
+            row_text(&buffer, Rect::new(list.x, list.y + 1, list.width, 1)).contains("plain"),
+            "the next todo still starts on the very next row"
+        );
+    }
+
+    #[test]
+    fn the_row_text_marker_fits_inside_the_budget() {
+        assert_eq!(pane_todo_row_text("one line", 20), "one line");
+        assert_eq!(pane_todo_row_text("one\ntwo", 20), "one ⏎");
+        // The marker is reserved out of the budget rather than overrunning it.
+        let squeezed = pane_todo_row_text("a long first line\nmore", 10);
+        assert!(display_width(&squeezed) <= 10, "{squeezed}");
+        assert!(squeezed.ends_with('⏎'));
     }
 
     /// Spec: "an empty panel can still add". The empty state used to render no

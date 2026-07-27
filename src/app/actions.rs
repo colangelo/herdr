@@ -451,6 +451,7 @@ impl AppState {
                 is_workspace: true,
                 is_tab: false,
                 expanded,
+                public_pane_id: None,
                 search_text: workspace_search_text,
                 matched: workspace_matches,
             });
@@ -558,6 +559,7 @@ impl AppState {
             is_workspace: false,
             is_tab: true,
             expanded: true,
+            public_pane_id: None,
             search_text,
             matched: true,
         }
@@ -635,6 +637,7 @@ impl AppState {
                 is_workspace: false,
                 is_tab: false,
                 expanded: false,
+                public_pane_id: self.session_public_pane_id(pane_id),
                 search_text,
                 matched: true,
             });
@@ -972,6 +975,7 @@ fn clear_link_row() -> NavigatorRow {
         is_workspace: false,
         is_tab: false,
         expanded: false,
+        public_pane_id: None,
         search_text: "no link clear".to_string(),
         matched: true,
     }
