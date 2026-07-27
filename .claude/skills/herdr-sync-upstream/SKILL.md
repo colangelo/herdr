@@ -179,6 +179,23 @@ If the internal push times out: Tailscale may be stopped (`tailscale status`;
 - **CI on the pushed master** must go green (`gh run list --repo colangelo/herdr
   --branch master --limit 3`). The conventional-commits job tolerates the
   force-push via the fork guard.
+- **`website/latest.json` survived the rebase**: `just latest-json-check`.
+  The release workflow's `update-latest-json` job commits the manifest to
+  master *after* the tag, so it is an ordinary master commit that §5's
+  force-push of a replayed patch set drops — silently, because the release
+  itself already succeeded and no job goes red. `src/update.rs` reads that file
+  over raw GitHub, so a dropped commit pins every fork binary's update check to
+  an older version: exactly what happened to v0.7.4-ac, which went unnoticed
+  from 2026-07-18 until 2026-07-27 (AC-forks/herdr#38). Restore it with the
+  same call CI makes, using the tag's protocol version, not master's:
+
+  ```bash
+  TAG=v0.7.4-ac; BASE=${TAG#v}; BASE=${BASE%%-ac*}
+  PROTOCOL=$(git show "$TAG:src/protocol/wire.rs" | sed -n 's/^pub const PROTOCOL_VERSION: u32 = \([0-9]*\);/\1/p')
+  python3 scripts/changelog.py sync-latest-json --repo colangelo/herdr \
+      --tag "$TAG" --version "$BASE" --protocol "$PROTOCOL" --force \
+      --output website/latest.json
+  ```
 - **Drift check**: skim upstream changes to `justfile` release recipes,
   `scripts/changelog.py`, and `release.yml` — if the release flow moved,
   update `.claude/skills/herdr-release/SKILL.md` and the `release-ac` recipe
