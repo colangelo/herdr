@@ -1865,6 +1865,7 @@ mod tests {
         // The three that broke muscle memory.
         assert_eq!(key_for("save todo"), "ctrl+s / alt+enter");
         assert_eq!(key_for("toggle done"), "ctrl+t");
+        assert_eq!(key_for("save and follow the link"), "ctrl+g");
         assert_eq!(key_for("kill to line end / start"), "ctrl+k / ctrl+u");
         assert_eq!(key_for("insert newline"), "enter");
 

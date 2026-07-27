@@ -1289,6 +1289,13 @@ impl App {
                     .open_pane_todo_link_picker_from(&self.terminal_runtimes);
                 return;
             }
+            // `ctrl+g` mirrors the panel's `g`. `ctrl+l` re-picks the link and
+            // clicking the row does the same, so without this the modal shows
+            // you an address it gives you no way to travel to.
+            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.save_pane_todo_edit_and_follow_via_api();
+                return;
+            }
             // Space belongs to the text field here, so the panel's `space`
             // toggle needs a modifier of its own inside the modal — and it
             // cannot be `ctrl+d`, which is delete-forward.
@@ -1381,6 +1388,25 @@ impl App {
         }
         self.close_pane_todo_edit_and_return();
         self.state.pane_todos_move_selection(0);
+    }
+
+    /// Save, then follow the link — exactly `ctrl+s` then the panel's `g`, in
+    /// one keystroke. Inert when there is nowhere to go, so the chord never
+    /// half-acts: it does not save either, and a dead link stays as inert here
+    /// as it is in the panel.
+    fn save_pane_todo_edit_and_follow_via_api(&mut self) {
+        let Some((ws_idx, pane_id)) = self.state.pane_todo_edit_link_target() else {
+            return;
+        };
+        self.save_pane_todo_edit_via_api();
+        // A save the store refused leaves the modal open with the reason on
+        // screen; travelling anyway would carry you away from it.
+        if self.state.pane_todo_edit.is_some() {
+            return;
+        }
+        self.state.close_pane_todos();
+        self.focus_pane_internal_via_api(ws_idx, pane_id);
+        self.state.mode = Mode::Terminal;
     }
 
     pub(super) fn apply_pane_todo_edit_action_via_api(&mut self, action: ModalAction) {
@@ -3901,6 +3927,83 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The modal showed an address with no way to travel to it: `ctrl+l` and a
+    /// click on the row both re-pick the link, and the panel's `g` is a mode
+    /// away. `ctrl+g` saves and follows, exactly as `ctrl+s` then `g` would.
+    #[test]
+    fn ctrl_g_in_the_edit_modal_saves_then_follows_the_link() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        choose_link_target(&mut app, candidates[0]);
+        type_into_edit(&mut app, "!");
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('g')).with_control());
+
+        assert_eq!(
+            app.state.workspaces[0].focused_pane_id(),
+            Some(candidates[0]),
+            "focus moved to the linked pane"
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pane_todo_edit.is_none(), "the modal closed");
+        let saved = stored_todo(&app, pane_id);
+        assert_eq!(
+            saved.text, "rerun the deploy!",
+            "what was typed was committed on the way out, not dropped"
+        );
+        assert_eq!(
+            saved.link.expect("the link was saved too").pane,
+            Some(candidates[0])
+        );
+    }
+
+    /// The chord never half-acts: with nowhere to go it saves nothing either,
+    /// so it cannot commit an edit and then silently fail to travel.
+    #[test]
+    fn ctrl_g_is_inert_when_there_is_no_link_to_follow() {
+        let (mut app, pane_id, _) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        type_into_edit(&mut app, "!");
+        assert!(app.state.pane_todo_edit_link_target().is_none());
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('g')).with_control());
+
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodoEdit,
+            "an unlinked todo has nowhere to go, so the modal stays put"
+        );
+        assert_eq!(edit_text(&app), "rerun the deploy!");
+        assert_eq!(
+            stored_todo(&app, pane_id).text,
+            "rerun the deploy",
+            "and nothing was written"
+        );
+    }
+
+    /// A save the store refuses leaves the modal open with the reason on
+    /// screen. Travelling anyway would carry the reader away from it.
+    #[test]
+    fn ctrl_g_stays_put_when_the_save_is_refused() {
+        let (mut app, pane_id, candidates) = app_with_linkable_panes();
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        choose_link_target(&mut app, candidates[0]);
+        // Empty text is the one rejection the modal can provoke on its own.
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('u')).with_control());
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('g')).with_control());
+
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        assert_ne!(
+            app.state.workspaces[0].focused_pane_id(),
+            Some(candidates[0]),
+            "a refused save must not still travel"
+        );
     }
 
     /// The modal's link row leads with the identifier too, so the picker, the
