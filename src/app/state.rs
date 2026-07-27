@@ -887,6 +887,19 @@ pub(crate) enum NavigatorTarget {
         tab_idx: usize,
         pane_id: PaneId,
     },
+    /// Synthetic row offered only while choosing a todo's link target:
+    /// picking it clears the link instead of pointing it at a pane.
+    ClearLink,
+}
+
+/// What an open navigator is being used for. `Goto` focuses whatever is
+/// picked; a selection purpose hands the choice back to what opened it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum NavigatorPurpose {
+    #[default]
+    Goto,
+    /// Choosing a link target for the todo open in the edit modal.
+    PaneTodoLink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -962,6 +975,9 @@ pub(crate) struct NavigatorState {
     pub search_focused: bool,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
+    /// Consulted at activation only, never threaded through rendering of the
+    /// rows themselves.
+    pub purpose: NavigatorPurpose,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2058,34 +2074,19 @@ impl AppState {
         self.pane_todo_edit = None;
     }
 
-    /// Panes a todo can link to: every other pane of its own workspace, in tab
-    /// then layout order, labelled the way that pane's border is.
-    pub(crate) fn pane_link_candidates(&self, pane_id: PaneId) -> Vec<(PaneId, String)> {
-        let Some(workspace) = self
-            .workspaces
-            .iter()
-            .find(|workspace| workspace.pane_state(pane_id).is_some())
-        else {
-            return Vec::new();
+    /// How a staged link target is named in the edit modal. Deliberately the
+    /// same chain the server captures on save, so the preview and the label
+    /// that ends up stored agree.
+    pub(crate) fn pane_link_target_label(&self, target: PaneId) -> String {
+        let Some(terminal) = self.pane_terminal(target) else {
+            return "pane".to_string();
         };
-        workspace
-            .tabs
-            .iter()
-            .flat_map(|tab| tab.layout.pane_ids())
-            .filter(|candidate| *candidate != pane_id)
-            .map(|candidate| {
-                let label = self
-                    .pane_terminal(candidate)
-                    .and_then(|terminal| terminal.border_label(true))
-                    .or_else(|| {
-                        workspace
-                            .public_pane_number(candidate)
-                            .map(|number| format!("pane {number}"))
-                    })
-                    .unwrap_or_else(|| "pane".to_string());
-                (candidate, label)
-            })
-            .collect()
+        terminal
+            .manual_label
+            .clone()
+            .or_else(|| terminal.effective_agent_label().map(str::to_string))
+            .or_else(|| crate::app::actions::launch_label(terminal.launch_argv.as_ref()))
+            .unwrap_or_else(|| "pane".to_string())
     }
 
     /// Toggle the done state of the todo being edited. Inert while composing a
@@ -2114,30 +2115,6 @@ impl AppState {
         };
     }
 
-    /// Cycle the link control: keep → clear → each linkable pane → keep.
-    pub(crate) fn cycle_pane_todo_edit_link(&mut self) {
-        let Some(pane_id) = self.pane_todo_edit.as_ref().map(|edit| edit.pane_id) else {
-            return;
-        };
-        let candidates = self.pane_link_candidates(pane_id);
-        let Some(edit) = self.pane_todo_edit.as_mut() else {
-            return;
-        };
-        edit.link = match edit.link {
-            PaneTodoEditLink::Keep => PaneTodoEditLink::Clear,
-            PaneTodoEditLink::Clear => match candidates.first() {
-                Some((candidate, _)) => PaneTodoEditLink::Set(*candidate),
-                None => PaneTodoEditLink::Keep,
-            },
-            PaneTodoEditLink::Set(current) => candidates
-                .iter()
-                .position(|(candidate, _)| *candidate == current)
-                .and_then(|idx| candidates.get(idx + 1))
-                .map(|(candidate, _)| PaneTodoEditLink::Set(*candidate))
-                .unwrap_or(PaneTodoEditLink::Keep),
-        };
-    }
-
     /// What the modal's link row shows for the current choice.
     pub(crate) fn pane_todo_edit_link_label(&self) -> String {
         let Some(edit) = self.pane_todo_edit.as_ref() else {
@@ -2153,12 +2130,7 @@ impl AppState {
                     todo.link.as_ref().map(|link| link.label.clone())
                 })
                 .unwrap_or_else(|| "none".to_string()),
-            PaneTodoEditLink::Set(target) => self
-                .pane_link_candidates(edit.pane_id)
-                .into_iter()
-                .find(|(candidate, _)| *candidate == target)
-                .map(|(_, label)| label)
-                .unwrap_or_else(|| "pane".to_string()),
+            PaneTodoEditLink::Set(target) => self.pane_link_target_label(target),
         }
     }
 
@@ -3021,78 +2993,187 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_edit_link_control_cycles_keep_clear_then_each_candidate() {
+    /// Builds two workspaces, each with two panes, and opens the link picker
+    /// on a todo belonging to the first pane of the first workspace.
+    fn state_with_link_picker_open() -> (AppState, PaneId) {
         let mut state = AppState::test_new();
-        let mut workspace = crate::workspace::Workspace::test_new("links");
-        workspace.test_split(ratatui::layout::Direction::Horizontal);
-        workspace.test_split(ratatui::layout::Direction::Vertical);
-        state.workspaces = vec![workspace];
+        let mut first = crate::workspace::Workspace::test_new("here");
+        first.test_split(ratatui::layout::Direction::Horizontal);
+        let mut second = crate::workspace::Workspace::test_new("there");
+        second.test_split(ratatui::layout::Direction::Horizontal);
+        state.workspaces = vec![first, second];
         state.active = Some(0);
         state.ensure_test_terminals();
         let pane_id = state.workspaces[0].tabs[0].root_pane;
 
-        let candidates = state.pane_link_candidates(pane_id);
-        assert_eq!(
-            candidates.len(),
-            2,
-            "two sibling panes are linkable, the todo's own pane is not"
-        );
-
         state.open_new_pane_todo(pane_id);
-        assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").link,
-            PaneTodoEditLink::Keep
-        );
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.open_pane_todo_link_picker_from(&runtimes);
+        (state, pane_id)
+    }
 
-        state.cycle_pane_todo_edit_link();
-        assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").link,
-            PaneTodoEditLink::Clear
-        );
-        assert_eq!(state.pane_todo_edit_link_label(), "none");
+    fn accept(state: &mut AppState) -> bool {
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.accept_navigator_selection_from(&runtimes)
+    }
 
-        // Clear hands off to the first candidate, and each further press
-        // advances one candidate rather than sticking on the current one.
-        for (candidate, label) in &candidates {
-            state.cycle_pane_todo_edit_link();
-            assert_eq!(
-                state.pane_todo_edit.as_ref().expect("edit state").link,
-                PaneTodoEditLink::Set(*candidate)
+    fn rows(state: &AppState) -> Vec<NavigatorRow> {
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.navigator_rows_from(&runtimes)
+    }
+
+    fn select(state: &mut AppState, want: impl Fn(&NavigatorRow) -> bool) {
+        state.navigator.selected = rows(state)
+            .iter()
+            .position(want)
+            .expect("the picker should offer such a row");
+    }
+
+    /// Spec: "the navigator opens in selection mode listing panes across every
+    /// workspace". The old control cycled only within the todo's own
+    /// workspace, which is why most panes could never be reached.
+    #[test]
+    fn the_link_picker_offers_panes_from_every_workspace() {
+        let (state, pane_id) = state_with_link_picker_open();
+        let rows = rows(&state);
+
+        for ws_idx in 0..2 {
+            assert!(
+                rows.iter().any(|row| matches!(
+                    row.target,
+                    NavigatorTarget::Pane { ws_idx: idx, .. } if idx == ws_idx
+                )),
+                "workspace {ws_idx} must contribute pane rows"
             );
-            assert_eq!(&state.pane_todo_edit_link_label(), label);
         }
+        assert!(
+            !rows.iter().any(|row| matches!(
+                row.target,
+                NavigatorTarget::Pane { pane_id: candidate, .. } if candidate == pane_id
+            )),
+            "a todo linking to its own pane says nothing, so it is not offered"
+        );
+    }
 
-        // Past the last candidate the cycle wraps back to keep.
-        state.cycle_pane_todo_edit_link();
+    /// Spec: "when a pane row is chosen, the edit returns with that pane
+    /// staged as the link target".
+    #[test]
+    fn choosing_a_pane_row_stages_it_and_returns_to_the_modal() {
+        let (mut state, pane_id) = state_with_link_picker_open();
+        select(&mut state, |row| {
+            matches!(row.target, NavigatorTarget::Pane { ws_idx: 1, .. })
+        });
+        let NavigatorTarget::Pane {
+            pane_id: target, ..
+        } = rows(&state)[state.navigator.selected].target
+        else {
+            panic!("selected row should be a pane");
+        };
+
+        assert!(accept(&mut state));
+
         assert_eq!(
             state.pane_todo_edit.as_ref().expect("edit state").link,
-            PaneTodoEditLink::Keep
+            PaneTodoEditLink::Set(target),
+            "a target in another workspace stages like any other"
+        );
+        assert_eq!(state.mode, Mode::PaneTodoEdit);
+        assert_eq!(state.navigator.purpose, NavigatorPurpose::Goto);
+        assert_ne!(target, pane_id);
+    }
+
+    /// Spec: "non-pane rows are not targets" — a workspace row expands or
+    /// collapses instead, and neither kind ends the selection.
+    #[test]
+    fn workspace_and_tab_rows_never_resolve_a_link() {
+        let (mut state, _) = state_with_link_picker_open();
+        select(&mut state, |row| row.is_workspace);
+        let expanded_before = state.navigator.expanded_workspaces.len();
+
+        assert!(!accept(&mut state), "a workspace row resolves nothing");
+
+        assert_eq!(
+            state.pane_todo_edit.as_ref().expect("edit state").link,
+            PaneTodoEditLink::Keep,
+            "the staged link is untouched"
+        );
+        assert_eq!(state.mode, Mode::Navigator, "the picker stays open");
+        assert_ne!(
+            state.navigator.expanded_workspaces.len(),
+            expanded_before,
+            "it collapses or expands instead"
         );
     }
 
     #[test]
-    fn the_edit_link_control_wraps_straight_back_when_a_pane_is_alone() {
-        let mut state = AppState::test_new();
-        state.workspaces = vec![crate::workspace::Workspace::test_new("links")];
-        state.active = Some(0);
-        state.ensure_test_terminals();
-        let pane_id = state.workspaces[0].tabs[0].root_pane;
+    fn the_clear_entry_clears_the_link() {
+        let (mut state, _) = state_with_link_picker_open();
+        select(&mut state, |row| {
+            matches!(row.target, NavigatorTarget::ClearLink)
+        });
 
-        state.open_new_pane_todo(pane_id);
-        state.cycle_pane_todo_edit_link();
+        assert!(accept(&mut state));
+
         assert_eq!(
             state.pane_todo_edit.as_ref().expect("edit state").link,
             PaneTodoEditLink::Clear
         );
+        assert_eq!(state.mode, Mode::PaneTodoEdit);
+    }
 
-        // The only pane is the todo's own, so there is nothing to link to.
-        assert!(state.pane_link_candidates(pane_id).is_empty());
-        state.cycle_pane_todo_edit_link();
+    /// Spec: "leaving the selection without choosing SHALL leave the link as
+    /// it was".
+    #[test]
+    fn dismissing_the_picker_keeps_the_link_it_had() {
+        let (mut state, _) = state_with_link_picker_open();
+        let target = match rows(&state)
+            .iter()
+            .find(|row| matches!(row.target, NavigatorTarget::Pane { .. }))
+            .expect("a pane row")
+            .target
+        {
+            NavigatorTarget::Pane { pane_id, .. } => pane_id,
+            _ => unreachable!(),
+        };
+        state.pane_todo_edit.as_mut().expect("edit state").link = PaneTodoEditLink::Set(target);
+
+        state.close_pane_todo_link_picker();
+
         assert_eq!(
             state.pane_todo_edit.as_ref().expect("edit state").link,
-            PaneTodoEditLink::Keep
+            PaneTodoEditLink::Set(target),
+            "dismissal stages nothing, so the previous choice stands"
         );
+        assert_eq!(state.mode, Mode::PaneTodoEdit);
+        assert_eq!(state.navigator.purpose, NavigatorPurpose::Goto);
+    }
+
+    /// The picker never opens on the clear entry, so a mis-keyed Enter cannot
+    /// wipe a link the user meant to keep.
+    #[test]
+    fn the_picker_does_not_open_on_the_clear_entry() {
+        let (state, _) = state_with_link_picker_open();
+        assert!(state.navigator.selected > 0);
+        assert!(matches!(rows(&state)[0].target, NavigatorTarget::ClearLink));
+    }
+
+    /// Ordinary navigation must be unaffected: no clear entry, every pane
+    /// offered, and Enter still focuses.
+    #[test]
+    fn the_goto_navigator_is_unchanged_by_the_picker() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("here")];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        state.open_navigator();
+
+        assert_eq!(state.navigator.purpose, NavigatorPurpose::Goto);
+        assert!(!rows(&state)
+            .iter()
+            .any(|row| matches!(row.target, NavigatorTarget::ClearLink)));
+
+        assert!(accept(&mut state));
+        assert_eq!(state.mode, Mode::Terminal, "goto still focuses and closes");
     }
 
     fn test_toast(kind: ToastKind, title: &str, target: Option<ToastTarget>) -> ToastNotification {
