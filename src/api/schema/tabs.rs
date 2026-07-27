@@ -44,5 +44,9 @@ pub struct TabInfo {
     pub label: String,
     pub focused: bool,
     pub pane_count: usize,
+    /// Aggregated over every pane in the tab by display ranking, so a tab
+    /// containing a working agent reports `working` even when a sibling pane
+    /// has finished unseen. Blocked still outranks working. This is the state
+    /// the tab *is*, not the one that most wants attention.
     pub agent_status: AgentStatus,
 }

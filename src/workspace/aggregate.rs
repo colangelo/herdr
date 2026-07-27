@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::agent_priority::attention_priority;
+use crate::agent_priority::{attention_priority, display_priority};
 use crate::detect::{Agent, AgentState};
 use crate::layout::PaneId;
 use crate::terminal::{TerminalId, TerminalState};
@@ -27,6 +27,25 @@ pub struct PaneDetail {
 }
 
 impl Tab {
+    /// The state this tab *is*, for anything that renders or reports it.
+    /// There is deliberately no attention-ranked counterpart: nothing sorts
+    /// tabs by attention today, and adding one blind would re-create the
+    /// ambiguity this pair of rankings exists to remove.
+    pub fn display_state(
+        &self,
+        terminals: &HashMap<TerminalId, TerminalState>,
+    ) -> (AgentState, bool) {
+        self.panes
+            .values()
+            .filter_map(|pane| {
+                terminals
+                    .get(&pane.attached_terminal_id)
+                    .map(|terminal| (terminal.state, pane.seen))
+            })
+            .max_by_key(|(state, seen)| display_priority(*state, *seen))
+            .unwrap_or((AgentState::Unknown, true))
+    }
+
     fn pane_details(
         &self,
         terminals: &HashMap<TerminalId, TerminalState>,
@@ -74,10 +93,10 @@ impl Tab {
 }
 
 impl Workspace {
-    pub fn aggregate_state(
-        &self,
-        terminals: &HashMap<TerminalId, TerminalState>,
-    ) -> (AgentState, bool) {
+    fn pane_states<'a>(
+        &'a self,
+        terminals: &'a HashMap<TerminalId, TerminalState>,
+    ) -> impl Iterator<Item = (AgentState, bool)> + 'a {
         self.tabs
             .iter()
             .flat_map(|tab| tab.panes.values())
@@ -86,6 +105,26 @@ impl Workspace {
                     .get(&pane.attached_terminal_id)
                     .map(|terminal| (terminal.state, pane.seen))
             })
+    }
+
+    /// The state this workspace *is*, for anything that renders or reports it.
+    pub fn display_state(
+        &self,
+        terminals: &HashMap<TerminalId, TerminalState>,
+    ) -> (AgentState, bool) {
+        self.pane_states(terminals)
+            .max_by_key(|(state, seen)| display_priority(*state, *seen))
+            .unwrap_or((AgentState::Unknown, true))
+    }
+
+    /// The state this workspace *wants the user for*, for attention-ordered
+    /// sorting. Not interchangeable with [`Workspace::display_state`]: a
+    /// finished-but-unseen pane outranks a working one here and only here.
+    pub fn attention_state(
+        &self,
+        terminals: &HashMap<TerminalId, TerminalState>,
+    ) -> (AgentState, bool) {
+        self.pane_states(terminals)
             .max_by_key(|(state, seen)| attention_priority(*state, *seen))
             .unwrap_or((AgentState::Unknown, true))
     }
@@ -162,19 +201,19 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_state_all_unknown() {
+    fn display_state_all_unknown() {
         let ws = Workspace::test_new("test");
         let mut terminals = HashMap::new();
         let root = ws.tabs[0].root_pane;
         let terminal = terminal_for_pane(&ws, root);
         terminals.insert(terminal.id.clone(), terminal);
-        let (state, seen) = ws.aggregate_state(&terminals);
+        let (state, seen) = ws.display_state(&terminals);
         assert_eq!(state, AgentState::Unknown);
         assert!(seen);
     }
 
     #[test]
-    fn aggregate_state_priority() {
+    fn display_state_prefers_working_over_seen_idle() {
         let mut ws = Workspace::test_new("test");
         let id2 = ws.test_split(Direction::Horizontal);
         let root_id = ws.tabs[0]
@@ -191,43 +230,90 @@ mod tests {
         second_terminal.state = AgentState::Working;
         terminals.insert(second_terminal.id.clone(), second_terminal);
 
-        let (state, seen) = ws.aggregate_state(&terminals);
+        let (state, seen) = ws.display_state(&terminals);
 
         assert_eq!(state, AgentState::Working);
         assert!(seen);
     }
 
-    /// Characterization test for the issue-39 bug: a pane that finished while
-    /// unseen ("done") currently outranks an actively working sibling, so the
-    /// sidebar row renders done while an agent is still working.
+    /// The issue-39 fix: a pane that finished while unseen ("done") must not
+    /// mask an actively working sibling. The same pair still ranks the other
+    /// way for attention, which is what keeps the priority sorts useful.
     ///
     /// <https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/39>
     #[test]
-    fn aggregate_state_done_unseen_beats_working() {
+    fn display_state_working_beats_done_unseen() {
         let (ws, terminals) =
             workspace_with_pane_states(&[(AgentState::Idle, false), (AgentState::Working, true)]);
 
-        assert_eq!(ws.aggregate_state(&terminals), (AgentState::Idle, false));
+        assert_eq!(ws.display_state(&terminals), (AgentState::Working, true));
+        assert_eq!(ws.attention_state(&terminals), (AgentState::Idle, false));
+    }
+
+    /// The displayed state is a function of the panes a row covers and nothing
+    /// else. Marking a finished sibling seen — which is what focusing a pane
+    /// does to every pane in its tab — must not change what the row shows.
+    ///
+    /// Before the fix this was the entire bug: the row read `done` until a
+    /// focus switch dropped the finished pane's rank, and only then revealed
+    /// the working agent that had been there the whole time.
+    #[test]
+    fn display_state_is_unchanged_by_focusing_a_done_sibling() {
+        let (mut ws, terminals) =
+            workspace_with_pane_states(&[(AgentState::Idle, false), (AgentState::Working, true)]);
+
+        let before = ws.display_state(&terminals);
+
+        // The tab-wide `seen` sweep that focusing any pane in the tab performs.
+        for pane in ws.tabs[0].panes.values_mut() {
+            pane.seen = true;
+        }
+
+        assert_eq!(ws.display_state(&terminals), before);
+        assert_eq!(before, (AgentState::Working, true));
     }
 
     /// Must survive the display/attention split: blocked outranks working in
     /// both rankings, because a blocked agent cannot proceed at all.
     #[test]
-    fn aggregate_state_blocked_beats_working() {
+    fn display_state_blocked_beats_working() {
         let (ws, terminals) =
             workspace_with_pane_states(&[(AgentState::Working, true), (AgentState::Blocked, true)]);
 
-        assert_eq!(ws.aggregate_state(&terminals), (AgentState::Blocked, true));
+        assert_eq!(ws.display_state(&terminals), (AgentState::Blocked, true));
     }
 
     /// Must survive the display/attention split: a finished-and-unseen pane
     /// still outranks one that is idle and already seen.
     #[test]
-    fn aggregate_state_done_beats_seen_idle() {
+    fn display_state_done_beats_seen_idle() {
         let (ws, terminals) =
             workspace_with_pane_states(&[(AgentState::Idle, true), (AgentState::Idle, false)]);
 
-        assert_eq!(ws.aggregate_state(&terminals), (AgentState::Idle, false));
+        assert_eq!(ws.display_state(&terminals), (AgentState::Idle, false));
+    }
+
+    /// Tab-level aggregation is a display path too — the navigator's tab rows
+    /// and the API's `TabInfo.agent_status` both read it.
+    #[test]
+    fn tab_display_state_working_beats_done_unseen() {
+        let (ws, terminals) =
+            workspace_with_pane_states(&[(AgentState::Idle, false), (AgentState::Working, true)]);
+
+        assert_eq!(
+            ws.tabs[0].display_state(&terminals),
+            (AgentState::Working, true)
+        );
+    }
+
+    #[test]
+    fn tab_display_state_is_unknown_without_terminals() {
+        let ws = Workspace::test_new("test");
+
+        assert_eq!(
+            ws.tabs[0].display_state(&HashMap::new()),
+            (AgentState::Unknown, true)
+        );
     }
 
     #[test]
