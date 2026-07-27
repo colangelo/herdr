@@ -49,11 +49,21 @@ impl App {
 
     fn resolve_link(&self, raw: &str) -> Option<TodoLink> {
         let (ws_idx, pane_id) = self.parse_pane_id(raw)?;
-        // PaneInfo.label and .agent are both Option<String>; fall back to the
-        // caller's own target string so a link always carries a usable label.
+        // Captured once and read back long afterwards, so this prefers a
+        // stable name over the pane's live title: the user's own label, then
+        // the agent, then the command the pane launched. Without that third
+        // step a plain shell falls straight through to its identifier, which
+        // locates the pane without naming it — `w1:p3` rather than `npm`.
         let label = self
             .pane_info(ws_idx, pane_id)
             .and_then(|pane| pane.label.or(pane.agent))
+            .or_else(|| {
+                crate::app::actions::launch_label(
+                    self.state
+                        .pane_terminal(pane_id)
+                        .and_then(|terminal| terminal.launch_argv.as_ref()),
+                )
+            })
             .unwrap_or_else(|| raw.to_string());
         Some(TodoLink {
             pane: Some(pane_id),
@@ -616,6 +626,80 @@ mod tests {
         assert_eq!(todo["link_pane_id"], pane_id);
         assert_eq!(todo["link_alive"], true);
         assert!(todo["link_label"].is_string());
+    }
+
+    /// The target pane's terminal, so a test can give it something to be
+    /// named by.
+    fn target_terminal(app: &mut App) -> &mut crate::terminal::TerminalState {
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+    }
+
+    fn link_label(app: &mut App, pane_id: &str) -> String {
+        let response = request_json(
+            app,
+            Method::TodoAdd(TodoAddParams {
+                pane_id: pane_id.to_string(),
+                text: "look over there".into(),
+                priority: None,
+                link_pane_id: Some(pane_id.to_string()),
+            }),
+        );
+        response["result"]["todo"]["link_label"]
+            .as_str()
+            .expect("a link always carries a label")
+            .to_string()
+    }
+
+    /// A pane running a plain shell has neither a manual label nor an agent,
+    /// so without the launched-command step the stored label is the pane's own
+    /// identifier — it locates the target without naming it, which is the
+    /// thing that made links unreadable.
+    #[test]
+    fn todo_link_to_a_shell_pane_captures_its_launched_command() {
+        let (mut app, pane_id) = test_app_with_pane();
+        target_terminal(&mut app).launch_argv = Some(vec!["/bin/zsh".into()]);
+
+        assert_eq!(link_label(&mut app, &pane_id), "zsh");
+    }
+
+    #[test]
+    fn todo_link_prefers_a_manual_label_over_the_launched_command() {
+        let (mut app, pane_id) = test_app_with_pane();
+        let terminal = target_terminal(&mut app);
+        terminal.launch_argv = Some(vec!["/bin/zsh".into()]);
+        terminal.set_manual_label("reviewer".into());
+
+        assert_eq!(link_label(&mut app, &pane_id), "reviewer");
+    }
+
+    #[test]
+    fn todo_link_prefers_the_agent_over_the_launched_command() {
+        let (mut app, pane_id) = test_app_with_pane();
+        let terminal = target_terminal(&mut app);
+        terminal.launch_argv = Some(vec!["/bin/zsh".into()]);
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+
+        assert_eq!(link_label(&mut app, &pane_id), "claude");
+    }
+
+    /// A target offering no name at all still has to carry something, and the
+    /// identifier is the only thing left.
+    #[test]
+    fn todo_link_falls_back_to_the_identifier_when_the_pane_offers_no_name() {
+        let (mut app, pane_id) = test_app_with_pane();
+        assert!(target_terminal(&mut app).launch_argv.is_none());
+
+        assert_eq!(link_label(&mut app, &pane_id), pane_id);
     }
 
     #[test]
