@@ -660,7 +660,7 @@ impl AppState {
                         return None;
                     }
                     if rect_contains(rects.link, mouse.column, mouse.row) {
-                        self.cycle_pane_todo_edit_link();
+                        self.open_pane_todo_link_picker_from(terminal_runtimes);
                         return None;
                     }
                     if rect_contains(rects.done, mouse.column, mouse.row) {
@@ -5458,11 +5458,22 @@ mod tests {
         let before = app.state.pane_todo_edit.as_ref().expect("edit state").link;
         let action = click(&mut app, rects.link);
         assert!(action.is_none(), "the link row is handled in place");
-        assert_ne!(
+        assert_eq!(
+            app.state.mode,
+            Mode::Navigator,
+            "clicking the link row opens the picker"
+        );
+        assert_eq!(
+            app.state.navigator.purpose,
+            crate::app::state::NavigatorPurpose::PaneTodoLink
+        );
+        assert_eq!(
             app.state.pane_todo_edit.as_ref().expect("edit state").link,
             before,
-            "clicking the link row must cycle the link"
+            "opening the picker stages nothing on its own"
         );
+        // Back to the modal so the rest of this test still has one.
+        app.state.close_pane_todo_link_picker();
 
         assert!(
             matches!(

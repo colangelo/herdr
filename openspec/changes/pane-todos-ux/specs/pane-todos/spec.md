@@ -196,8 +196,11 @@ left unbound by default.
 
 #### Scenario: Non-pane rows are not targets
 
-- **WHEN** a workspace or tab row is activated in selection mode
-- **THEN** it expands or collapses and no link target is chosen
+- **WHEN** a workspace row is activated in selection mode
+- **THEN** it expands or collapses, no link target is chosen, and the
+  selection stays open
+- **WHEN** a tab row is activated instead
+- **THEN** nothing happens, since only workspaces carry expansion state
 
 #### Scenario: Leaving selection keeps the previous link
 

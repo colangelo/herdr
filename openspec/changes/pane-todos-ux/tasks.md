@@ -30,14 +30,14 @@ the picker then persists `w1:p3`.
 
 ## 5. Navigator selection mode
 
-- [ ] 5.1 Add a navigator purpose to `AppState` (goto vs. selecting a link target for a todo), defaulting to goto and reset on close
-- [ ] 5.2 In selection mode, resolve on pane rows only; make workspace and tab rows expand/collapse without resolving
-- [ ] 5.3 Offer a synthetic clear-the-link entry, and exclude the todo's own pane
-- [ ] 5.4 Return to `Mode::PaneTodoEdit` on both resolve and dismiss, leaving the staged link untouched on dismiss, mirroring `close_pane_todo_edit_and_return`
-- [ ] 5.5 Title the overlay for the selection purpose rather than reusing the goto title
-- [ ] 5.6 Show the navigator's pane label chain in the picker rows (client-side display only — the stored label is group 2)
-- [ ] 5.7 Point the edit modal's link control (key and click) at the picker; delete `cycle_pane_todo_edit_link` and `pane_link_candidates`
-- [ ] 5.8 Tests: a pane row stages the target; workspace/tab rows do not; the clear entry clears; own pane absent; dismiss preserves the prior link; the label shown in the picker for a shell target matches what group 2 persists
+- [x] 5.1 Add a navigator purpose to `AppState` (goto vs. selecting a link target for a todo), defaulting to goto and reset on close
+- [x] 5.2 In selection mode, resolve on pane rows only; make workspace and tab rows expand/collapse without resolving
+- [x] 5.3 Offer a synthetic clear-the-link entry, and exclude the todo's own pane
+- [x] 5.4 Return to `Mode::PaneTodoEdit` on both resolve and dismiss, leaving the staged link untouched on dismiss, mirroring `close_pane_todo_edit_and_return`
+- [x] 5.5 Title the overlay for the selection purpose rather than reusing the goto title
+- [x] 5.6 Show the navigator's pane label chain in the picker rows (client-side display only — the stored label is group 2)
+- [x] 5.7 Point the edit modal's link control (key and click) at the picker; delete `cycle_pane_todo_edit_link` and `pane_link_candidates`
+- [x] 5.8 Tests: a pane row stages the target; workspace/tab rows do not; the clear entry clears; own pane absent; dismiss preserves the prior link; the label shown in the picker for a shell target matches what group 2 persists
 
 ## 6. Docs and validation
 

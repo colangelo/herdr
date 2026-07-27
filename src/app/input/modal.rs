@@ -215,7 +215,13 @@ pub(crate) fn handle_navigator_key(
 
     match key.code {
         KeyCode::Esc => {
-            leave_modal(state);
+            // Dismissing a link selection goes back to the modal that opened
+            // it, leaving the staged link exactly as it was.
+            if state.navigator.purpose == crate::app::state::NavigatorPurpose::PaneTodoLink {
+                state.close_pane_todo_link_picker();
+            } else {
+                leave_modal(state);
+            }
         }
         KeyCode::Enter => {
             state.accept_navigator_selection_from(terminal_runtimes);
@@ -1207,7 +1213,8 @@ impl App {
                 return;
             }
             KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.state.cycle_pane_todo_edit_link();
+                self.state
+                    .open_pane_todo_link_picker_from(&self.terminal_runtimes);
                 return;
             }
             // Space belongs to the text field here, so the panel's `space`
@@ -3441,11 +3448,7 @@ mod tests {
 
     /// Builds a workspace with three panes so the todo's own pane has two
     /// linkable siblings, and puts one todo on the root pane.
-    fn app_with_linkable_panes() -> (
-        App,
-        crate::layout::PaneId,
-        Vec<(crate::layout::PaneId, String)>,
-    ) {
+    fn app_with_linkable_panes() -> (App, crate::layout::PaneId, Vec<crate::layout::PaneId>) {
         let mut app = app_with_test_workspaces(&["links"]);
         app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
         app.state.workspaces[0].test_split(ratatui::layout::Direction::Vertical);
@@ -3465,9 +3468,52 @@ mod tests {
                 100,
             )
             .expect("todo should be added");
-        let candidates = app.state.pane_link_candidates(pane_id);
+        let candidates: Vec<crate::layout::PaneId> = app.state.workspaces[0].tabs[0]
+            .layout
+            .pane_ids()
+            .into_iter()
+            .filter(|candidate| *candidate != pane_id)
+            .collect();
         assert_eq!(candidates.len(), 2, "two sibling panes should be linkable");
         (app, pane_id, candidates)
+    }
+
+    /// Choose a link target the way a user does: ctrl+l opens the picker,
+    /// then a pane row is selected and accepted.
+    fn choose_link_target(app: &mut App, target: crate::layout::PaneId) {
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.state.navigator.selected = app
+            .state
+            .navigator_rows_from(&app.terminal_runtimes)
+            .iter()
+            .position(|row| {
+                matches!(
+                    row.target,
+                    crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == target
+                )
+            })
+            .expect("the target pane should be offered");
+        app.state
+            .accept_navigator_selection_from(&app.terminal_runtimes);
+    }
+
+    /// Clear the link through the picker's explicit entry.
+    fn choose_clear_link(app: &mut App) {
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::CONTROL,
+        ));
+        app.state.navigator.selected = app
+            .state
+            .navigator_rows_from(&app.terminal_runtimes)
+            .iter()
+            .position(|row| matches!(row.target, crate::app::state::NavigatorTarget::ClearLink))
+            .expect("the clear entry should be offered");
+        app.state
+            .accept_navigator_selection_from(&app.terminal_runtimes);
     }
 
     fn stored_todo(app: &App, pane_id: crate::layout::PaneId) -> crate::terminal::todo::PaneTodo {
@@ -3490,18 +3536,29 @@ mod tests {
         let todo_id = stored_todo(&app, pane_id).id;
         app.state.open_pane_todo_edit(pane_id, todo_id);
 
-        // Keep -> Clear -> first candidate.
+        // ctrl+l opens the picker; choose the first sibling pane from it.
         app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
             KeyCode::Char('l'),
             KeyModifiers::CONTROL,
         ));
-        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
-            KeyCode::Char('l'),
-            KeyModifiers::CONTROL,
-        ));
+        assert_eq!(app.state.mode, Mode::Navigator);
+        app.state.navigator.selected = app
+            .state
+            .navigator_rows_from(&app.terminal_runtimes)
+            .iter()
+            .position(|row| {
+                matches!(
+                    row.target,
+                    crate::app::state::NavigatorTarget::Pane { pane_id: candidate, .. }
+                        if candidate == candidates[0]
+                )
+            })
+            .expect("the sibling pane should be offered");
+        app.state
+            .accept_navigator_selection_from(&app.terminal_runtimes);
         assert_eq!(
             app.state.pane_todo_edit.as_ref().expect("edit state").link,
-            crate::app::state::PaneTodoEditLink::Set(candidates[0].0),
+            crate::app::state::PaneTodoEditLink::Set(candidates[0]),
         );
 
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
@@ -3510,14 +3567,14 @@ mod tests {
         let link = saved.link.expect("the chosen link must reach the store");
         assert_eq!(
             link.pane,
-            Some(candidates[0].0),
+            Some(candidates[0]),
             "the modal's link target must be the pane that was selected"
         );
         // The label is resolved server-side from the target pane's label or
         // agent name, falling back to its public id; these test panes have
         // neither, so the public id is what gets captured.
         let expected_label = app
-            .public_pane_id(0, candidates[0].0)
+            .public_pane_id(0, candidates[0])
             .expect("target pane has a public id");
         assert_eq!(
             link.label, expected_label,
@@ -3648,29 +3705,19 @@ mod tests {
 
         // Give the todo a link first, through the same save path.
         app.state.open_pane_todo_edit(pane_id, todo_id);
-        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
-            KeyCode::Char('l'),
-            KeyModifiers::CONTROL,
-        ));
-        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
-            KeyCode::Char('l'),
-            KeyModifiers::CONTROL,
-        ));
+        choose_link_target(&mut app, candidates[0]);
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
         assert_eq!(
             stored_todo(&app, pane_id)
                 .link
                 .expect("link should be set")
                 .pane,
-            Some(candidates[0].0),
+            Some(candidates[0]),
         );
 
-        // Reopen and cycle Keep -> Clear, then save.
+        // Reopen and pick the clear entry, then save.
         app.state.open_pane_todo_edit(pane_id, todo_id);
-        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
-            KeyCode::Char('l'),
-            KeyModifiers::CONTROL,
-        ));
+        choose_clear_link(&mut app);
         assert_eq!(
             app.state.pane_todo_edit.as_ref().expect("edit state").link,
             crate::app::state::PaneTodoEditLink::Clear,
@@ -3691,14 +3738,7 @@ mod tests {
         let (mut app, pane_id, candidates) = app_with_linkable_panes();
         let todo_id = stored_todo(&app, pane_id).id;
         app.state.open_pane_todo_edit(pane_id, todo_id);
-        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
-            KeyCode::Char('l'),
-            KeyModifiers::CONTROL,
-        ));
-        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
-            KeyCode::Char('l'),
-            KeyModifiers::CONTROL,
-        ));
+        choose_link_target(&mut app, candidates[0]);
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
 
         // Reopen, change only the text, save with the link left on Keep.
@@ -3713,7 +3753,7 @@ mod tests {
         let saved = stored_todo(&app, pane_id);
         assert_eq!(
             saved.link.expect("Keep must not drop the link").pane,
-            Some(candidates[0].0),
+            Some(candidates[0]),
         );
         assert!(
             saved.text.ends_with('!'),
