@@ -878,7 +878,10 @@ fn navigator_matches(query: &str, text: &str) -> bool {
     text_matches_query(query, text)
 }
 
-fn launch_label(argv: Option<&Vec<String>>) -> Option<String> {
+/// The command a pane was launched with, reduced to its basename. Shared with
+/// the `todo.*` link handlers so a stored link and the navigator name a plain
+/// shell the same way.
+pub(super) fn launch_label(argv: Option<&Vec<String>>) -> Option<String> {
     let argv = argv?;
     let command = argv.first()?;
     std::path::Path::new(command)
