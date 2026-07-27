@@ -1555,9 +1555,11 @@ pub struct NotificationCenterState {
     pub hovered_button: Option<NotificationCenterButton>,
 }
 
-/// Footer buttons of the pane todo panel, in render order.
+/// Footer buttons of the pane todo panel, in render order. `Add` leads so it
+/// keeps the same position whether or not the pane holds todos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneTodoPanelButton {
+    Add,
     Toggle,
     ClearDone,
     Close,

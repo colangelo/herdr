@@ -24,9 +24,9 @@ the picker then persists `w1:p3`.
 
 ## 4. Add from the panel
 
-- [ ] 4.1 Bind `a` in `handle_pane_todos_key_via_api` (`src/app/input/modal.rs`) to `AppState::open_new_pane_todo` for the panel's pane
-- [ ] 4.2 Add the matching footer button in `src/ui/todo_panel.rs`, and render the footer in the empty state so an empty panel is not a dead end
-- [ ] 4.3 Tests: `a` opens the edit modal on a new todo and saving returns to the panel with it listed; the empty-state panel offers the add affordance
+- [x] 4.1 Bind `a` in `handle_pane_todos_key_via_api` (`src/app/input/modal.rs`) to `AppState::open_new_pane_todo` for the panel's pane
+- [x] 4.2 Add the matching footer button in `src/ui/todo_panel.rs`, and render the footer in the empty state so an empty panel is not a dead end
+- [x] 4.3 Tests: `a` opens the edit modal on a new todo and saving returns to the panel with it listed; the empty-state panel offers the add affordance
 
 ## 5. Navigator selection mode
 

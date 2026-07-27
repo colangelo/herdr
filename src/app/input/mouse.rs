@@ -313,6 +313,9 @@ impl AppState {
                         .pane_todo_panel_buttons()
                         .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
                     {
+                        Some(PaneTodoPanelButton::Add) => {
+                            return Some(MouseAction::PaneTodo(PaneTodoAction::Add));
+                        }
                         Some(PaneTodoPanelButton::Toggle) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::ToggleDone));
                         }
@@ -1668,8 +1671,9 @@ impl AppState {
             .clamp(30, 60)
             .min(screen.width.max(1));
         let rows = (todos.len().max(1) as u16).min(PANE_TODO_PANEL_MAX_ROWS);
-        let footer = if todos.is_empty() { 0 } else { 1 };
-        let panel_h = (rows + 2 + footer).min(screen.height.max(1));
+        // The footer row is always reserved: an empty panel still carries add
+        // and close, and sizing it away is what made a quiet pane a dead end.
+        let panel_h = (rows + 2 + 1).min(screen.height.max(1));
         let right = anchor.x.saturating_add(anchor.width);
         let x = right.saturating_sub(panel_w).max(screen.x);
         let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
@@ -1696,13 +1700,13 @@ impl AppState {
         ))
     }
 
-    /// The footer button row, present only when there is something to act on.
+    /// The footer button row. Present even on a pane with no todos, where it
+    /// narrows to add and close — the panel always offers a way to put
+    /// something in it.
     pub(crate) fn pane_todo_panel_buttons(&self) -> Option<crate::ui::PaneTodoPanelButtonRects> {
         let panel = self.pane_todos.as_ref()?;
-        if self.pane_todos_in_display_order(panel.pane_id).is_empty() {
-            return None;
-        }
-        crate::ui::pane_todo_panel_button_rects(self.pane_todo_panel_inner()?)
+        let has_todos = !self.pane_todos_in_display_order(panel.pane_id).is_empty();
+        crate::ui::pane_todo_panel_button_rects(self.pane_todo_panel_inner()?, has_todos)
     }
 
     /// The edit modal's interactive regions in screen space, from the one
@@ -5557,6 +5561,33 @@ mod tests {
         }
     }
 
+    /// The footer's add box, which is the mouse route to the action `a` gives
+    /// the keyboard.
+    #[test]
+    fn clicking_the_footer_add_button_opens_a_new_todo() {
+        let mut app = app_for_pane_todo_indicator();
+        let pane_id = app.state.view.pane_infos[0].id;
+        app.state.open_pane_todos(pane_id);
+        let buttons = app
+            .state
+            .pane_todo_panel_buttons()
+            .expect("footer buttons should exist");
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                buttons.add.x,
+                buttons.row_y(),
+            ),
+        );
+
+        assert!(
+            matches!(action, Some(MouseAction::PaneTodo(PaneTodoAction::Add))),
+            "the add box must report the add action"
+        );
+    }
+
     /// The reason the indicator is drawn on every pane: an empty pane is
     /// exactly the one you want to add a todo to, and before this it offered
     /// nothing to click.
@@ -5834,7 +5865,9 @@ mod tests {
         // from the panel's edge: `centered_button_row` centres the row, so
         // `panel.x + 1` lands *on* the leftmost box at this panel width and
         // the test would pass without ever reaching the inert path.
-        let gap_col = buttons.clear_done.x + buttons.clear_done.width;
+        // `add` is the one box present in every layout, and something always
+        // follows it, so the cell just past it is reliably gap.
+        let gap_col = buttons.add.x + buttons.add.width;
         assert_eq!(
             buttons.hit(gap_col, buttons.row_y()),
             None,
