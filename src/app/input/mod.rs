@@ -225,10 +225,15 @@ impl App {
                 let Some(edit) = self.state.pane_todo_edit.as_mut() else {
                     return false;
                 };
-                let room = crate::terminal::todo::MAX_TODO_TEXT_LEN
-                    .saturating_sub(edit.text.chars().count());
-                edit.text
-                    .extend(text.chars().filter(|ch| !ch.is_control()).take(room));
+                // Newlines survive — a todo may hold more than one line — but
+                // every other control character is still dropped, so a pasted
+                // `ESC` cannot compose an escape sequence into a todo. The
+                // field itself holds the length line.
+                let pasted: String = text
+                    .chars()
+                    .filter(|ch| *ch == '\n' || !ch.is_control())
+                    .collect();
+                edit.text.insert_str(&pasted);
                 true
             }
             Mode::OpenExistingWorktree => {
@@ -1015,6 +1020,58 @@ mod tests {
             KeyCode::Char('v'),
             KeyModifiers::ALT
         )));
+    }
+
+    /// Spec: "the newline is kept and the escape character is dropped". A
+    /// pasted `ESC` still cannot compose an escape sequence into a todo; a
+    /// pasted newline is now ordinary text.
+    #[test]
+    fn pasting_into_a_todo_keeps_newlines_and_drops_other_control_characters() {
+        let mut app = test_app();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.open_new_pane_todo(pane_id);
+
+        assert!(app.paste_into_active_text_input("first\nse\x1bcond\ttab"));
+
+        assert_eq!(
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .text
+                .text(),
+            "first\nsecondtab"
+        );
+    }
+
+    /// A paste is still bounded by the store's limit, and takes what fits
+    /// rather than being dropped whole.
+    #[test]
+    fn pasting_into_a_todo_stops_at_the_stores_limit() {
+        let mut app = test_app();
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.open_new_pane_todo(pane_id);
+
+        let over = "x".repeat(crate::terminal::todo::MAX_TODO_TEXT_LEN + 20);
+        assert!(app.paste_into_active_text_input(&over));
+
+        assert_eq!(
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .text
+                .text()
+                .chars()
+                .count(),
+            crate::terminal::todo::MAX_TODO_TEXT_LEN
+        );
     }
 
     #[test]

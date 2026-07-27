@@ -241,11 +241,20 @@ fn render_row(
     } else {
         Style::default().fg(p.surface1).bg(p.panel_bg)
     };
+    // The picker stages a pane by its public identifier, so a row about to be
+    // staged leads with the identifier it would store. The goto purpose leaves
+    // it off: there the row is a place to go, not a value to record.
+    let public_id = (app.navigator.purpose == NavigatorPurpose::PaneTodoLink)
+        .then(|| row.public_pane_id.clone())
+        .flatten()
+        .map(|id| format!("{id} "))
+        .unwrap_or_default();
     let meta_width = metadata_width(rect.width);
     let left_budget = rect
         .width
         .saturating_sub(meta_width)
         .saturating_sub(display_width_u16(&format!("{gutter}{prefix} ")))
+        .saturating_sub(display_width_u16(&public_id))
         .saturating_sub(3) as usize;
     let title = truncate_end(&row.label, left_budget);
 
@@ -255,6 +264,7 @@ fn render_row(
         Span::styled(" ", base_style),
         Span::styled(status_icon, status_style),
         Span::raw(" "),
+        Span::styled(public_id, if selected { base_style } else { dim_style }),
         Span::styled(title, text_style),
     ];
     frame.render_widget(Paragraph::new(Line::from(spans)).style(base_style), rect);
@@ -567,7 +577,7 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
                 },
                 dim,
             ),
-            Span::styled("↑↓", key),
+            Span::styled("^j/^k/↑↓", key),
             Span::styled(" move  ", dim),
             Span::styled("ctrl+u", key),
             Span::styled(" clear  ", dim),
@@ -589,7 +599,7 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
             Span::styled(" search  ", dim),
             Span::styled("b/w/i/d/a", key),
             Span::styled(" states  ", dim),
-            Span::styled("j/k/↑↓", key),
+            Span::styled("j/k/^j/^k/↑↓", key),
             Span::styled(" move  ", dim),
             Span::styled("esc", key),
             Span::styled(" close", dim),
@@ -615,6 +625,7 @@ mod tests {
             is_workspace,
             is_tab: false,
             expanded: true,
+            public_pane_id: None,
             search_text: String::new(),
             matched: true,
         }

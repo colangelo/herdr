@@ -285,6 +285,48 @@ mod tests {
         assert!(t.add_todo(&exact, TodoPriority::Normal, None, 100).is_ok());
     }
 
+    /// A todo may hold more than one line. The store already allowed it —
+    /// `validate_text` trims the ends and counts characters, and never
+    /// inspects for control characters — but nothing could produce one until
+    /// the edit modal's field grew a newline key, so it was never pinned.
+    #[test]
+    fn a_todo_keeps_its_embedded_newlines_through_add_update_and_restore() {
+        let mut t = terminal();
+
+        let todo = t
+            .add_todo("  first\nsecond  ", TodoPriority::Normal, None, 100)
+            .unwrap();
+        assert_eq!(
+            todo.text, "first\nsecond",
+            "the ends are trimmed, the newline inside is not"
+        );
+
+        t.update_todo(
+            todo.id,
+            TodoUpdate {
+                text: Some("one\ntwo\nthree".into()),
+                ..TodoUpdate::default()
+            },
+            200,
+        )
+        .unwrap();
+        assert_eq!(t.todos()[0].text, "one\ntwo\nthree");
+
+        // The snapshot path a session restore comes back through.
+        let saved = t.todos().to_vec();
+        let mut restored = terminal();
+        restored.restore_todos(saved, 99);
+        assert_eq!(restored.todos()[0].text, "one\ntwo\nthree");
+
+        // Newlines count toward the cap like any other character.
+        let at_cap = "z\n".repeat(MAX_TODO_TEXT_LEN / 2);
+        assert_eq!(at_cap.chars().count(), MAX_TODO_TEXT_LEN);
+        assert_eq!(
+            restored.add_todo(&format!("{at_cap}z"), TodoPriority::Normal, None, 300),
+            Err(TodoError::TextTooLong)
+        );
+    }
+
     #[test]
     fn add_todo_enforces_the_per_pane_cap() {
         let mut t = terminal();

@@ -201,6 +201,43 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
     ];
     groups.push(("panes", panes));
 
+    // Fixed chords rather than `KeysConfig` actions — the todo panel and its
+    // edit modal own their keymaps — but a shortcut absent from this panel is
+    // a shortcut nobody finds, so they are listed the same way the navigation
+    // group lists `esc` and `enter`.
+    groups.push((
+        "pane todos",
+        vec![
+            help_entry("enter", "edit selected todo"),
+            help_entry("a", "add todo"),
+            help_entry("spc", "toggle done"),
+            help_entry("d", "remove todo"),
+            help_entry("c", "clear done todos"),
+            help_entry("g", "follow todo link"),
+            help_entry("esc / q", "close panel"),
+        ],
+    ));
+
+    groups.push((
+        "todo edit modal",
+        vec![
+            help_entry("ctrl+s / alt+enter", "save todo"),
+            help_entry("esc", "cancel edit"),
+            help_entry("tab", "cycle priority"),
+            help_entry("ctrl+l", "choose link target"),
+            help_entry("ctrl+t", "toggle done"),
+            help_entry("enter", "insert newline"),
+            help_entry("ctrl+a / ctrl+e", "line start / end"),
+            help_entry("ctrl+b / ctrl+f", "character back / forward"),
+            help_entry("alt+b / alt+f", "word back / forward"),
+            help_entry("ctrl+d", "delete forward"),
+            help_entry("ctrl+k / ctrl+u", "kill to line end / start"),
+            help_entry("ctrl+w", "kill word back"),
+            help_entry("ctrl+y", "yank last kill"),
+            help_entry("ctrl+_ / ctrl+- / ctrl+/", "undo"),
+        ],
+    ));
+
     if !kb.custom_commands.is_empty() {
         groups.push((
             "custom",
