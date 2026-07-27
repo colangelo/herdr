@@ -88,9 +88,15 @@ Herdr can run inside tmux as the outer terminal environment. Agent detection doe
 
 ## State rollups
 
-The sidebar rolls state upward.
+The sidebar rolls state upward. A row covering several panes — a workspace, a tab, or a collapsed worktree group — shows the state of the most significant agent under it, ranked `blocked`, `working`, `done`, `idle`, `unknown`.
 
-A blocked agent makes its pane, tab, and workspace look blocked. A working agent makes the workspace look active. A done agent stays visible until you view it.
+So a blocked agent makes its pane, tab, and workspace look blocked, and a workspace holding a working agent reads as working even when another agent beside it has already finished. A done agent stays visible until you view it.
+
+A rolled-up row reflects only the panes it covers. Viewing one pane never changes what a row shows for the others.
+
+Sorting is ranked differently, on purpose. Under `agent_panel_sort = "priority"` or `workspace_sort = "priority"`, a finished agent sorts *above* a working one, because it is the one waiting on you. The top of a priority-sorted list is what wants a decision; the state on each row is what its agents are actually doing.
+
+The `agent_status` that `workspace.info` and `tab.info` report follows the same rollup as the sidebar row. Per-pane `agent_status` is that pane's own state, with no rollup.
 
 This is the main Herdr workflow: start several agents, let them work in parallel, and use the sidebar to see which project needs a decision, which one is still running, and which one is ready to review.
 
