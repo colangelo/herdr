@@ -732,8 +732,11 @@ def cmd_validate_product_announcement(args: argparse.Namespace) -> int:
 
 def cmd_verify_release_state(args: argparse.Namespace) -> int:
     version = normalize_version(args.version)
-    release_payload = fetch_release_payload(version, args.repo)
-    expected_manifest = manifest_from_release_payload(release_payload, version, args.protocol)
+    tag = getattr(args, "tag", None)
+    release_payload = fetch_release_payload(version, args.repo, tag=tag)
+    expected_manifest = manifest_from_release_payload(
+        release_payload, version, args.protocol, expected_tag=tag
+    )
 
     local_raw_manifest = load_json(Path(args.output))
     local_manifest = ensure_manifest_matches_expected(
@@ -818,6 +821,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify_release_state.add_argument("--output", default=str(DEFAULT_LATEST_JSON_PATH))
     verify_release_state.add_argument("--live-url", default=DEFAULT_LIVE_MANIFEST_URL)
     verify_release_state.add_argument("--protocol", type=int)
+    verify_release_state.add_argument(
+        "--tag",
+        default=None,
+        help="Explicit release tag to read (e.g. v0.7.4-ac for forks). Defaults to v{version}.",
+    )
     verify_release_state.set_defaults(func=cmd_verify_release_state)
 
     return parser
