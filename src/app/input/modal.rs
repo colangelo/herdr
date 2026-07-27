@@ -30,6 +30,7 @@ pub(super) enum ModalAction {
 /// never diverge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PaneTodoAction {
+    Add,
     Edit,
     ToggleDone,
     Remove,
@@ -1093,6 +1094,7 @@ impl App {
             // Enter edits rather than jumps: todos are authored, notifications
             // are not. Jumping is on the link chip and `g`.
             KeyCode::Enter => self.apply_pane_todo_action(PaneTodoAction::Edit),
+            KeyCode::Char('a') => self.apply_pane_todo_action(PaneTodoAction::Add),
             KeyCode::Char(' ') => self.apply_pane_todo_action(PaneTodoAction::ToggleDone),
             KeyCode::Char('g') => self.apply_pane_todo_action(PaneTodoAction::FollowLink),
             KeyCode::Char('d') => self.apply_pane_todo_action(PaneTodoAction::Remove),
@@ -1119,6 +1121,13 @@ impl App {
             return;
         };
 
+        // Add acts on the pane, not on a selection, so it runs before the
+        // selected-todo lookup below — which is what lets an empty panel add.
+        if action == PaneTodoAction::Add {
+            self.state.open_new_pane_todo(pane_id);
+            return;
+        }
+
         if action == PaneTodoAction::ClearDone {
             self.runtime_todo_clear(
                 "tui.todo.clear",
@@ -1136,6 +1145,8 @@ impl App {
             return;
         };
         match action {
+            // Handled above, before the selected-todo lookup.
+            PaneTodoAction::Add => {}
             PaneTodoAction::Edit => self.state.open_pane_todo_edit(pane_id, todo.id),
             PaneTodoAction::ToggleDone => {
                 self.runtime_todo_update(
@@ -3468,6 +3479,68 @@ mod tests {
         assert!(
             app.state.pane_todo_edit.is_none(),
             "saving closes the modal"
+        );
+    }
+
+    /// Spec: "adding a todo from the panel". The panel's keys were selection,
+    /// toggle, edit, follow, remove, clear and close — no add — and
+    /// `keys.add_pane_todo` ships unbound, so out of the box there was no
+    /// keyboard route to creating a todo at all.
+    #[test]
+    fn a_adds_a_todo_from_the_panel_and_saving_returns_to_it() {
+        let (mut app, pane_id, _) = app_with_linkable_panes();
+        app.state.open_pane_todos(pane_id);
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('a')));
+
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        assert_eq!(edit.pane_id, pane_id);
+        assert!(edit.todo_id.is_none(), "a new todo, not an existing one");
+
+        for ch in "water the plants".chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodos,
+            "saving returns to the panel it was opened from"
+        );
+        assert!(app
+            .state
+            .pane_terminal(pane_id)
+            .expect("pane terminal")
+            .todos()
+            .iter()
+            .any(|todo| todo.text == "water the plants"));
+    }
+
+    /// The empty panel is the case that matters: every pane now carries an
+    /// indicator that opens one, so it has to offer a way forward.
+    #[test]
+    fn the_panel_can_add_on_a_pane_with_no_todos() {
+        let mut app = app_with_test_workspaces(&["empty"]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.open_pane_todos(pane_id);
+        assert!(app
+            .state
+            .pane_terminal(pane_id)
+            .expect("pane terminal")
+            .todos()
+            .is_empty());
+
+        app.handle_pane_todos_key_via_api(key(KeyCode::Char('a')));
+
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        assert_eq!(
+            app.state
+                .pane_todo_edit
+                .as_ref()
+                .expect("edit state")
+                .pane_id,
+            pane_id
         );
     }
 
