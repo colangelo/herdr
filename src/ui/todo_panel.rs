@@ -18,6 +18,7 @@ use crate::terminal::todo::{PaneTodo, TodoPriority};
 /// inside the filled box, in render order.
 const ADD_BUTTON: (&str, &str) = ("a", "add");
 const TOGGLE_BUTTON: (&str, &str) = ("spc", "toggle");
+const GO_BUTTON: (&str, &str) = ("g", "go");
 const CLEAR_DONE_BUTTON: (&str, &str) = ("c", "clear done");
 const CLOSE_BUTTON: (&str, &str) = ("esc", "close");
 
@@ -30,13 +31,15 @@ fn button_spec(button: (&'static str, &'static str)) -> ActionButtonSpec<'static
 
 /// Footer button rects; the mouse layer and the render agree on this geometry.
 /// `toggle` and `clear_done` are absent on a pane with no todos — there is
-/// nothing to toggle or clear — and are also the first two dropped when the
-/// panel is too narrow. `add` and `close` always survive: an empty panel that
-/// could not add is the dead end this footer exists to prevent.
+/// nothing to toggle or clear — and `go` is absent unless the selected todo's
+/// link resolves, since there is nowhere to go otherwise. `add` and `close`
+/// always survive: an empty panel that could not add is the dead end this
+/// footer exists to prevent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PaneTodoPanelButtonRects {
     pub add: Rect,
     pub toggle: Option<Rect>,
+    pub go: Option<Rect>,
     pub clear_done: Option<Rect>,
     pub close: Rect,
 }
@@ -49,6 +52,9 @@ impl PaneTodoPanelButtonRects {
         }
         if self.toggle.is_some_and(contains) {
             return Some(PaneTodoPanelButton::Toggle);
+        }
+        if self.go.is_some_and(contains) {
+            return Some(PaneTodoPanelButton::Go);
         }
         if self.clear_done.is_some_and(contains) {
             return Some(PaneTodoPanelButton::ClearDone);
@@ -67,6 +73,7 @@ impl PaneTodoPanelButtonRects {
 pub(crate) fn pane_todo_panel_button_rects(
     inner: Rect,
     has_todos: bool,
+    has_live_link: bool,
 ) -> Option<PaneTodoPanelButtonRects> {
     if inner.width == 0 || inner.height < 2 {
         return None;
@@ -75,16 +82,27 @@ pub(crate) fn pane_todo_panel_button_rects(
     let row_offset = inner.height - 1;
 
     // Widest layout first, each step dropping the least essential box still
-    // standing. The final pair is returned whether or not it fits, matching
-    // how the row behaved before `add` joined it.
-    for (want_toggle, want_clear) in [(true, true), (false, true), (false, false)] {
+    // standing. `go` is the last of the three to go: following a link is the
+    // one action whose key nothing else on screen advertises. The final pair is
+    // returned whether or not it fits, matching how the row behaved before
+    // `add` joined it.
+    for (want_toggle, want_clear, want_go) in [
+        (true, true, true),
+        (false, true, true),
+        (false, false, true),
+        (false, false, false),
+    ] {
         let with_toggle = want_toggle && has_todos;
         let with_clear = want_clear && has_todos;
+        let with_go = want_go && has_live_link;
 
-        let mut specs = Vec::with_capacity(4);
+        let mut specs = Vec::with_capacity(5);
         specs.push(button_spec(ADD_BUTTON));
         if with_toggle {
             specs.push(button_spec(TOGGLE_BUTTON));
+        }
+        if with_go {
+            specs.push(button_spec(GO_BUTTON));
         }
         if with_clear {
             specs.push(button_spec(CLEAR_DONE_BUTTON));
@@ -96,7 +114,7 @@ pub(crate) fn pane_todo_panel_button_rects(
             .map(|spec| action_button_width(spec.hint, spec.label))
             .sum::<u16>()
             + gap * (specs.len() as u16 - 1);
-        let last = !want_toggle && !want_clear;
+        let last = !want_toggle && !want_clear && !want_go;
         if width > inner.width && !last {
             continue;
         }
@@ -104,11 +122,13 @@ pub(crate) fn pane_todo_panel_button_rects(
         let mut rects = action_button_row_rects(inner, &specs, gap, row_offset).into_iter();
         let add = rects.next()?;
         let toggle = with_toggle.then(|| rects.next()).flatten();
+        let go = with_go.then(|| rects.next()).flatten();
         let clear_done = with_clear.then(|| rects.next()).flatten();
         let close = rects.next()?;
         return Some(PaneTodoPanelButtonRects {
             add,
             toggle,
+            go,
             clear_done,
             close,
         });
@@ -308,6 +328,15 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
                 Some(TOGGLE_BUTTON.0),
                 TOGGLE_BUTTON.1,
                 style_for(PaneTodoPanelButton::Toggle),
+            );
+        }
+        if let Some(go) = buttons.go {
+            render_action_button(
+                frame,
+                go,
+                Some(GO_BUTTON.0),
+                GO_BUTTON.1,
+                style_for(PaneTodoPanelButton::Go),
             );
         }
         if let Some(clear_done) = buttons.clear_done {
@@ -633,6 +662,69 @@ mod tests {
         let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
         assert!(footer.contains("a add"), "the way out of the empty state");
         assert!(footer.contains("esc close"));
+    }
+
+    /// Following a link worked from the first release of the panel — `g`, and
+    /// a click on the chip — but the footer never said so, which made a chip
+    /// that reads like a label the only visible route.
+    #[test]
+    fn the_footer_offers_go_only_while_the_selected_todo_has_a_live_link() {
+        // Wide text so the panel is roomy enough to hold every box.
+        let wide = "x".repeat(60);
+        let mut app = app_with_open_panel(&[(wide.as_str(), false, TodoPriority::Normal)]);
+        assert!(
+            app.pane_todo_panel_buttons()
+                .expect("footer buttons")
+                .go
+                .is_none(),
+            "an unlinked todo has nowhere to go"
+        );
+
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let todo_id = app.terminals[&terminal_id].todos()[0].id;
+        let link = |app: &mut AppState, target: Option<crate::layout::PaneId>, at: u64| {
+            app.terminals
+                .get_mut(&terminal_id)
+                .expect("test terminal should exist")
+                .update_todo(
+                    todo_id,
+                    TodoUpdate {
+                        link: Some(Some(TodoLink {
+                            pane: target,
+                            label: "infra".into(),
+                        })),
+                        ..TodoUpdate::default()
+                    },
+                    at,
+                )
+                .expect("todo should be updated");
+        };
+
+        link(&mut app, Some(pane_id), 300);
+        let buttons = app.pane_todo_panel_buttons().expect("footer buttons");
+        let go = buttons.go.expect("a live link offers the go button");
+        assert_eq!(
+            buttons.hit(go.x, go.y),
+            Some(PaneTodoPanelButton::Go),
+            "the drawn box is the box the mouse hits"
+        );
+        let rect = app.pane_todo_panel_rect().expect("panel rect should exist");
+        let buffer = draw(&app);
+        assert!(
+            row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1)).contains("g go"),
+            "the footer advertises the key that was already there"
+        );
+
+        // A dead link is inert, so the button goes away rather than lying.
+        link(&mut app, None, 400);
+        assert!(app
+            .pane_todo_panel_buttons()
+            .expect("footer buttons")
+            .go
+            .is_none());
     }
 
     #[test]

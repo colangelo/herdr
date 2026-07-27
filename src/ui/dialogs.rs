@@ -293,15 +293,21 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
         )),
         rects.priority,
     );
-    frame.render_widget(
-        Paragraph::new(field(
-            "link",
-            "^l",
-            app.pane_todo_edit_link_label(),
-            Style::default().fg(app.palette.blue),
-        )),
-        rects.link,
+    let mut link = field(
+        "link",
+        "^l",
+        app.pane_todo_edit_link_label(),
+        Style::default().fg(app.palette.blue),
     );
+    // The row shows an address; without this it gives no way to travel to it.
+    // Offered only while the link resolves, since `ctrl+g` is inert otherwise.
+    if app.pane_todo_edit_link_target().is_some() {
+        link.spans.push(Span::styled(
+            "   ^g go",
+            Style::default().fg(app.palette.overlay1),
+        ));
+    }
+    frame.render_widget(Paragraph::new(link), rects.link);
 
     // Composing a new todo has no done state to show, so the reserved row
     // stays blank rather than offering a control that cannot be saved.
@@ -1625,6 +1631,75 @@ mod tests {
             .map(|x| buffer[(x, rects.save.y)].symbol())
             .collect();
         assert!(save.contains("save"));
+    }
+
+    /// The link row shows an address, so it has to offer a way to travel to
+    /// it. `ctrl+l` re-picks the link and a click on the row does the same, so
+    /// without the `^g` hint the row is a dead end that looks like a
+    /// destination.
+    #[test]
+    fn the_link_row_advertises_go_only_while_the_link_resolves() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("todos")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        app.view.terminal_area = Rect::new(0, 0, 80, 24);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let todo_id = app
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "go there",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added")
+            .id;
+
+        let link_row = |app: &AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| render_pane_todo_edit_overlay(app, frame, frame.area()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let inner = crate::ui::centered_popup_rect(
+                Rect::new(0, 0, 80, 24),
+                PANE_TODO_EDIT_POPUP_WIDTH,
+                PANE_TODO_EDIT_POPUP_HEIGHT,
+            )
+            .map(|popup| Rect::new(popup.x + 1, popup.y + 1, popup.width - 2, popup.height - 2))
+            .expect("popup should fit");
+            let rects = pane_todo_edit_rects(inner).expect("edit rects should exist");
+            (rects.link.x..rects.link.x + rects.link.width)
+                .map(|x| buffer[(x, rects.link.y)].symbol())
+                .collect::<String>()
+        };
+
+        app.open_pane_todo_edit(pane_id, todo_id);
+        let row = link_row(&app);
+        assert!(row.contains("none"), "no link yet: {row}");
+        assert!(!row.contains("^g"), "and so nowhere to go: {row}");
+
+        // Staged through the picker, before any save: `ctrl+g` acts on the
+        // staged choice, so the hint has to follow it rather than the store.
+        if let Some(edit) = app.pane_todo_edit.as_mut() {
+            edit.link = crate::app::state::PaneTodoEditLink::Set(pane_id);
+        }
+        let row = link_row(&app);
+        assert!(
+            row.contains("^g go"),
+            "a staged live link can be followed: {row}"
+        );
+
+        if let Some(edit) = app.pane_todo_edit.as_mut() {
+            edit.link = crate::app::state::PaneTodoEditLink::Clear;
+        }
+        assert!(!link_row(&app).contains("^g"), "a cleared link cannot");
     }
 
     /// A todo may hold more than one line, so the input block is several rows
