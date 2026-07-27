@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::agent_priority::attention_priority;
 use crate::detect::{Agent, AgentState};
 use crate::layout::PaneId;
 use crate::terminal::{TerminalId, TerminalState};
@@ -72,16 +73,6 @@ impl Tab {
     }
 }
 
-fn pane_attention_priority(state: AgentState, seen: bool) -> u8 {
-    match (state, seen) {
-        (AgentState::Blocked, _) => 4,
-        (AgentState::Idle, false) => 3,
-        (AgentState::Working, _) => 2,
-        (AgentState::Idle, true) => 1,
-        (AgentState::Unknown, _) => 0,
-    }
-}
-
 impl Workspace {
     pub fn aggregate_state(
         &self,
@@ -95,7 +86,7 @@ impl Workspace {
                     .get(&pane.attached_terminal_id)
                     .map(|terminal| (terminal.state, pane.seen))
             })
-            .max_by_key(|(state, seen)| pane_attention_priority(*state, *seen))
+            .max_by_key(|(state, seen)| attention_priority(*state, *seen))
             .unwrap_or((AgentState::Unknown, true))
     }
 

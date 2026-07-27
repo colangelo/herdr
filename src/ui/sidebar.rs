@@ -12,6 +12,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
+use crate::agent_priority::attention_priority;
 use crate::app::state::{AgentPanelSort, Palette, WorkspaceSort};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
@@ -218,7 +219,7 @@ pub(crate) fn agent_panel_target_keys(app: &AppState) -> Vec<crate::layout::Pane
         .flat_map(|ws| ws.pane_details(&app.terminals))
         .map(|detail| {
             (
-                workspace_attention_priority(detail.state, detail.seen),
+                attention_priority(detail.state, detail.seen),
                 detail.last_agent_state_change_seq,
                 detail.pane_id,
             )
@@ -283,22 +284,12 @@ fn workspace_entry_gap(app: &AppState, entries: &[WorkspaceListEntry], entry_idx
     }
 }
 
-fn workspace_attention_priority(state: AgentState, seen: bool) -> u8 {
-    match (state, seen) {
-        (AgentState::Blocked, _) => 4,
-        (AgentState::Idle, false) => 3,
-        (AgentState::Working, _) => 2,
-        (AgentState::Idle, true) => 1,
-        (AgentState::Unknown, _) => 0,
-    }
-}
-
 fn space_aggregate_state(app: &AppState, key: &str) -> (AgentState, bool) {
     app.workspaces
         .iter()
         .filter(|ws| ws.worktree_space().is_some_and(|space| space.key == key))
         .map(|ws| ws.aggregate_state(&app.terminals))
-        .max_by_key(|(state, seen)| workspace_attention_priority(*state, *seen))
+        .max_by_key(|(state, seen)| attention_priority(*state, *seen))
         .unwrap_or((AgentState::Unknown, true))
 }
 
@@ -480,7 +471,7 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
         }
         let (state, seen) = ws.aggregate_state(&app.terminals);
         (
-            workspace_attention_priority(state, seen),
+            attention_priority(state, seen),
             ws.last_agent_state_change_seq(&app.terminals),
         )
     };
@@ -562,7 +553,7 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
         let (priority, last_change_seq) = if prioritize {
             let (state, seen) = space_aggregate_state(app, &space.key);
             (
-                workspace_attention_priority(state, seen),
+                attention_priority(state, seen),
                 space_last_agent_state_change_seq(app, &space.key),
             )
         } else {
