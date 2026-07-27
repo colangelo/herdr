@@ -14,12 +14,21 @@ its own raw parser maps a bare `LF` to `ctrl+j` (`src/raw_input.rs:1533`,
 | `ctrl+j` `ctrl+k` (list motion) | Everywhere | `ctrl+j` is `LF` (`0x0A`), `Enter` is `CR` (`0x0D`) — distinct bytes, and Herdr already parses them apart. Config already accepts `ctrl+j` bindings (`navigate_pane_down = "ctrl+j"` appears in existing tests). |
 | `alt+b` `alt+f` `alt+d` | Everywhere in practice | Sent as `ESC`-prefixed; already how Herdr receives `alt`. On macOS these are subject to the same Option dead-key caveat the sidebar jump ranges hit — `alt+f` is fine, `alt+e`/`alt+i`/`alt+n`/`alt+u` are not, and none of those are in this set. |
 | `alt+Enter` (alternative save) | Only with the Kitty protocol | Ghostty, kitty, foot, WezTerm report it; Terminal.app does not. Accepted when it arrives, never the only way to save. |
-| `ctrl+-` (undo) | Only with the Kitty protocol | There is no legacy encoding for it. `ctrl+_` is `0x1F` and works everywhere, which is also emacs' documented undo. |
-| `ctrl+/` (undo) | Sometimes | Many terminals send `0x1F` for it, i.e. it arrives *as* `ctrl+_`. Free to accept, not something to promise. |
+| `ctrl+-` (undo) | Everywhere | See the correction below: this is the arm the legacy `0x1F` byte lands on. |
+| `ctrl+/` (undo) | Sometimes | Many terminals send `0x1F` for it, i.e. it arrives on the same arm. Free to accept, not something to promise. |
 
-So: everything asked for is reachable, with one substitution — **undo binds to
-`ctrl+_` as its primary and accepts `ctrl+-` when the terminal reports it**,
-rather than the reverse.
+**Corrected during implementation.** This table originally had the undo rows the
+wrong way round, assuming a legacy `0x1F` would surface as `ctrl+_`. Herdr does
+not use crossterm's key parser; its own (`src/input/parse.rs:124`) maps the byte
+`31` to **`Char('-') + CONTROL`**. So on a terminal without the enhanced
+protocol, `ctrl+_` arrives *as `ctrl+-`*, and it is the `ctrl+-` arm — not the
+`ctrl+_` one — that satisfies "undo SHALL be bound to a chord a terminal without
+the enhanced keyboard protocol can still deliver".
+
+Rather than pick, the field accepts **`ctrl+_`, `ctrl+-`, and `ctrl+/` all
+three**. They are the same action, the legacy and enhanced encodings both land,
+and no user has to know which tier their terminal is in. Dogfooding on Ghostty
+confirmed `ctrl+_` and `ctrl+-` both firing.
 
 ## The real work is a cursor, not keybindings
 
