@@ -1243,8 +1243,11 @@ impl App {
         let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
             return;
         };
+        // Resolved against the target's own workspace, not `ws_idx`: a link
+        // may point at a pane in any workspace, and scoping the lookup to the
+        // active one drops it here with no error.
         let link_pane_id = match link {
-            crate::app::state::PaneTodoEditLink::Set(target) => self.public_pane_id(ws_idx, target),
+            crate::app::state::PaneTodoEditLink::Set(target) => self.session_public_pane_id(target),
             _ => None,
         };
         let clear_link = matches!(link, crate::app::state::PaneTodoEditLink::Clear);
@@ -3465,6 +3468,54 @@ mod tests {
         assert!(
             app.state.pane_todo_edit.is_none(),
             "saving closes the modal"
+        );
+    }
+
+    /// Pane ids are unique across the session but public pane ids are scoped
+    /// to a workspace, so `save_pane_todo_edit_via_api` resolving the target
+    /// against `state.active` dropped any cross-workspace link on save — no
+    /// error, no toast, the link simply was not there afterwards.
+    #[test]
+    fn a_link_to_a_pane_in_another_workspace_reaches_the_store() {
+        let mut app = app_with_test_workspaces(&["here", "there"]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let target = app.state.workspaces[1].tabs[0].root_pane;
+        assert_ne!(pane_id, target);
+        assert!(
+            app.public_pane_id(0, target).is_none(),
+            "the target must be unresolvable in the active workspace, \
+             otherwise this test proves nothing"
+        );
+
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "ship it",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+
+        let todo_id = stored_todo(&app, pane_id).id;
+        app.state.open_pane_todo_edit(pane_id, todo_id);
+        app.state.pane_todo_edit.as_mut().expect("edit state").link =
+            crate::app::state::PaneTodoEditLink::Set(target);
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Enter));
+
+        let link = stored_todo(&app, pane_id)
+            .link
+            .expect("a cross-workspace link must survive the save");
+        assert_eq!(
+            link.pane,
+            Some(target),
+            "the stored link must point at the pane that was chosen"
         );
     }
 
