@@ -5,15 +5,15 @@ the picker then persists `w1:p3`.
 
 ## 1. Session-wide public pane id (correctness)
 
-- [ ] 1.1 Add a session-wide public pane id lookup in `src/app/ids.rs` that locates the pane's own workspace, mirroring the search `AppState::pane_todo_link_target` already performs
-- [ ] 1.2 Use it in `save_pane_todo_edit_via_api` (`src/app/input/modal.rs`) instead of resolving against `self.state.active`
-- [ ] 1.3 Test: saving a link whose target is in another workspace stores the link and round-trips through snapshot restore. Mutation-check by reverting 1.2 and confirming the test fails
+- [x] 1.1 Add a session-wide public pane id lookup in `src/app/ids.rs` that locates the pane's own workspace, mirroring the search `AppState::pane_todo_link_target` already performs
+- [x] 1.2 Use it in `save_pane_todo_edit_via_api` (`src/app/input/modal.rs`) instead of resolving against `self.state.active`
+- [x] 1.3 Test: saving a link whose target is in another workspace stores the link and round-trips through snapshot restore. Mutation-check by reverting 1.2 and confirming the test fails
 
 ## 2. Link label chain (correctness)
 
-- [ ] 2.1 Share `launch_label` out of `src/app/actions.rs` rather than duplicating it
-- [ ] 2.2 Add the launched-command fallback to `resolve_link` (`src/app/api/todos.rs`) so the chain is `manual_label → agent label → launched command → raw public pane id`
-- [ ] 2.3 Tests: linking to a shell pane stores `zsh`/`npm` rather than `w1:p3`; the manual-label and agent-label cases still win over it; a target with no argv at all still falls back to the raw id. Cover it through the API so the CLI path is covered too
+- [x] 2.1 Share `launch_label` out of `src/app/actions.rs` rather than duplicating it
+- [x] 2.2 Add the launched-command fallback to `resolve_link` (`src/app/api/todos.rs`) so the chain is `manual_label → agent label → launched command → raw public pane id`
+- [x] 2.3 Tests: linking to a shell pane stores `zsh`/`npm` rather than `w1:p3`; the manual-label and agent-label cases still win over it; a target with no argv at all still falls back to the raw id. Cover it through the API so the CLI path is covered too
 
 ## 3. Always-on indicator
 
