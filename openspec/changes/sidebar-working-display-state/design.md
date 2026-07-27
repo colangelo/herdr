@@ -22,6 +22,12 @@ Two jobs, one table. For *sorting by attention* the ranking is defensible: a fin
 wants you more than a working one. For *choosing a displayed state* it is wrong — a space
 that contains a working agent is working.
 
+A **fourth** table exists and is easy to miss: `state_priority` in `src/app/actions.rs`,
+serving the navigator's tab rows. It is *not* a copy — it already ranks `Working` above
+`Idle + unseen`, i.e. it is the display ranking this change generalizes. Its existence is
+evidence the split is the right one, and it explains why navigator tab rows never showed the
+bug while navigator workspace rows (which call `aggregate_state`) did.
+
 ## Goals / Non-Goals
 
 **Goals**
@@ -69,15 +75,30 @@ attention when its agents are merely busy.
 else max-by-attention". That is `display_priority` written as a special case, but with the
 precedence hidden in control flow instead of stated in a table.
 
-### Decision 2: `aggregate_state` returns display state
+### Decision 2: aggregates are named for the ranking they follow
 
 `Workspace::aggregate_state` is the space-row source and switches to `display_priority`.
 Its `(AgentState, bool)` signature is unchanged, so `state_dot` and
 `agent_panel_status_key` need no changes.
 
-Call sites must be audited: any caller using `aggregate_state` to decide *ordering* or
-*notification* should move to an explicit attention-ranked helper rather than silently
-inheriting display order.
+It is **renamed** `display_state`, and an `attention_state` sibling is added. The bug came
+from a ranking nobody had to name at the call site; keeping a name as vague as
+`aggregate_state` after the split preserves exactly that hazard. Every call site should now
+read as a claim about which question it is asking.
+
+There are three aggregation sites, not one, and each needs both forms where it is used both
+ways:
+
+| Site | Display | Attention |
+|---|---|---|
+| `Workspace` (all panes) | `display_state` | `attention_state` |
+| worktree space (all workspaces with a space key), `src/ui/sidebar.rs` | `space_display_state` | `space_attention_state` |
+| `Tab` (all panes in a tab) | `Tab::display_state` | — (no attention caller) |
+
+Call sites must be audited: any caller using an aggregate to decide *ordering* or
+*notification* moves to the attention form rather than silently inheriting display order.
+The sidebar's `workspace_rank` and its space/group rank are exactly this case — both feed
+`workspace_sort = priority` and both call an aggregate today.
 
 ### Decision 3: Sorting follows attention; motion follows the sort
 
@@ -101,9 +122,19 @@ client/UI layer. The *attention* ranking is a shared runtime fact already surfac
 the API (`agent_status` distinguishes `done` from `idle`).
 
 Keep the shared definition in a neutral location with neutral names — `display_priority` /
-`attention_priority`, not `sidebar_priority` / `row_priority`. Any workspace- or tab-level
-aggregate exposed through the JSON API must state which ranking it uses; do not change the
-API's meaning silently as a side effect of a UI fix.
+`attention_priority`, not `sidebar_priority` / `row_priority`.
+
+The API does expose two aggregates: `WorkspaceInfo.agent_status` and `TabInfo.agent_status`,
+both currently attention-ranked and both undocumented. They **move to the display ranking**,
+documented on the field. Rationale: `agent_status` on a container answers "what is this
+container's state", which is precisely the question `display_priority` answers;
+`attention_priority` is a sort key, and reporting a sort key as a status is the defect this
+whole change is about. Leaving the API attention-ranked would fix the sidebar while
+`herdr workspace list` kept reporting `done` for a workspace whose agent is working.
+
+This is a deliberate, stated change to an undocumented field, decided explicitly rather than
+inherited — which is what "do not change the API's meaning silently" asks for. Per-pane
+`agent_status` carries no aggregation and is untouched.
 
 ## Risks
 
