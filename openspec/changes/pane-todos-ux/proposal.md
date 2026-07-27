@@ -20,8 +20,11 @@ empty panel is a dead end.
 candidate → keep`, which does not scale past a handful of panes. Worse, the
 candidate list is restricted to the todo's own workspace, so most panes in a real
 session simply never appear — the reported symptom was "no idea why it cycles
-only on some panes". Non-agent panes are technically offered but labelled
-`pane 3`, so a shell running a command is unidentifiable and reads as missing.
+only on some panes". Non-agent panes are technically offered, but neither label
+they get identifies them: the cycling control shows `pane 3`, and the label
+actually *stored* on the link is worse still — the server captures
+`manual_label → agent label → the raw public pane id`, so a shell with neither
+is recorded as `w1:p3`. A shell running a command is unidentifiable either way.
 
 The data layer already supports what is wanted here. Pane ids are unique across
 the session, link resolution already searches every workspace, and restore
@@ -45,6 +48,8 @@ save.
 - Link targets are resolved to their public identifier **in the target's own
   workspace** rather than the active one, which is what makes cross-workspace
   links actually persist.
+- The server's link-label chain gains the launched-command fallback, so a shell
+  target is stored as `zsh` or `npm` rather than as `w1:p3`.
 - `cycle_pane_todo_edit_link` and `pane_link_candidates` are removed; the picker
   is the single mechanism.
 
@@ -57,10 +62,17 @@ save.
   link control opens the picker), `src/app/state.rs` (navigator selection
   purpose, removal of the cycling helpers), `src/app/actions.rs` +
   `src/ui/navigator.rs` (selection mode), `src/app/ids.rs` (session-wide public
-  pane id lookup), `src/ui/keybind_help.rs`.
-- No server, API, protocol, or persistence changes: `todo.update` already carries
-  `link_pane_id`, and the stored link shape is unchanged. This is TUI
-  presentation and input only, per the runtime/client boundary guardrail.
+  pane id lookup), `src/ui/keybind_help.rs`, `src/app/api/todos.rs`
+  (`resolve_link` label chain).
+- No wire changes: no API schema field, protocol version, snapshot shape, or CLI
+  flag moves. `todo.update` already carries `link_pane_id` and the stored
+  `TodoLink` shape is unchanged.
+- One deliberate **server-side behaviour** change: `resolve_link` gains the
+  launched-command fallback in its label chain. This belongs on the server, not
+  in the TUI — the captured label is a shared runtime fact persisted on the todo,
+  not TUI presentation, so per the runtime/client boundary guardrail it must not
+  be injected by one client. It also fixes `herdr todo add --link` for CLI
+  callers, which have the same unusable label today.
 - Behaviour change for existing users: every pane's title loses the columns the
   indicator reserves, and `ctrl+l` no longer cycles. Accepted deliberately —
   uniform placement of the affordance was the goal.
