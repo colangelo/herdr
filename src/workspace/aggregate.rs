@@ -148,6 +148,28 @@ mod tests {
         TerminalState::new(ws.terminal_id(pane_id).unwrap().clone(), "/tmp".into())
     }
 
+    /// A single-tab workspace whose panes carry the given `(state, seen)` pairs,
+    /// one pane per pair, plus the terminal map backing them.
+    fn workspace_with_pane_states(
+        states: &[(AgentState, bool)],
+    ) -> (Workspace, HashMap<TerminalId, TerminalState>) {
+        let mut ws = Workspace::test_new("test");
+        for _ in 1..states.len() {
+            ws.test_split(Direction::Horizontal);
+        }
+        let pane_ids = ws.tabs[0].layout.pane_ids();
+        assert_eq!(pane_ids.len(), states.len());
+
+        let mut terminals = HashMap::new();
+        for (pane_id, (state, seen)) in pane_ids.iter().zip(states) {
+            let mut terminal = terminal_for_pane(&ws, *pane_id);
+            terminal.state = *state;
+            terminals.insert(terminal.id.clone(), terminal);
+            ws.tabs[0].panes.get_mut(pane_id).unwrap().seen = *seen;
+        }
+        (ws, terminals)
+    }
+
     #[test]
     fn aggregate_state_all_unknown() {
         let ws = Workspace::test_new("test");
@@ -184,30 +206,37 @@ mod tests {
         assert!(seen);
     }
 
+    /// Characterization test for the issue-39 bug: a pane that finished while
+    /// unseen ("done") currently outranks an actively working sibling, so the
+    /// sidebar row renders done while an agent is still working.
+    ///
+    /// <https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/39>
     #[test]
     fn aggregate_state_done_unseen_beats_working() {
-        let mut ws = Workspace::test_new("test");
-        let id2 = ws.test_split(Direction::Horizontal);
-        let root_id = ws.tabs[0]
-            .panes
-            .keys()
-            .find(|id| **id != id2)
-            .copied()
-            .unwrap();
-        let mut terminals = HashMap::new();
-        let mut root_terminal = terminal_for_pane(&ws, root_id);
-        root_terminal.state = AgentState::Idle;
-        terminals.insert(root_terminal.id.clone(), root_terminal);
-        let mut second_terminal = terminal_for_pane(&ws, id2);
-        second_terminal.state = AgentState::Working;
-        terminals.insert(second_terminal.id.clone(), second_terminal);
-        let root = ws.tabs[0].panes.get_mut(&root_id).unwrap();
-        root.seen = false;
+        let (ws, terminals) =
+            workspace_with_pane_states(&[(AgentState::Idle, false), (AgentState::Working, true)]);
 
-        let (state, seen) = ws.aggregate_state(&terminals);
+        assert_eq!(ws.aggregate_state(&terminals), (AgentState::Idle, false));
+    }
 
-        assert_eq!(state, AgentState::Idle);
-        assert!(!seen);
+    /// Must survive the display/attention split: blocked outranks working in
+    /// both rankings, because a blocked agent cannot proceed at all.
+    #[test]
+    fn aggregate_state_blocked_beats_working() {
+        let (ws, terminals) =
+            workspace_with_pane_states(&[(AgentState::Working, true), (AgentState::Blocked, true)]);
+
+        assert_eq!(ws.aggregate_state(&terminals), (AgentState::Blocked, true));
+    }
+
+    /// Must survive the display/attention split: a finished-and-unseen pane
+    /// still outranks one that is idle and already seen.
+    #[test]
+    fn aggregate_state_done_beats_seen_idle() {
+        let (ws, terminals) =
+            workspace_with_pane_states(&[(AgentState::Idle, true), (AgentState::Idle, false)]);
+
+        assert_eq!(ws.aggregate_state(&terminals), (AgentState::Idle, false));
     }
 
     #[test]
