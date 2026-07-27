@@ -1516,6 +1516,54 @@ mod tests {
         assert!(save.contains("save"));
     }
 
+    /// The title used to start in the frame's first inner column while every
+    /// row under it started one column further in, so it read as stuck to the
+    /// border. It now shares the rows' column.
+    #[test]
+    fn the_modal_title_lines_up_with_the_rows_under_it() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("todos")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        app.view.terminal_area = Rect::new(0, 0, 80, 24);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        app.open_new_pane_todo(pane_id);
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| render_pane_todo_edit_overlay(&app, frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let inner = crate::ui::centered_popup_rect(
+            Rect::new(0, 0, 80, 24),
+            PANE_TODO_EDIT_POPUP_WIDTH,
+            PANE_TODO_EDIT_POPUP_HEIGHT,
+        )
+        .map(|popup| Rect::new(popup.x + 1, popup.y + 1, popup.width - 2, popup.height - 2))
+        .expect("popup should fit");
+        let rects = pane_todo_edit_rects(inner).expect("edit rects should exist");
+
+        let column_of = |row: Rect, needle: &str| {
+            let text: String = (row.x..row.x + row.width)
+                .map(|x| buffer[(x, row.y)].symbol())
+                .collect();
+            row.x + text.find(needle).expect("row should hold its label") as u16
+        };
+
+        let title_x = column_of(Rect::new(inner.x, inner.y, inner.width, 1), "new todo");
+        let priority_x = column_of(rects.priority, "priority");
+
+        assert!(
+            title_x > inner.x,
+            "the title is held off the frame, not drawn against it"
+        );
+        assert_eq!(
+            title_x, priority_x,
+            "the title starts in the same column as the rows under it"
+        );
+    }
+
     /// The done row is only drawn when editing an existing todo, so the
     /// new-todo geometry test above cannot cover it. Same property: the cells
     /// that say "done" are the cells `pane_todo_edit_rects` hands the mouse.

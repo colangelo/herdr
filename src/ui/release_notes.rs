@@ -43,8 +43,10 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
     let header_rows =
         Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas::<2>(stack.header);
 
+    // No `+ 1` here: `render_modal_header` now insets the title itself, and
+    // doubling it would push this one title a column past every other modal's.
     let header_title_area = Rect::new(
-        header_rows[0].x + 1,
+        header_rows[0].x,
         header_rows[0].y,
         header_rows[0].width.saturating_sub(2),
         header_rows[0].height,
@@ -158,8 +160,10 @@ pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Fr
     let header_rows =
         Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas::<2>(stack.header);
 
+    // No `+ 1` here: `render_modal_header` now insets the title itself, and
+    // doubling it would push this one title a column past every other modal's.
     let header_title_area = Rect::new(
-        header_rows[0].x + 1,
+        header_rows[0].x,
         header_rows[0].y,
         header_rows[0].width.saturating_sub(2),
         header_rows[0].height,
