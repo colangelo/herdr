@@ -66,10 +66,15 @@ all.
 
 A todo MAY link to any other pane in the session, including panes in other
 workspaces and panes running no agent. The link SHALL store the target's
-internal pane identity plus a label captured when the link was created. The
-captured label SHALL identify the target the way the session navigator names it,
-so a pane running a plain shell is named by the command it launched rather than
-by its position.
+internal pane identity plus a label captured when the link was created.
+
+The captured label SHALL name the target rather than merely locate it: a
+manually labelled pane by its label, an agent pane by its agent, and a pane
+running a plain shell by the command it launched. Only a target offering none
+of these SHALL fall back to its identifier. Because the label is captured once
+and read back long afterwards, it SHALL prefer those stable names over the
+pane's live terminal title, which the session navigator leads with but which
+drifts underneath a stored link.
 
 Because pane identity is unique across the session while public pane
 identifiers are scoped to a workspace, resolving a link target to its public
@@ -97,6 +102,14 @@ SHALL NOT resolve to any other pane.
 
 - **WHEN** a link targets a pane running no agent
 - **THEN** the link is created and its captured label names the launched command
+- **WHEN** that same pane also carries a manual label or an agent
+- **THEN** those name it instead
+
+#### Scenario: A target with no name keeps its identifier
+
+- **WHEN** a link targets a pane with no manual label, no agent, and no
+  launched command on record
+- **THEN** its captured label is the pane's own identifier
 
 #### Scenario: A link to a closed pane goes dead
 
