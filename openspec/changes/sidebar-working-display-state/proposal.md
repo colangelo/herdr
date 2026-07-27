@@ -37,9 +37,13 @@ distinct, older mechanism that the fork's priority sorting made far more visible
   ranking they follow.
 - Collapse the three byte-identical copies of the ranking table
   (`src/workspace/aggregate.rs:83`, `src/ui/sidebar.rs:293`, `src/app/api_helpers.rs:1`)
-  into one shared definition so the two rankings cannot silently drift apart.
+  into one shared definition so the two rankings cannot silently drift apart — along with a
+  fourth copy, the navigator's `state_priority` (`src/app/actions.rs`), which already
+  implements the display ranking this change generalizes.
 - A row's rendered state must not change as a side effect of focusing an unrelated sibling
   pane.
+- The two aggregate `agent_status` fields the JSON API exposes
+  (`WorkspaceInfo`, `TabInfo`) follow the display ranking too, and say so on the field.
 
 ## Capabilities
 
@@ -65,9 +69,10 @@ distinct, older mechanism that the fork's priority sorting made far more visible
 - Sort-motion target keys (`agent_panel_target_keys`, `workspace_unit_target_keys`) must
   use the same ranking as the sort they animate, or the bubble motion will chase a
   different order than the sort produced.
-- API surface: `agent_status` already distinguishes `done` from `idle` per pane and is
-  unchanged. Any workspace/tab-level aggregate exposed through the JSON API must state
-  which ranking it uses — this is a shared runtime fact, not TUI presentation.
+- API surface: per-pane `agent_status` carries no aggregation and is unchanged.
+  `WorkspaceInfo.agent_status` (`src/app/creation.rs`) and `TabInfo.agent_status` move from
+  the attention ranking to the display ranking and are documented as such — a shared runtime
+  fact stated explicitly, not TUI presentation leaking outward.
 - No wire-protocol change: `src/protocol/wire.rs::PROTOCOL_VERSION` is untouched.
 
 ## Non-Goals

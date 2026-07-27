@@ -25,6 +25,24 @@ single shared location so they cannot drift apart.
 - **WHEN** panes are ranked for attention-ordered sorting or notification decisions
 - **THEN** a pane that is Idle and unseen still ranks above a pane that is Working, as before this change
 
+#### Scenario: Every aggregating row follows the display ranking
+- **WHEN** a state is aggregated for a whole workspace, a whole tab, or a whole collapsed worktree space
+- **THEN** each of those aggregates uses the display ranking, so no level of grouping masks a working agent
+
+### Requirement: Aggregate agent status reported over the API matches what is displayed
+An aggregate `agent_status` the JSON API reports for a container of panes SHALL be derived
+from the display ranking, the same ranking the corresponding row displays, and the field
+SHALL document which ranking it uses. Per-pane `agent_status` performs no aggregation and
+SHALL be unaffected.
+
+#### Scenario: Workspace agent status reports working
+- **WHEN** a client requests workspace info for a workspace holding one pane that finished while unseen and one pane that is actively working
+- **THEN** the reported `agent_status` is `working`, matching the state that workspace's sidebar row displays
+
+#### Scenario: Per-pane agent status is unchanged
+- **WHEN** a client requests pane info for a pane whose agent finished while unseen
+- **THEN** the reported `agent_status` is still `done`
+
 ### Requirement: Displayed state is independent of sibling focus
 The state a sidebar row displays SHALL be a function only of the agent states and seen
 flags of the panes it covers. Focusing a pane SHALL NOT change the displayed state of a row
