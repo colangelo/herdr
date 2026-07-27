@@ -120,6 +120,29 @@ refactors a core UI/input surface, which the repo classifies as release-risk and
 would require navigator characterization tests first). Both remain open if the
 navigator's second purpose turns out to strain it.
 
+### The link label is captured on the server, not by the picker
+
+Easy to get wrong, because the picker is where the good label is visible. It is
+not where the label is stored. The TUI sends only `link_pane_id`; the server's
+`resolve_link` (`src/app/api/todos.rs`) builds the stored label from
+`manual_label → effective_agent_label → raw`. A shell with neither is therefore
+persisted as its raw public pane id, `w1:p3`.
+
+The navigator's chain has a fourth link the server's lacks:
+`launch_label(launch_argv)`. So the picker showing `npm run dev` while the saved
+chip reads `w1:p3` is not a hypothetical — it is what shipping the picker alone
+would produce, reproducing the very complaint this change answers.
+
+The fallback is therefore added to `resolve_link`, and `launch_label` is shared
+out of `src/app/actions.rs` rather than duplicated.
+
+**Why server-side rather than sending a label from the picker:** the captured
+label is a shared runtime fact persisted on the todo and read back by every
+client, not TUI presentation state. Letting one client inject it is exactly the
+coupling the runtime/client boundary guardrail forbids, and it would need a new
+API field. Fixing the chain instead keeps the wire unchanged and fixes CLI
+callers of `herdr todo add --link` for free.
+
 ### The cross-workspace save fix
 
 `App::public_pane_id(ws_idx, pane_id)` looks the pane up *inside*
