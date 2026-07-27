@@ -1564,6 +1564,7 @@ pub struct NotificationCenterState {
 pub enum PaneTodoPanelButton {
     Add,
     Toggle,
+    Go,
     ClearDone,
     Close,
 }
@@ -2238,6 +2239,29 @@ impl AppState {
             }
             crate::terminal::todo::TodoPriority::High => crate::terminal::todo::TodoPriority::Low,
         };
+    }
+
+    /// Where the modal's link control currently points, resolved live against
+    /// the staged choice rather than the stored one. `None` when there is
+    /// nothing to follow — no link, an explicit clear, or a target that has
+    /// gone — which is also exactly when the row offers no `go`.
+    pub(crate) fn pane_todo_edit_link_target(&self) -> Option<(usize, PaneId)> {
+        let edit = self.pane_todo_edit.as_ref()?;
+        let target = match edit.link {
+            PaneTodoEditLink::Clear => return None,
+            PaneTodoEditLink::Set(target) => target,
+            PaneTodoEditLink::Keep => {
+                let todo_id = edit.todo_id?;
+                let terminal = self.pane_terminal(edit.pane_id)?;
+                let todo = terminal.todos().iter().find(|todo| todo.id == todo_id)?;
+                todo.link.as_ref()?.pane?
+            }
+        };
+        let ws_idx = self
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.pane_state(target).is_some())?;
+        Some((ws_idx, target))
     }
 
     /// What the modal's link row shows for the current choice: the target's

@@ -318,6 +318,9 @@ impl AppState {
                         Some(PaneTodoPanelButton::Toggle) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::ToggleDone));
                         }
+                        Some(PaneTodoPanelButton::Go) => {
+                            return Some(MouseAction::PaneTodo(PaneTodoAction::FollowLink));
+                        }
                         Some(PaneTodoPanelButton::ClearDone) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::ClearDone));
                         }
@@ -1701,7 +1704,17 @@ impl AppState {
     pub(crate) fn pane_todo_panel_buttons(&self) -> Option<crate::ui::PaneTodoPanelButtonRects> {
         let panel = self.pane_todos.as_ref()?;
         let has_todos = !self.pane_todos_in_display_order(panel.pane_id).is_empty();
-        crate::ui::pane_todo_panel_button_rects(self.pane_todo_panel_inner()?, has_todos)
+        // `go` follows the *selected* todo's link, so it is offered only while
+        // that todo has one that still resolves — a dead link is inert, and a
+        // button that does nothing is worse than no button.
+        let has_live_link = self
+            .selected_pane_todo()
+            .is_some_and(|todo| self.pane_todo_link_target(&todo).is_some());
+        crate::ui::pane_todo_panel_button_rects(
+            self.pane_todo_panel_inner()?,
+            has_todos,
+            has_live_link,
+        )
     }
 
     /// The edit modal's interactive regions in screen space, from the one

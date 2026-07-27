@@ -219,6 +219,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             help_entry("esc", "cancel edit"),
             help_entry("tab", "cycle priority"),
             help_entry("ctrl+l", "choose link target"),
+            help_entry("ctrl+g", "save and follow the link"),
             help_entry("ctrl+t", "toggle done"),
             help_entry("enter", "insert newline"),
             help_entry("ctrl+a / ctrl+e", "line start / end"),
