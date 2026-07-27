@@ -59,12 +59,34 @@ pub(super) fn render_modal_shell(
     render_panel_shell(frame, popup, p.accent, p.panel_bg)
 }
 
+/// Columns a modal's title is held off the frame on each side. Modal rows
+/// already sit one column in — the dialogs prefix their content with `" "` and
+/// the release-notes and product-announcement headers had each grown their own
+/// `+ 1` — so the title follows the same column instead of hugging the border.
+/// Kept in the shared header so every modal gets it, rather than at the call
+/// sites where only two of eight had it.
+pub(crate) const MODAL_TITLE_INSET: u16 = 1;
+
 pub(super) fn render_modal_header(frame: &mut Frame, area: Rect, title: &str, p: &Palette) {
+    let Some(area) = inset_horizontal(area, MODAL_TITLE_INSET) else {
+        return;
+    };
     let line = Line::from(vec![Span::styled(
         title,
         Style::default().fg(p.text).add_modifier(Modifier::BOLD),
     )]);
     frame.render_widget(Paragraph::new(line), area);
+}
+
+/// `area` pulled in by `cols` on both sides, or `None` when that leaves nothing
+/// to draw in — a title with no room is dropped rather than drawn against the
+/// frame.
+fn inset_horizontal(area: Rect, cols: u16) -> Option<Rect> {
+    let width = area.width.checked_sub(cols.saturating_mul(2))?;
+    if width == 0 {
+        return None;
+    }
+    Some(Rect::new(area.x + cols, area.y, width, area.height))
 }
 
 #[derive(Debug, Clone, Copy)]
