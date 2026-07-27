@@ -634,23 +634,65 @@ pub(crate) struct PaneTodoIndicator {
     /// Exactly the cells the label is drawn into.
     pub rect: Rect,
     pub label: String,
-    /// Highest outstanding priority; `None` once every todo is done.
-    pub priority: Option<crate::terminal::todo::TodoPriority>,
+    pub state: PaneTodoIndicatorState,
 }
 
-/// `▾ N` for N outstanding todos, a bare `▾` once they are all done, and
-/// nothing at all for a pane with no todos — a quiet pane keeps exactly the
-/// border it has today. Same spacing grammar as the notification `◆`. The
-/// count is at most two digits because `add_todo` caps a pane at
-/// `MAX_TODOS_PER_PANE` (50).
-fn pane_todo_indicator_label(total: usize, outstanding: usize) -> Option<String> {
-    if total == 0 {
-        return None;
+/// Which of three things a pane's indicator is saying. Tone rather than shape
+/// separates them, which keeps the reserved width identical in every state so
+/// the title's budget does not shift as todos come and go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaneTodoIndicatorState {
+    /// Outstanding todos, coloured by the highest priority among them.
+    Outstanding {
+        count: usize,
+        priority: Option<crate::terminal::todo::TodoPriority>,
+    },
+    /// Todos, every one of them done.
+    AllDone,
+    /// No todos at all — the affordance standing on its own, so an empty pane
+    /// can still be opened by mouse.
+    Empty,
+}
+
+impl PaneTodoIndicatorState {
+    fn of(
+        total: usize,
+        outstanding: usize,
+        priority: Option<crate::terminal::todo::TodoPriority>,
+    ) -> Self {
+        if outstanding > 0 {
+            Self::Outstanding {
+                count: outstanding,
+                priority,
+            }
+        } else if total > 0 {
+            Self::AllDone
+        } else {
+            Self::Empty
+        }
     }
-    if outstanding == 0 {
-        return Some(" ▾ ".to_string());
+
+    /// Finished work stays legible; an empty affordance recedes further still,
+    /// so the two never read as the same thing.
+    fn color(self, app: &AppState) -> ratatui::style::Color {
+        match self {
+            Self::Outstanding { priority, .. } => app.pane_todo_indicator_color(priority),
+            Self::AllDone => app.palette.overlay1,
+            Self::Empty => app.palette.overlay0,
+        }
     }
-    Some(format!(" ▾ {outstanding} "))
+}
+
+/// `▾ N` for N outstanding todos and a bare `▾` otherwise. Every pane gets one
+/// so the control sits in the same place on all of them; the empty and
+/// all-done states are told apart by [`PaneTodoIndicatorState::color`], not by
+/// width. Same spacing grammar as the notification `◆`. The count is at most
+/// two digits because `add_todo` caps a pane at `MAX_TODOS_PER_PANE` (50).
+fn pane_todo_indicator_label(state: PaneTodoIndicatorState) -> String {
+    match state {
+        PaneTodoIndicatorState::Outstanding { count, .. } => format!(" ▾ {count} "),
+        PaneTodoIndicatorState::AllDone | PaneTodoIndicatorState::Empty => " ▾ ".to_string(),
+    }
 }
 
 /// The entry point for a caller holding only a pane id — the mouse hit-test,
@@ -674,8 +716,12 @@ fn pane_todo_indicator_for(
     if !app.show_pane_todo_indicator || !info.borders.contains(Borders::TOP) {
         return None;
     }
-    let label =
-        pane_todo_indicator_label(terminal.todos().len(), terminal.outstanding_todo_count())?;
+    let state = PaneTodoIndicatorState::of(
+        terminal.todos().len(),
+        terminal.outstanding_todo_count(),
+        terminal.highest_outstanding_todo_priority(),
+    );
+    let label = pane_todo_indicator_label(state);
     let width = display_width_u16(&label);
     // The label plus both corner glyphs is the whole requirement: the title is
     // laid out in what is left over and drops itself when that is too narrow,
@@ -692,7 +738,7 @@ fn pane_todo_indicator_for(
     Some(PaneTodoIndicator {
         rect: Rect::new(x, info.rect.y, width, 1),
         label,
-        priority: terminal.highest_outstanding_todo_priority(),
+        state,
     })
 }
 
@@ -766,7 +812,7 @@ fn render_pane_border_titles(
                 indicator.rect.y,
                 &indicator.label,
                 indicator.rect.width as usize,
-                Style::default().fg(app.pane_todo_indicator_color(indicator.priority)),
+                Style::default().fg(indicator.state.color(app)),
             );
         }
     }
@@ -1214,12 +1260,17 @@ mod tests {
     fn pane_border_renderer_places_adjacent_cjk_by_display_width() {
         let mut app = AppState::test_new();
         app.mode = Mode::Terminal;
-        app.view.terminal_area = Rect::new(0, 0, 12, 3);
+        // 15 rather than 12: the always-on todo indicator reserves three
+        // columns of every top border, and this test is about where wide
+        // glyphs land, not about how much title survives. Widening by exactly
+        // the reserved width leaves the title the same 12 columns it was
+        // written against, so the expected cells stay put.
+        app.view.terminal_area = Rect::new(0, 0, 15, 3);
         let ws = Workspace::test_new("test");
         let pane_id = ws.tabs[0].root_pane;
         app.view.pane_infos = vec![PaneInfo {
             id: pane_id,
-            rect: Rect::new(0, 0, 12, 3),
+            rect: Rect::new(0, 0, 15, 3),
             inner_rect: Rect::default(),
             scrollbar_rect: None,
             borders: Borders::ALL,
@@ -1232,7 +1283,7 @@ mod tests {
         app.terminals.insert(terminal_id, terminal_state);
 
         let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(12, 3)).unwrap();
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(15, 3)).unwrap();
         terminal
             .draw(|frame| render_view_pane_borders(&app, &ws, frame))
             .unwrap();
@@ -1746,7 +1797,13 @@ mod tests {
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
 
         assert_eq!(indicator.label, " ▾ 3 ");
-        assert_eq!(indicator.priority, Some(TodoPriority::High));
+        assert_eq!(
+            indicator.state,
+            PaneTodoIndicatorState::Outstanding {
+                count: 3,
+                priority: Some(TodoPriority::High),
+            }
+        );
     }
 
     /// Spec: "the cells that respond to a click are exactly the cells drawn".
@@ -1778,13 +1835,27 @@ mod tests {
         );
     }
 
+    /// Spec: "an empty pane still offers the affordance". The indicator used
+    /// to be drawn only for panes already holding todos, which left the one
+    /// pane you would want to add a todo to — an empty one — with nothing to
+    /// click.
     #[test]
-    fn a_pane_with_no_todos_renders_the_border_it_has_today() {
+    fn a_pane_with_no_todos_still_offers_the_affordance() {
         let app = app_with_pane_todos(&[]);
+        let indicator = pane_todo_indicator(&app, &app.view.pane_infos[0])
+            .expect("every bordered pane offers the affordance");
 
-        assert!(pane_todo_indicator(&app, &app.view.pane_infos[0]).is_none());
+        assert_eq!(indicator.state, PaneTodoIndicatorState::Empty);
+        assert_eq!(indicator.label, " ▾ ", "nothing to count");
+
         let buffer = draw_pane_borders(&app);
-        assert_eq!(row_text(&buffer, 0, 30), format!("┌{}┐", "─".repeat(28)));
+        let drawn: String = (indicator.rect.x..indicator.rect.x + indicator.rect.width)
+            .map(|x| buffer[(x, indicator.rect.y)].symbol())
+            .collect();
+        assert_eq!(
+            drawn, indicator.label,
+            "the cells it claims for the click target are the cells drawn"
+        );
     }
 
     #[test]
@@ -1794,13 +1865,38 @@ mod tests {
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
 
         assert_eq!(indicator.label, " ▾ ", "no count once everything is done");
-        assert_eq!(indicator.priority, None);
+        assert_eq!(indicator.state, PaneTodoIndicatorState::AllDone);
 
         let buffer = draw_pane_borders(&app);
         assert_eq!(
             buffer[(indicator.rect.x + 1, indicator.rect.y)].style().fg,
-            Some(app.palette.overlay0),
+            Some(app.palette.overlay1),
             "a finished pane's indicator is muted"
+        );
+    }
+
+    /// Spec: "empty is distinguishable from all-done". Both draw a bare glyph
+    /// of the same width, so tone is the only thing left to separate "nothing
+    /// to do" from "everything done". Drawing the indicator on every pane took
+    /// away the old signal — its absence — and this is what replaces it.
+    #[test]
+    fn an_empty_pane_and_a_finished_pane_read_differently() {
+        let empty = app_with_pane_todos(&[]);
+        let finished = app_with_pane_todos(&[(true, TodoPriority::High)]);
+
+        let empty_indicator =
+            pane_todo_indicator(&empty, &empty.view.pane_infos[0]).expect("indicator should exist");
+        let finished_indicator = pane_todo_indicator(&finished, &finished.view.pane_infos[0])
+            .expect("indicator should exist");
+
+        assert_eq!(
+            empty_indicator.label, finished_indicator.label,
+            "same glyph and same reserved width in both states"
+        );
+        assert_ne!(
+            empty_indicator.state.color(&empty),
+            finished_indicator.state.color(&finished),
+            "so the tone has to carry the whole difference"
         );
     }
 
