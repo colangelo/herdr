@@ -229,6 +229,32 @@ release-ac version:
     git push origin v{{version}}
     @echo "v{{version}} released — CI builds -ac binaries and updates colangelo/homebrew-tap"
 
+# Fork: verify the newest -ac release, website/latest.json, the live raw-GitHub
+# manifest, and the release asset URLs all agree. Defaults to the newest v*-ac tag;
+# pass one explicitly to check an older release.
+#
+# Run this after `just release` AND after every upstream sync. The release
+# workflow's update-latest-json job commits the manifest to master, so the sync's
+# force-push of a replayed patch set can drop that commit — which silently pins
+# every fork binary's update check to an older version, with no failing job to
+# show for it. That is exactly what happened to v0.7.4-ac between 2026-07-18 and
+# 2026-07-27 (see AC-forks/herdr#38).
+latest-json-check tag="":
+    @set -e; \
+    TAG="{{tag}}"; \
+    if [ -z "$TAG" ]; then TAG="$(git tag --list 'v*-ac' 'v*-ac.*' --sort=-v:refname | head -n1)"; fi; \
+    test -n "$TAG" || { echo "error: no v*-ac tag found — run: git fetch origin --tags"; exit 1; }; \
+    BASE="$(printf '%s' "${TAG#v}" | sed 's/-ac.*//')"; \
+    PROTOCOL="$(git show "$TAG:src/protocol/wire.rs" | sed -n 's/^pub const PROTOCOL_VERSION: u32 = \([0-9]*\);/\1/p')"; \
+    test -n "$PROTOCOL" || { echo "error: no PROTOCOL_VERSION in $TAG:src/protocol/wire.rs"; exit 1; }; \
+    echo "checking $TAG (version $BASE, protocol $PROTOCOL)"; \
+    python3 scripts/changelog.py verify-release-state \
+        --repo colangelo/herdr \
+        --version "$BASE" \
+        --tag "$TAG" \
+        --protocol "$PROTOCOL" \
+        --live-url https://raw.githubusercontent.com/colangelo/herdr/master/website/latest.json
+
 # Fork: trigger a rolling -ac-beta build from a branch (default master).
 # Runs .github/workflows/beta.yml: builds macOS binaries, replaces the rolling
 # `beta` prerelease, and updates the colangelo/homebrew-tap herdr-beta formula.
