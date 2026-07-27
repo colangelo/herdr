@@ -78,9 +78,31 @@ Every pane that draws a top border carries a `▾` indicator at the right end of
 
 `prefix+ctrl+t`, or a click on the indicator, opens that pane's todo panel. Inside it, `Up`/`Down` or `j`/`k` move the selection, `a` adds a todo, `Enter` (or a row click) opens the todo for editing, `Space` toggles done, `g` follows a linked todo to its pane, `d` removes the selected todo, `c` clears the completed ones, and `Esc` or `q` closes. The add action is offered even when the pane holds no todos. A todo linked to a pane that no longer exists renders dimmed and does nothing when followed.
 
-In the edit view, `Tab` cycles the priority, `ctrl+l` opens the link picker, `ctrl+d` toggles done (the panel's `Space`, which the edit view's text field owns), `Enter` saves, and `Esc` cancels. Clicking the priority, link, or done row does the same as its shortcut. The done row is absent while composing a new todo, which is never already done. `keys.add_pane_todo` is unset by default and opens the edit view on a new todo. Set `ui.show_pane_todo_indicator = false` to hide the indicator, and `ui.pane_todo_color` to override its color.
+In the edit view, `Tab` cycles the priority, `ctrl+l` opens the link picker, `ctrl+t` toggles done (the panel's `Space`, which the edit view's text field owns), `ctrl+s` saves, and `Esc` cancels. Terminals that report the enhanced keyboard protocol can save with `alt+Enter` too. Clicking the priority, link, or done row does the same as its shortcut. The done row is absent while composing a new todo, which is never already done. `keys.add_pane_todo` is unset by default and opens the edit view on a new todo. Set `ui.show_pane_todo_indicator = false` to hide the indicator, and `ui.pane_todo_color` to override its color.
 
-The link picker is the session navigator in a selection mode: it lists every pane in every workspace, searchable and filterable, named the way the navigator names them, so a pane running a plain shell is identified by the command it launched. Choosing a pane row stages it as the target; a `no link` entry at the top clears the link instead. Workspace and tab rows are context only — activating a workspace expands or collapses it, and neither ends the selection. The todo's own pane is not offered. `Esc` leaves the picker with the link exactly as it was.
+The text field has an insertion point, so typing and pasting land where the cursor is rather than at the end, and a click in the text puts the cursor there. The readline chords all work:
+
+| Action | Keys |
+| --- | --- |
+| Line start / end | `ctrl+a` / `ctrl+e` |
+| Character back / forward | `ctrl+b` / `ctrl+f`, `Left` / `Right` |
+| Word back / forward | `alt+b` / `alt+f`, `ctrl+Left` / `ctrl+Right` |
+| Line up / down | `Up` / `Down` |
+| Delete backward / forward | `Backspace` / `ctrl+d`, `Delete` |
+| Kill to line end / start | `ctrl+k` / `ctrl+u` |
+| Kill the word behind the cursor | `ctrl+w`, `alt+Backspace` |
+| Yank the last kill | `ctrl+y` |
+| Undo | `ctrl+_`, `ctrl+-`, `ctrl+/` |
+
+The kill ring is Herdr's own and holds one entry; `ctrl+y` puts back what `ctrl+k`, `ctrl+u`, or `ctrl+w` last took, and has nothing to do with the system clipboard. System paste stays on the usual paste chord, and now keeps the newlines in what you paste while still dropping other control characters.
+
+A todo can hold more than one line: `Enter` inserts a newline. That is why `Enter` no longer saves and `ctrl+d` no longer toggles done — the field needs both. The edit view shows three lines at a time and scrolls to follow the cursor. In the panel, a multi-line todo still occupies one row, showing its first line with a `⏎` marker.
+
+The link picker is the session navigator in a selection mode: it lists every pane in every workspace, searchable and filterable, named the way the navigator names them, so a pane running a plain shell is identified by the command it launched. Each pane row shows the public pane identifier it would stage, like `w2:pC`. Choosing a pane row stages it as the target; a `no link` entry at the top clears the link instead. Workspace and tab rows are context only — activating a workspace expands or collapses it, and neither ends the selection. The todo's own pane is not offered. `Esc` leaves the picker with the link exactly as it was.
+
+`ctrl+j` and `ctrl+k` move the selection anywhere in the picker, including while its search is focused, alongside the arrow keys and `ctrl+n`/`ctrl+p`. The same chords work in the ordinary goto picker (`prefix+g`), which is the same surface.
+
+A live link is shown as `→ w2:pC · claude` — the pane's public identifier first, because that is the part you can act on with `herdr pane`, `herdr agent read`, or a sibling agent's prompt, and the captured label after it, because that is the part you recognise. The identifier is resolved from the live target every time it is drawn, so it follows a pane that moves. A dead link has no identifier to show and keeps its label alone.
 
 Closing a pane that still has outstanding todos asks for confirmation first; a pane whose todos are all done closes without a prompt.
 
