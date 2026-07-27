@@ -1022,6 +1022,9 @@ pub(crate) struct NavigatorRow {
     pub is_workspace: bool,
     pub is_tab: bool,
     pub expanded: bool,
+    /// The pane's public identifier, for pane rows only. It is what a link
+    /// picker row would stage, so the picker leads with it.
+    pub public_pane_id: Option<String>,
     pub search_text: String,
     /// Whether this row itself matched the active query/state filter, as
     /// opposed to being included as ancestor context or cascaded subtree of a
@@ -1613,7 +1616,10 @@ pub struct PaneTodoEditState {
     pub pane_id: PaneId,
     /// `None` while composing a brand-new todo.
     pub todo_id: Option<u64>,
-    pub text: String,
+    /// A cursor-bearing field rather than a bare `String`: every readline
+    /// motion needs an insertion point to move, and the store's limit is
+    /// enforced here so the modal cannot compose a todo the server rejects.
+    pub text: crate::ui::text_field::TextField,
     pub priority: crate::terminal::todo::TodoPriority,
     pub link: PaneTodoEditLink,
     /// Only meaningful while editing an existing todo; a todo being composed
@@ -2152,6 +2158,33 @@ impl AppState {
         Some((ws_idx, pane_id))
     }
 
+    /// A pane's public identifier, located in the pane's own workspace rather
+    /// than the active one — `PaneId` is unique across the session while public
+    /// identifiers are workspace-scoped.
+    pub(crate) fn session_public_pane_id(&self, pane_id: PaneId) -> Option<String> {
+        let ws = self
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.pane_state(pane_id).is_some())?;
+        let pane_number = ws.public_pane_number(pane_id)?;
+        Some(crate::workspace::public_pane_id_for_number(
+            &ws.id,
+            pane_number,
+        ))
+    }
+
+    /// The public identifier a todo's link resolves to right now, or `None`
+    /// for a dead link. Derived at presentation time and never stored: public
+    /// pane identifiers are positional, so a stored one can go quietly stale
+    /// where a derived one is simply absent.
+    pub(crate) fn pane_todo_link_public_id(
+        &self,
+        todo: &crate::terminal::todo::PaneTodo,
+    ) -> Option<String> {
+        let (_, pane_id) = self.pane_todo_link_target(todo)?;
+        self.session_public_pane_id(pane_id)
+    }
+
     /// Open the edit modal on an existing todo, prefilled from the store.
     pub(crate) fn open_pane_todo_edit(&mut self, pane_id: PaneId, todo_id: u64) {
         let Some(todo) = self
@@ -2164,7 +2197,10 @@ impl AppState {
         self.pane_todo_edit = Some(PaneTodoEditState {
             pane_id,
             todo_id: Some(todo.id),
-            text: todo.text,
+            text: crate::ui::text_field::TextField::from_text(
+                &todo.text,
+                crate::terminal::todo::MAX_TODO_TEXT_LEN,
+            ),
             priority: todo.priority,
             link: PaneTodoEditLink::Keep,
             done: todo.done,
@@ -2177,7 +2213,7 @@ impl AppState {
         self.pane_todo_edit = Some(PaneTodoEditState {
             pane_id,
             todo_id: None,
-            text: String::new(),
+            text: crate::ui::text_field::TextField::new(crate::terminal::todo::MAX_TODO_TEXT_LEN),
             priority: crate::terminal::todo::TodoPriority::default(),
             link: PaneTodoEditLink::Keep,
             done: false,
@@ -2230,22 +2266,37 @@ impl AppState {
         };
     }
 
-    /// What the modal's link row shows for the current choice.
+    /// What the modal's link row shows for the current choice: the target's
+    /// public identifier first and its label after it, the same composition
+    /// the panel's chip uses. A dead link resolves to no identifier and shows
+    /// its label alone.
     pub(crate) fn pane_todo_edit_link_label(&self) -> String {
         let Some(edit) = self.pane_todo_edit.as_ref() else {
             return String::new();
         };
-        match edit.link {
-            PaneTodoEditLink::Clear => "none".to_string(),
-            PaneTodoEditLink::Keep => edit
-                .todo_id
-                .and_then(|todo_id| {
+        let (public_id, label) = match edit.link {
+            PaneTodoEditLink::Clear => return "none".to_string(),
+            PaneTodoEditLink::Keep => {
+                let Some(todo) = edit.todo_id.and_then(|todo_id| {
                     let terminal = self.pane_terminal(edit.pane_id)?;
-                    let todo = terminal.todos().iter().find(|todo| todo.id == todo_id)?;
-                    todo.link.as_ref().map(|link| link.label.clone())
-                })
-                .unwrap_or_else(|| "none".to_string()),
-            PaneTodoEditLink::Set(target) => self.pane_link_target_label(target),
+                    terminal.todos().iter().find(|todo| todo.id == todo_id)
+                }) else {
+                    return "none".to_string();
+                };
+                let Some(link) = todo.link.as_ref() else {
+                    return "none".to_string();
+                };
+                (self.pane_todo_link_public_id(todo), link.label.clone())
+            }
+            PaneTodoEditLink::Set(target) => (
+                self.session_public_pane_id(target),
+                self.pane_link_target_label(target),
+            ),
+        };
+        match public_id {
+            Some(id) if label.is_empty() => id,
+            Some(id) => format!("{id} · {label}"),
+            None => label,
         }
     }
 
@@ -3648,6 +3699,7 @@ mod tests {
             is_workspace,
             is_tab: false,
             expanded: true,
+            public_pane_id: None,
             search_text: String::new(),
             matched: true,
         }

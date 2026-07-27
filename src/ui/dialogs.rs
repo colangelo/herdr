@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use super::text::{display_width_u16, truncate_end};
+use super::text_field::TextField;
 use super::widgets::{
     action_button_row_rects, centered_popup_rect, panel_contrast_fg, render_action_button,
     render_modal_header, render_modal_shell, render_panel_shell, ActionButtonSpec,
@@ -76,13 +77,23 @@ fn render_name_input_field(app: &AppState, frame: &mut Frame, input_rect: Rect) 
 }
 
 pub(crate) const PANE_TODO_EDIT_POPUP_WIDTH: u16 = 60;
-pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 12;
+pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 14;
+
+/// How many lines of a todo the modal shows at once. A todo is a note, not a
+/// document, so the block is bounded and scrolls rather than growing the modal
+/// to fit whatever was pasted into it.
+pub(crate) const PANE_TODO_EDIT_INPUT_ROWS: u16 = 3;
+
+/// One column of padding at each edge of the input block, matching the `" "`
+/// every other modal row is prefixed with.
+const INPUT_PADDING: u16 = 1;
 
 /// The modal's interactive regions. One definition, read by the renderer and
 /// by the mouse layer, so clicking "priority" always lands on the row that
 /// says "priority".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PaneTodoEditRects {
+    /// Several rows tall, since a todo may hold more than one line.
     pub input: Rect,
     pub priority: Rect,
     pub link: Rect,
@@ -94,8 +105,11 @@ pub(crate) struct PaneTodoEditRects {
 }
 
 pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
-    // Row 6 now holds `done`, so the button row (height - 1) must clear it.
-    if inner.width == 0 || inner.height < 9 {
+    // The input block spans `PANE_TODO_EDIT_INPUT_ROWS`, pushing everything
+    // under it down; `done` is the lowest field row, so the button row
+    // (height - 1) must still clear it.
+    let below_input = 2 + PANE_TODO_EDIT_INPUT_ROWS;
+    if inner.width == 0 || inner.height < below_input + 6 {
         return None;
     }
     let row = |offset: u16| Rect::new(inner.x, inner.y + offset, inner.width, 1);
@@ -103,7 +117,7 @@ pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
         inner,
         &[
             ActionButtonSpec {
-                hint: Some("↵"),
+                hint: Some("^s"),
                 label: "save",
             },
             ActionButtonSpec {
@@ -115,13 +129,80 @@ pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
         inner.height - 1,
     );
     Some(PaneTodoEditRects {
-        input: row(2),
-        priority: row(4),
-        link: row(5),
-        done: row(6),
+        input: Rect::new(inner.x, inner.y + 2, inner.width, PANE_TODO_EDIT_INPUT_ROWS),
+        priority: row(below_input + 1),
+        link: row(below_input + 2),
+        done: row(below_input + 3),
         save: buttons[0],
         cancel: buttons[1],
     })
+}
+
+/// Which of the field's lines the input block starts at: the least it can
+/// scroll and still show the cursor. Derived rather than stored, so the view
+/// cannot drift out of step with the cursor.
+pub(crate) fn pane_todo_edit_line_scroll(field: &TextField, rows: u16) -> usize {
+    field
+        .cursor_line()
+        .saturating_sub(rows.max(1).saturating_sub(1) as usize)
+}
+
+/// Display columns the input block's text is shifted left by, so the cursor
+/// stays visible on a line wider than the block. Applied to every row, not
+/// just the cursor's, so the lines stay aligned with each other.
+pub(crate) fn pane_todo_edit_column_scroll(field: &TextField, width: u16) -> usize {
+    field
+        .cursor_column()
+        .saturating_sub(width.max(1).saturating_sub(1) as usize)
+}
+
+/// The part of the input block that holds the todo itself, once its padding is
+/// taken out. Render and hit-test share it, so the cursor lands where the
+/// pointer is.
+pub(crate) fn pane_todo_edit_text_area(input: Rect) -> Rect {
+    Rect::new(
+        input.x + INPUT_PADDING,
+        input.y,
+        input.width.saturating_sub(INPUT_PADDING * 2),
+        input.height,
+    )
+}
+
+/// One rendered row of the input block: the visible slice of `line`, with the
+/// character under the cursor picked out when the cursor is on this line.
+fn input_row_line(
+    line: &str,
+    column_scroll: usize,
+    width: usize,
+    cursor_column: Option<usize>,
+    text_style: Style,
+    cursor_style: Style,
+) -> Line<'static> {
+    let (mut before, mut under, mut after) = (String::new(), String::new(), String::new());
+    let mut column = 0usize;
+    for ch in line.chars() {
+        let start = column;
+        column += crate::ui::text::char_display_width(ch);
+        if start < column_scroll || start - column_scroll >= width {
+            continue;
+        }
+        match cursor_column {
+            Some(cursor) if start == cursor => under.push(ch),
+            Some(cursor) if start < cursor => before.push(ch),
+            _ => after.push(ch),
+        }
+    }
+    // At the end of a line there is no character to sit on, so the cursor
+    // takes a blank cell — which is also where a fresh todo starts.
+    if cursor_column.is_some() && under.is_empty() {
+        under.push(' ');
+    }
+    Line::from(vec![
+        Span::styled(" ".repeat(INPUT_PADDING as usize), text_style),
+        Span::styled(before, text_style),
+        Span::styled(under, cursor_style),
+        Span::styled(after, text_style),
+    ])
 }
 
 pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
@@ -156,18 +237,34 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
     );
 
     frame.render_widget(Clear, rects.input);
-    frame.render_widget(
-        Paragraph::new(format!(
-            " {}█",
-            truncate_end(&edit.text, rects.input.width.saturating_sub(3) as usize)
-        ))
-        .style(
-            Style::default()
-                .fg(app.palette.text)
-                .bg(app.palette.surface0),
-        ),
-        rects.input,
-    );
+    let input_style = Style::default()
+        .fg(app.palette.text)
+        .bg(app.palette.surface0);
+    let cursor_style = Style::default()
+        .fg(app.palette.surface0)
+        .bg(app.palette.accent);
+    let text_area = pane_todo_edit_text_area(rects.input);
+    let line_scroll = pane_todo_edit_line_scroll(&edit.text, rects.input.height);
+    let column_scroll = pane_todo_edit_column_scroll(&edit.text, text_area.width);
+    let cursor_line = edit.text.cursor_line();
+    let lines: Vec<&str> = edit.text.lines().collect();
+    for row in 0..rects.input.height {
+        let rect = Rect::new(rects.input.x, rects.input.y + row, rects.input.width, 1);
+        let idx = line_scroll + row as usize;
+        let line = lines.get(idx).copied().unwrap_or("");
+        frame.render_widget(
+            Paragraph::new(input_row_line(
+                line,
+                column_scroll,
+                text_area.width as usize,
+                (idx == cursor_line).then(|| edit.text.cursor_column()),
+                input_style,
+                cursor_style,
+            ))
+            .style(input_style),
+            rect,
+        );
+    }
 
     let priority_label = match edit.priority {
         crate::terminal::todo::TodoPriority::High => "high",
@@ -212,7 +309,7 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
         frame.render_widget(
             Paragraph::new(field(
                 "done",
-                "^d",
+                "^t",
                 if edit.done { "yes" } else { "no" }.to_string(),
                 Style::default().fg(if edit.done {
                     app.palette.green
@@ -224,10 +321,11 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
         );
     }
 
+    // `^s`, not `↵`: Enter inserts a newline in this field.
     render_action_button(
         frame,
         rects.save,
-        Some("↵"),
+        Some("^s"),
         "save",
         Style::default()
             .fg(panel_contrast_fg(&app.palette))
@@ -1093,7 +1191,9 @@ pub(crate) fn confirm_close_button_rects(inner: Rect) -> (Rect, Rect) {
 #[cfg(test)]
 mod tests {
     use crate::{
+        app::{state::WorktreeCreateState, AppState},
         app::{state::WorktreeCreateState, AppState, Mode},
+        ui::text_field::TextField,
         workspace::Workspace,
     };
     use ratatui::{
@@ -1104,7 +1204,8 @@ mod tests {
     };
 
     use super::{
-        confirm_close_overlay_text, pane_todo_edit_rects, render_new_linked_worktree_overlay,
+        confirm_close_overlay_text, display_width_u16, pane_todo_edit_rects,
+        pane_todo_edit_text_area, render_new_linked_worktree_overlay,
         render_pane_todo_edit_overlay, render_rename_overlay, PANE_TODO_EDIT_POPUP_HEIGHT,
         PANE_TODO_EDIT_POPUP_WIDTH,
     };
@@ -1475,7 +1576,8 @@ mod tests {
         let pane_id = app.workspaces[0].tabs[0].root_pane;
         app.open_new_pane_todo(pane_id);
         if let Some(edit) = app.pane_todo_edit.as_mut() {
-            edit.text = "rerun the deploy".into();
+            edit.text =
+                TextField::from_text("rerun the deploy", crate::terminal::todo::MAX_TODO_TEXT_LEN);
         }
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
@@ -1497,7 +1599,16 @@ mod tests {
             .map(|x| buffer[(x, rects.input.y)].symbol())
             .collect();
         assert!(input.contains("rerun the deploy"));
-        assert!(input.contains('█'), "the fake cursor sits after the text");
+        // The cursor is a real insertion point now, drawn by inverting the
+        // cell it sits on rather than by appending a glyph. Freshly opened, it
+        // sits one column past the last character.
+        let text_area = pane_todo_edit_text_area(rects.input);
+        let cursor_x = text_area.x + display_width_u16("rerun the deploy");
+        assert_eq!(
+            buffer[(cursor_x, text_area.y)].style().bg,
+            Some(app.palette.accent),
+            "the cursor cell is picked out where the insertion point is"
+        );
 
         let priority: String = (rects.priority.x..rects.priority.x + rects.priority.width)
             .map(|x| buffer[(x, rects.priority.y)].symbol())
@@ -1514,6 +1625,66 @@ mod tests {
             .map(|x| buffer[(x, rects.save.y)].symbol())
             .collect();
         assert!(save.contains("save"));
+    }
+
+    /// A todo may hold more than one line, so the input block is several rows
+    /// tall and scrolls to keep the insertion point visible rather than
+    /// growing the modal to whatever was pasted in.
+    #[test]
+    fn the_input_block_shows_several_lines_and_scrolls_to_the_cursor() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("todos")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        app.view.terminal_area = Rect::new(0, 0, 80, 24);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        app.open_new_pane_todo(pane_id);
+
+        let inner = crate::ui::centered_popup_rect(
+            Rect::new(0, 0, 80, 24),
+            PANE_TODO_EDIT_POPUP_WIDTH,
+            PANE_TODO_EDIT_POPUP_HEIGHT,
+        )
+        .map(|popup| Rect::new(popup.x + 1, popup.y + 1, popup.width - 2, popup.height - 2))
+        .expect("popup should fit");
+        let rects = pane_todo_edit_rects(inner).expect("edit rects should exist");
+        assert_eq!(rects.input.height, super::PANE_TODO_EDIT_INPUT_ROWS);
+        assert!(
+            rects.input.y + rects.input.height <= rects.priority.y,
+            "the block cannot overlap the field rows under it"
+        );
+
+        let render = |app: &AppState, row: u16| {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| render_pane_todo_edit_overlay(app, frame, frame.area()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (rects.input.x..rects.input.x + rects.input.width)
+                .map(|x| buffer[(x, rects.input.y + row)].symbol())
+                .collect::<String>()
+        };
+
+        // Three lines fill the block exactly.
+        if let Some(edit) = app.pane_todo_edit.as_mut() {
+            edit.text =
+                TextField::from_text("one\ntwo\nthree", crate::terminal::todo::MAX_TODO_TEXT_LEN);
+        }
+        assert!(render(&app, 0).contains("one"));
+        assert!(render(&app, 1).contains("two"));
+        assert!(render(&app, 2).contains("three"));
+
+        // A fourth scrolls the first out: the cursor lands on the last line,
+        // and the block shows the last three.
+        if let Some(edit) = app.pane_todo_edit.as_mut() {
+            edit.text = TextField::from_text(
+                "one\ntwo\nthree\nfour",
+                crate::terminal::todo::MAX_TODO_TEXT_LEN,
+            );
+        }
+        assert!(!render(&app, 0).contains("one"));
+        assert!(render(&app, 0).contains("two"));
+        assert!(render(&app, 2).contains("four"));
     }
 
     /// The title used to start in the frame's first inner column while every
@@ -1614,7 +1785,11 @@ mod tests {
 
         let row = render(&app);
         assert!(row.contains("done"), "the done row is labelled: {row}");
-        assert!(row.contains("^d"), "it advertises its shortcut: {row}");
+        assert!(
+            row.contains("^t"),
+            "it advertises its shortcut, which is no longer ^d — that is \
+             delete-forward in the text field now: {row}"
+        );
         assert!(row.contains("no"), "and shows the current state: {row}");
 
         app.toggle_pane_todo_edit_done();
