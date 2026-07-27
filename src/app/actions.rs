@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use tracing::{info, warn};
 
-use crate::agent_priority::display_priority;
 use crate::detect::{Agent, AgentState};
 use crate::events::AppEvent;
 use crate::layout::PaneId;
@@ -425,7 +424,7 @@ impl AppState {
             let workspace_matches = match query_kind {
                 NavigatorQueryKind::Empty => true,
                 NavigatorQueryKind::State(filter) => {
-                    let (state, seen) = ws.aggregate_state(&self.terminals);
+                    let (state, seen) = ws.display_state(&self.terminals);
                     navigator_state_filter_matches(filter, state, seen)
                 }
                 NavigatorQueryKind::Text => navigator_matches(&query, &workspace_search_text),
@@ -439,7 +438,7 @@ impl AppState {
 
             let expanded = !matches!(query_kind, NavigatorQueryKind::Empty)
                 || self.navigator.expanded_workspaces.contains(&ws.id);
-            let (state, seen) = ws.aggregate_state(&self.terminals);
+            let (state, seen) = ws.display_state(&self.terminals);
             let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
             rows.push(NavigatorRow {
                 target: NavigatorTarget::Workspace { ws_idx },
@@ -540,7 +539,7 @@ impl AppState {
         let label = ws
             .tab_display_name(tab_idx)
             .unwrap_or_else(|| (tab_idx + 1).to_string());
-        let (status, seen) = tab_aggregate_state(tab, &self.terminals);
+        let (status, seen) = tab.display_state(&self.terminals);
         let activity = tab_activity_summary(tab, &self.terminals);
         let pane_count = tab.panes.len();
         let meta = if activity.is_empty() {
@@ -1003,27 +1002,6 @@ fn state_label_text(state: AgentState, seen: bool) -> &'static str {
         (AgentState::Idle, true) => "idle",
         (AgentState::Unknown, _) => "unknown",
     }
-}
-
-fn tab_aggregate_state(
-    tab: &crate::workspace::Tab,
-    terminals: &std::collections::HashMap<
-        crate::terminal::TerminalId,
-        crate::terminal::TerminalState,
-    >,
-) -> (AgentState, bool) {
-    let mut aggregate = AgentState::Unknown;
-    let mut seen = true;
-    for pane in tab.panes.values() {
-        let Some(terminal) = terminals.get(&pane.attached_terminal_id) else {
-            continue;
-        };
-        if display_priority(terminal.state, pane.seen) > display_priority(aggregate, seen) {
-            aggregate = terminal.state;
-            seen = pane.seen;
-        }
-    }
-    (aggregate, seen)
 }
 
 fn tab_activity_summary(
