@@ -53,4 +53,4 @@ confirmation. Group 7 is the docs and final validation.
 
 - [x] 7.1 Stage the changelog entry and config-reference updates under `docs/next/`, extending existing pages rather than adding new `.mdx` that would need ja/zh-cn translations
 - [x] 7.2 Document the `herdr todo` verbs and the `todo.*` socket methods on the existing CLI and socket API pages
-- [ ] 7.3 Dogfood the feature in a live herdr build before marking the change complete (`just check` is green apart from the known macOS `live_handoff` failure, fork issue #33)
+- [x] 7.3 Dogfood the feature in a live herdr build before marking the change complete (`just check` is green apart from the known macOS `live_handoff` failure, fork issue #33). Shipped on the `-ac-beta` channel and used live: the panel was opened on real panes, a todo toggled done, and the edit modal exercised — which is what surfaced the follow-up work now tracked in the `pane-todos-ux` change (always-on indicator, add-from-panel, cross-workspace link picker)
