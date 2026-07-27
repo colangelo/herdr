@@ -41,7 +41,7 @@ the picker then persists `w1:p3`.
 
 ## 6. Docs and validation
 
-- [ ] 6.1 Update `docs/next/website/src/content/docs/keyboard.mdx` for the always-on indicator, the panel add key, and the link picker replacing the cycle
-- [ ] 6.2 Add the changelog entry under `docs/next/CHANGELOG.md`, and add `help_entry` rows in `src/ui/keybind_help.rs` for any new action
-- [ ] 6.3 `just check` green apart from the known macOS `live_handoff` failure (fork issue #33), plus the changelog duplicate checks from the sync skill
+- [x] 6.1 Update `docs/next/website/src/content/docs/keyboard.mdx` for the always-on indicator, the panel add key, and the link picker replacing the cycle
+- [x] 6.2 Add the changelog entry under `docs/next/CHANGELOG.md`, and add `help_entry` rows in `src/ui/keybind_help.rs` for any new action
+- [x] 6.3 `just check` green apart from the known macOS `live_handoff` failure (fork issue #33), plus the changelog duplicate checks from the sync skill
 - [ ] 6.4 Dogfood on the `-ac-beta` channel: click an empty pane's indicator, add a todo from the panel, and link it to a pane in another workspace
