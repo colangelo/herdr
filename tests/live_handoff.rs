@@ -1226,10 +1226,17 @@ fn live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session() {
     let started_marker = base.join("agent-started");
     let fake_pi = base.join("pi");
     fs::create_dir_all(&base).unwrap();
+    // Deliberately does not `exec` the sleep. Keeping the script itself in the
+    // foreground job leaves `pi` in the process argv, which is how a real agent
+    // is identified. `exec` would replace the image with `/bin/sleep`, leaving
+    // only the `HERDR_AGENT` environment hint to identify the pane — and macOS
+    // withholds argv and environment for SIP-protected platform binaries like
+    // `/bin/sleep`, so the hint is unreadable there and the pane never
+    // registers as hosting an agent. See AC-forks/herdr#40.
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nexport HERDR_AGENT=pi\necho started > {}\nexec /bin/sleep 30\n",
+            "#!/bin/sh\nexport HERDR_AGENT=pi\necho started > {}\n/bin/sleep 30\n",
             started_marker.display()
         ),
     )
