@@ -54,5 +54,5 @@ requirements that change is still holding open.
 
 ## 7. Dogfood
 
-- [ ] 7.1 Ship a beta per the `herdr-dogfood` skill and confirm on a live session: mid-buffer editing, a two-line todo, `ctrl+j`/`ctrl+k` while searching the picker, and a chip reading `w2:pC · claude`
-- [ ] 7.2 Confirm undo arrives on the host terminal in use, and note in the change which chord actually landed
+- [x] 7.1 Ship a beta per the `herdr-dogfood` skill and confirm on a live session: mid-buffer editing, a two-line todo, `ctrl+j`/`ctrl+k` while searching the picker, and a chip reading `w2:pC · claude` — shipped as `0.7.5-ac-beta.51-fagioli` and handed off live with panes preserved; confirmed against a seeded todo on `w5:p3` linked to `w2:p1`, whose chip reads `→ w2:p1 · infra-homepage`
+- [x] 7.2 Confirm undo arrives on the host terminal in use, and note in the change which chord actually landed — on Ghostty, **both `ctrl+_` and `ctrl+-` land**. That is the enhanced-protocol path, where each arrives as its own `Char(..)+CONTROL`. `ctrl+/` is the same action and was not distinguished separately. The legacy path is covered by the `ctrl+-` arm either way: Herdr's own parser maps the bare `0x1F` byte to `ctrl+-` (`src/input/parse.rs`), which is what makes undo reachable without the enhanced protocol — a detail the design had the wrong way round, assuming `0x1F` would surface as `ctrl+_`
