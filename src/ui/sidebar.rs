@@ -2438,6 +2438,91 @@ mod tests {
         assert_eq!(idle_style.fg, Some(Color::Rgb(74, 222, 128)));
     }
 
+    /// One single-pane workspace per `(state, seen, seq)` triple, in the order
+    /// given, so a test can name an expected order by index.
+    fn app_with_workspace_states(
+        states: &[(AgentState, bool, Option<u64>)],
+    ) -> crate::app::state::AppState {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = (0..states.len())
+            .map(|idx| Workspace::test_new(&format!("w{idx}")))
+            .collect();
+        app.ensure_test_terminals();
+        for (workspace, (state, seen, seq)) in app.workspaces.iter_mut().zip(states) {
+            let pane_id = workspace.tabs[0].root_pane;
+            let terminal_id = workspace.tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            workspace.tabs[0].panes.get_mut(&pane_id).unwrap().seen = *seen;
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = *state;
+            terminal.last_agent_state_change_seq = *seq;
+        }
+        app
+    }
+
+    /// A fixture covering all five `(state, seen)` combinations, one per
+    /// workspace. Attention order over it is blocked, done, working, idle,
+    /// unknown — indices 3, 4, 1, 0, 2.
+    fn mixed_state_workspaces() -> crate::app::state::AppState {
+        app_with_workspace_states(&[
+            (AgentState::Idle, true, Some(1)),
+            (AgentState::Working, true, Some(2)),
+            (AgentState::Unknown, true, Some(3)),
+            (AgentState::Blocked, true, Some(4)),
+            (AgentState::Idle, false, Some(5)),
+        ])
+    }
+
+    fn workspace_order(app: &crate::app::state::AppState) -> Vec<usize> {
+        workspace_list_entries(app)
+            .iter()
+            .map(|entry| match entry {
+                WorkspaceListEntry::Workspace { ws_idx, .. } => *ws_idx,
+            })
+            .collect()
+    }
+
+    /// Characterization test: the agent panel's priority sort is an
+    /// *attention* order, in which a pane that finished while unseen outranks
+    /// an actively working one. Splitting display state away from attention
+    /// must leave this ordering exactly as it is — surfacing a finished agent
+    /// above a working one is the point of the sort.
+    #[test]
+    fn agent_panel_priority_sort_is_attention_ordered() {
+        let mut app = mixed_state_workspaces();
+        app.agent_panel_sort = AgentPanelSort::Priority;
+        app.sort_motion_bubble = false;
+
+        let order: Vec<_> = agent_panel_entries(&app)
+            .into_iter()
+            .map(|entry| agent_panel_status_key(entry.state, entry.seen))
+            .collect();
+
+        assert_eq!(order, vec!["blocked", "done", "working", "idle", "unknown"]);
+    }
+
+    /// Characterization test: the workspace list's priority sort is likewise
+    /// an attention order, and the bubble-motion target agrees with it. The
+    /// two must not diverge, or the motion chases an order the sort never
+    /// produces and never settles.
+    #[test]
+    fn workspace_priority_sort_is_attention_ordered_and_matches_motion_target() {
+        let mut app = mixed_state_workspaces();
+        app.workspace_sort = WorkspaceSort::Priority;
+        app.sort_motion_bubble = false;
+
+        let order = workspace_order(&app);
+        assert_eq!(order, vec![3, 4, 1, 0, 2]);
+
+        let expected_keys: Vec<String> = order
+            .iter()
+            .map(|ws_idx| format!("ws:{}", app.workspaces[*ws_idx].id))
+            .collect();
+        assert_eq!(workspace_unit_target_keys(&app), expected_keys);
+    }
+
     #[test]
     fn agent_panel_target_keys_match_priority_entries_order() {
         // `agent_panel_target_keys` re-implements the panel's priority
