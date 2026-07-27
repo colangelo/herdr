@@ -326,7 +326,7 @@ fn render_header_status(
         return;
     };
 
-    let (state, seen) = ws.aggregate_state(&app.terminals);
+    let (state, seen) = ws.display_state(&app.terminals);
     let (dot, dot_style) = state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
     let tab_label = mobile_tab_status(ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
@@ -606,7 +606,7 @@ fn render_mobile_switcher_content(
         let active = Some(*ws_idx) == app.active;
         let selected = *ws_idx == app.selected;
         let bg = mobile_item_bg(selected, active, p);
-        let (state, seen) = ws.aggregate_state(&app.terminals);
+        let (state, seen) = ws.display_state(&app.terminals);
         let (dot, dot_style) =
             state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
 

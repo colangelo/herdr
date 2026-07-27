@@ -1123,7 +1123,8 @@
         "TabInfo": {
           "properties": {
             "agent_status": {
-              "$ref": "#/schemas/event/$defs/AgentStatus"
+              "$ref": "#/schemas/event/$defs/AgentStatus",
+              "description": "Aggregated over every pane in the tab by display ranking, so a tab\ncontaining a working agent reports `working` even when a sibling pane\nhas finished unseen. Blocked still outranks working. This is the state\nthe tab *is*, not the one that most wants attention."
             },
             "focused": {
               "type": "boolean"
@@ -1165,7 +1166,8 @@
               "type": "string"
             },
             "agent_status": {
-              "$ref": "#/schemas/event/$defs/AgentStatus"
+              "$ref": "#/schemas/event/$defs/AgentStatus",
+              "description": "Aggregated over every pane in the workspace by display ranking, so a\nworkspace containing a working agent reports `working` even when a\nsibling pane has finished unseen. Blocked still outranks working. This\nis the state the workspace *is*, not the one that most wants attention."
             },
             "focused": {
               "type": "boolean"
@@ -10499,7 +10501,8 @@
         "TabInfo": {
           "properties": {
             "agent_status": {
-              "$ref": "#/schemas/success_response/$defs/AgentStatus"
+              "$ref": "#/schemas/success_response/$defs/AgentStatus",
+              "description": "Aggregated over every pane in the tab by display ranking, so a tab\ncontaining a working agent reports `working` even when a sibling pane\nhas finished unseen. Blocked still outranks working. This is the state\nthe tab *is*, not the one that most wants attention."
             },
             "focused": {
               "type": "boolean"
@@ -10610,7 +10613,8 @@
               "type": "string"
             },
             "agent_status": {
-              "$ref": "#/schemas/success_response/$defs/AgentStatus"
+              "$ref": "#/schemas/success_response/$defs/AgentStatus",
+              "description": "Aggregated over every pane in the workspace by display ranking, so a\nworkspace containing a working agent reports `working` even when a\nsibling pane has finished unseen. Blocked still outranks working. This\nis the state the workspace *is*, not the one that most wants attention."
             },
             "focused": {
               "type": "boolean"

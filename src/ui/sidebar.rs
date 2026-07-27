@@ -12,7 +12,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
-use crate::agent_priority::attention_priority;
+use crate::agent_priority::{attention_priority, display_priority};
 use crate::app::state::{AgentPanelSort, Palette, WorkspaceSort};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
@@ -240,7 +240,7 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
 }
 
 fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {
-    let (state, seen) = ws.aggregate_state(&app.terminals);
+    let (state, seen) = ws.display_state(&app.terminals);
     let label = if indented {
         grouped_child_display_label(
             &ws.display_name_from_terminals(&app.terminals),
@@ -284,11 +284,28 @@ fn workspace_entry_gap(app: &AppState, entries: &[WorkspaceListEntry], entry_idx
     }
 }
 
-fn space_aggregate_state(app: &AppState, key: &str) -> (AgentState, bool) {
+fn space_workspaces<'a>(
+    app: &'a AppState,
+    key: &'a str,
+) -> impl Iterator<Item = &'a crate::workspace::Workspace> + 'a {
     app.workspaces
         .iter()
-        .filter(|ws| ws.worktree_space().is_some_and(|space| space.key == key))
-        .map(|ws| ws.aggregate_state(&app.terminals))
+        .filter(move |ws| ws.worktree_space().is_some_and(|space| space.key == key))
+}
+
+/// The state a worktree space *is*, shown on its collapsed group row.
+fn space_display_state(app: &AppState, key: &str) -> (AgentState, bool) {
+    space_workspaces(app, key)
+        .map(|ws| ws.display_state(&app.terminals))
+        .max_by_key(|(state, seen)| display_priority(*state, *seen))
+        .unwrap_or((AgentState::Unknown, true))
+}
+
+/// The state a worktree space *wants the user for*, used to rank the whole
+/// group under `workspace_sort = priority`.
+fn space_attention_state(app: &AppState, key: &str) -> (AgentState, bool) {
+    space_workspaces(app, key)
+        .map(|ws| ws.attention_state(&app.terminals))
         .max_by_key(|(state, seen)| attention_priority(*state, *seen))
         .unwrap_or((AgentState::Unknown, true))
 }
@@ -469,7 +486,7 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
         if !prioritize {
             return (0, None);
         }
-        let (state, seen) = ws.aggregate_state(&app.terminals);
+        let (state, seen) = ws.attention_state(&app.terminals);
         (
             attention_priority(state, seen),
             ws.last_agent_state_change_seq(&app.terminals),
@@ -551,7 +568,7 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
 
         // Rank a group by its whole space, even when collapsed rows are hidden.
         let (priority, last_change_seq) = if prioritize {
-            let (state, seen) = space_aggregate_state(app, &space.key);
+            let (state, seen) = space_attention_state(app, &space.key);
             (
                 attention_priority(state, seen),
                 space_last_agent_state_change_seq(app, &space.key),
@@ -945,7 +962,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         if y >= ws_area.y + ws_area.height {
             break;
         }
-        let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
+        let (agg_state, agg_seen) = ws.display_state(&app.terminals);
         let (icon, icon_style) = state_icon(
             agg_state,
             agg_seen,
@@ -1621,7 +1638,7 @@ fn render_workspace_list(
         let is_active = Some(i) == app.active;
         let is_dragged = dragged_ws_idx == Some(i);
         let highlighted = selected || is_active || is_dragged;
-        let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
+        let (agg_state, agg_seen) = ws.display_state(&app.terminals);
 
         // Jump number for this card, if enabled and within the label range.
         let jump_number = visible_order.as_ref().and_then(|order| {
@@ -1717,7 +1734,7 @@ fn render_workspace_list(
         let (display_state, display_seen) = parent_group
             .as_ref()
             .filter(|(_, collapsed)| *collapsed)
-            .map(|(key, _)| space_aggregate_state(app, key))
+            .map(|(key, _)| space_display_state(app, key))
             .unwrap_or((agg_state, agg_seen));
         let state_icon = state_icon(
             display_state,
@@ -2411,6 +2428,28 @@ mod tests {
         assert_eq!(idle_style.fg, Some(Color::Rgb(74, 222, 128)));
     }
 
+    /// Puts a workspace's single root pane into the given agent state. Panics
+    /// if the workspace has been split; the state fixtures here are all
+    /// one pane per workspace.
+    fn set_single_pane_state(
+        app: &mut crate::app::state::AppState,
+        ws_idx: usize,
+        state: AgentState,
+        seen: bool,
+        seq: Option<u64>,
+    ) {
+        let workspace = &mut app.workspaces[ws_idx];
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        workspace.tabs[0].panes.get_mut(&pane_id).unwrap().seen = seen;
+        let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Pi);
+        terminal.state = state;
+        terminal.last_agent_state_change_seq = seq;
+    }
+
     /// One single-pane workspace per `(state, seen, seq)` triple, in the order
     /// given, so a test can name an expected order by index.
     fn app_with_workspace_states(
@@ -2421,18 +2460,36 @@ mod tests {
             .map(|idx| Workspace::test_new(&format!("w{idx}")))
             .collect();
         app.ensure_test_terminals();
-        for (workspace, (state, seen, seq)) in app.workspaces.iter_mut().zip(states) {
-            let pane_id = workspace.tabs[0].root_pane;
-            let terminal_id = workspace.tabs[0].panes[&pane_id]
-                .attached_terminal_id
-                .clone();
-            workspace.tabs[0].panes.get_mut(&pane_id).unwrap().seen = *seen;
-            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
-            terminal.detected_agent = Some(Agent::Pi);
-            terminal.state = *state;
-            terminal.last_agent_state_change_seq = *seq;
+        for (ws_idx, (state, seen, seq)) in states.iter().enumerate() {
+            set_single_pane_state(&mut app, ws_idx, *state, *seen, *seq);
         }
         app
+    }
+
+    /// A collapsed worktree-space row aggregates across its member workspaces
+    /// through a second, independent `max_by_key`. It is a display path too:
+    /// fixing only the per-workspace aggregate would leave collapsed groups
+    /// still masking a working agent behind a finished sibling.
+    #[test]
+    fn space_display_state_working_beats_done_unseen_across_members() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
+            workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
+        ];
+        app.ensure_test_terminals();
+        set_single_pane_state(&mut app, 0, AgentState::Idle, false, Some(1));
+        set_single_pane_state(&mut app, 1, AgentState::Working, true, Some(2));
+
+        assert_eq!(
+            space_display_state(&app, "repo-key"),
+            (AgentState::Working, true)
+        );
+        // The group's rank under `workspace_sort = priority` is unaffected.
+        assert_eq!(
+            space_attention_state(&app, "repo-key"),
+            (AgentState::Idle, false)
+        );
     }
 
     /// A fixture covering all five `(state, seen)` combinations, one per
@@ -2468,12 +2525,19 @@ mod tests {
         app.agent_panel_sort = AgentPanelSort::Priority;
         app.sort_motion_bubble = false;
 
-        let order: Vec<_> = agent_panel_entries(&app)
-            .into_iter()
+        let entries = agent_panel_entries(&app);
+        let order: Vec<_> = entries
+            .iter()
             .map(|entry| agent_panel_status_key(entry.state, entry.seen))
             .collect();
 
         assert_eq!(order, vec!["blocked", "done", "working", "idle", "unknown"]);
+
+        // The bubble-motion target must animate toward the order the sort
+        // actually produced, across every state combination — not just the
+        // three the older motion test covers.
+        let entry_ids: Vec<_> = entries.iter().map(|entry| entry.pane_id).collect();
+        assert_eq!(agent_panel_target_keys(&app), entry_ids);
     }
 
     /// Characterization test: the workspace list's priority sort is likewise
