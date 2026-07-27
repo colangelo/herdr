@@ -17,9 +17,9 @@ use crate::workspace::WorkspaceGitStatus;
 use super::api_helpers::pane_agent_status;
 use super::state::{
     navigator_display_index_of_row, navigator_display_lines, navigator_first_row_at_or_after,
-    text_matches_query, AgentNotificationDelivery, AppState, Mode, NavigatorRow,
-    NavigatorStateFilter, NavigatorTarget, PaneFocusTarget, PendingAgentNotification, ToastKind,
-    ToastNotification, ToastTarget, ViewLayout,
+    text_matches_query, AgentNotificationDelivery, AppState, Mode, NavigatorPurpose, NavigatorRow,
+    NavigatorStateFilter, NavigatorTarget, PaneFocusTarget, PaneTodoEditLink,
+    PendingAgentNotification, ToastKind, ToastNotification, ToastTarget, ViewLayout,
 };
 
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
@@ -359,6 +359,7 @@ impl AppState {
         self.navigator.search_focused = false;
         self.navigator.state_filter = None;
         self.navigator.scroll = 0;
+        self.navigator.purpose = NavigatorPurpose::Goto;
         self.navigator.expanded_workspaces.clear();
 
         for ws in &self.workspaces {
@@ -370,6 +371,37 @@ impl AppState {
             .current_navigator_row_index_from(terminal_runtimes)
             .unwrap_or(0);
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
+    }
+
+    /// Open the navigator to choose a link target for the todo being edited.
+    /// `pane_todo_edit` lives outside `mode`, so it survives behind the picker
+    /// and dismissing simply returns to it with the staged link untouched.
+    pub(crate) fn open_pane_todo_link_picker_from(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        if self.pane_todo_edit.is_none() {
+            return;
+        }
+        self.open_navigator_from(terminal_runtimes);
+        self.navigator.purpose = NavigatorPurpose::PaneTodoLink;
+        // Start below the clear entry so a mis-keyed Enter cannot wipe an
+        // existing link, while it stays visible at the top of the list.
+        let rows = self.navigator_rows_from(terminal_runtimes);
+        self.navigator.selected = usize::from(rows.len() > 1);
+        self.ensure_navigator_selection_visible_from(terminal_runtimes);
+    }
+
+    /// Leave the link picker for the modal that opened it. Both resolving and
+    /// dismissing come through here; dismissal just stages nothing first,
+    /// which is what leaves the previous link as it was.
+    pub(crate) fn close_pane_todo_link_picker(&mut self) {
+        self.navigator.purpose = NavigatorPurpose::Goto;
+        self.mode = if self.pane_todo_edit.is_some() {
+            Mode::PaneTodoEdit
+        } else {
+            Mode::Terminal
+        };
     }
 
     #[cfg(test)]
@@ -425,6 +457,17 @@ impl AppState {
             if expanded {
                 rows.extend(child_rows);
             }
+        }
+        if self.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+            // A todo linking to its own pane says nothing, so its pane is not
+            // offered; the clear entry leads because it is the one row that is
+            // not a place to go.
+            if let Some(own) = self.pane_todo_edit.as_ref().map(|edit| edit.pane_id) {
+                rows.retain(
+                    |row| !matches!(row.target, NavigatorTarget::Pane { pane_id, .. } if pane_id == own),
+                );
+            }
+            rows.insert(0, clear_link_row());
         }
         rows
     }
@@ -788,11 +831,49 @@ impl AppState {
         else {
             return false;
         };
+        if self.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+            return self.resolve_pane_todo_link_selection(row.target, terminal_runtimes);
+        }
         self.focus_navigator_target(row.target)
+    }
+
+    /// Selection mode: only pane rows and the clear entry resolve. A workspace
+    /// row expands or collapses instead and a tab row is inert — neither is a
+    /// link target, and activating one must not end the selection.
+    fn resolve_pane_todo_link_selection(
+        &mut self,
+        target: NavigatorTarget,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) -> bool {
+        match target {
+            NavigatorTarget::Workspace { .. } => {
+                self.toggle_selected_navigator_workspace_from(terminal_runtimes);
+                false
+            }
+            NavigatorTarget::Tab { .. } => false,
+            NavigatorTarget::Pane { pane_id, .. } => {
+                self.stage_pane_todo_link(PaneTodoEditLink::Set(pane_id));
+                true
+            }
+            NavigatorTarget::ClearLink => {
+                self.stage_pane_todo_link(PaneTodoEditLink::Clear);
+                true
+            }
+        }
+    }
+
+    fn stage_pane_todo_link(&mut self, link: PaneTodoEditLink) {
+        if let Some(edit) = self.pane_todo_edit.as_mut() {
+            edit.link = link;
+        }
+        self.close_pane_todo_link_picker();
     }
 
     pub(crate) fn focus_navigator_target(&mut self, target: NavigatorTarget) -> bool {
         match target {
+            // Only ever produced in selection mode, which resolves it before
+            // reaching here.
+            NavigatorTarget::ClearLink => false,
             NavigatorTarget::Workspace { ws_idx } => {
                 if ws_idx >= self.workspaces.len() {
                     return false;
@@ -876,6 +957,24 @@ fn navigator_state_filter_matches(
 
 fn navigator_matches(query: &str, text: &str) -> bool {
     text_matches_query(query, text)
+}
+
+/// The one row in the link picker that is not a place to go.
+fn clear_link_row() -> NavigatorRow {
+    NavigatorRow {
+        target: NavigatorTarget::ClearLink,
+        depth: 0,
+        label: "no link".to_string(),
+        meta: "clear".to_string(),
+        status: AgentState::Unknown,
+        seen: true,
+        is_current: false,
+        is_workspace: false,
+        is_tab: false,
+        expanded: false,
+        search_text: "no link clear".to_string(),
+        matched: true,
+    }
 }
 
 /// The command a pane was launched with, reduced to its basename. Shared with

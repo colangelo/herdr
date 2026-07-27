@@ -13,8 +13,8 @@ use super::{
     widgets::{panel_contrast_fg, render_panel_shell},
 };
 use crate::app::state::{
-    navigator_display_lines, AppState, NavigatorDisplayLine, NavigatorRow, NavigatorStateFilter,
-    NavigatorTarget,
+    navigator_display_lines, AppState, NavigatorDisplayLine, NavigatorPurpose, NavigatorRow,
+    NavigatorStateFilter, NavigatorTarget,
 };
 use crate::terminal::TerminalRuntimeRegistry;
 
@@ -90,8 +90,14 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             "done",
             app,
         ),
+        // The picker has no title bar to name it, so the placeholder and the
+        // footer verb below are what say which job the overlay is doing.
         None if query.is_empty() => spans.push(Span::styled(
-            "search panes",
+            if app.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+                "search panes to link"
+            } else {
+                "search panes"
+            },
             Style::default().fg(p.overlay0),
         )),
         None => spans.push(Span::styled(query.to_string(), Style::default().fg(p.text))),
@@ -394,6 +400,7 @@ fn selected_detail(app: &AppState, terminal_runtimes: &TerminalRuntimeRegistry) 
             tab_idx,
             pane_id,
         } => pane_detail(app, terminal_runtimes, ws_idx, tab_idx, pane_id),
+        NavigatorTarget::ClearLink => "leave this todo with no link".to_string(),
     }
 }
 
@@ -552,7 +559,14 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     let line = if app.navigator.search_focused {
         Line::from(vec![
             Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(
+                if app.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+                    " link  "
+                } else {
+                    " switch  "
+                },
+                dim,
+            ),
             Span::styled("↑↓", key),
             Span::styled(" move  ", dim),
             Span::styled("ctrl+u", key),
@@ -563,7 +577,14 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     } else {
         Line::from(vec![
             Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(
+                if app.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+                    " link  "
+                } else {
+                    " switch  "
+                },
+                dim,
+            ),
             Span::styled("/", key),
             Span::styled(" search  ", dim),
             Span::styled("b/w/i/d/a", key),
