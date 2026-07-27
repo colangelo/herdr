@@ -2196,9 +2196,11 @@ impl AppState {
         self.terminals.get(&pane.attached_terminal_id)
     }
 
-    /// Colour of a pane's todo indicator. The highest outstanding priority
-    /// drives it unless `ui.pane_todo_color` pins it; `None` means every todo
-    /// is done, which always reads muted.
+    /// Colour for a todo's priority: the pane indicator's outstanding state,
+    /// and the priority chips in the panel and edit modal. `ui.pane_todo_color`
+    /// pins it; `None` has no priority to show and reads muted. The
+    /// indicator's done and empty states are tones of their own — see
+    /// `PaneTodoIndicatorState::color`.
     pub fn pane_todo_indicator_color(
         &self,
         priority: Option<crate::terminal::todo::TodoPriority>,

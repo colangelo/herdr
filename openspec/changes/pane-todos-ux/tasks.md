@@ -17,10 +17,10 @@ the picker then persists `w1:p3`.
 
 ## 3. Always-on indicator
 
-- [ ] 3.1 Change `pane_todo_indicator_label` (`src/ui/panes.rs`) to always return a glyph, with the count only when outstanding todos exist
-- [ ] 3.2 Give the three states distinct tones: priority colour (outstanding), normal dim (all done), dimmest (empty); keep `ui.show_pane_todo_indicator = false` suppressing all three
-- [ ] 3.3 Keep both existing guards: no indicator when the pane draws no top border, and the indicator wins a width squeeze (title drops itself), omitted only when the pane cannot carry the glyph plus its two border corners
-- [ ] 3.4 Tests: empty pane draws the glyph and is clickable; empty and all-done render in different tones; drawn cells still equal `pane_todo_indicator_rect`; configured-off draws nothing on a pane holding todos; a pane with no top border draws nothing; the title yields before the indicator does
+- [x] 3.1 Change `pane_todo_indicator_label` (`src/ui/panes.rs`) to always return a glyph, with the count only when outstanding todos exist
+- [x] 3.2 Give the three states distinct tones: priority colour (outstanding), normal dim (all done), dimmest (empty); keep `ui.show_pane_todo_indicator = false` suppressing all three
+- [x] 3.3 Keep both existing guards: no indicator when the pane draws no top border, and the indicator wins a width squeeze (title drops itself), omitted only when the pane cannot carry the glyph plus its two border corners
+- [x] 3.4 Tests: empty pane draws the glyph and is clickable; empty and all-done render in different tones; drawn cells still equal `pane_todo_indicator_rect`; configured-off draws nothing on a pane holding todos; a pane with no top border draws nothing; the title yields before the indicator does
 
 ## 4. Add from the panel
 

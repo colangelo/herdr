@@ -5057,6 +5057,46 @@ mod tests {
         }
     }
 
+    /// The reason the indicator is drawn on every pane: an empty pane is
+    /// exactly the one you want to add a todo to, and before this it offered
+    /// nothing to click.
+    #[test]
+    fn clicking_an_empty_panes_indicator_opens_its_panel() {
+        let mut app = app_for_pane_todo_indicator();
+        let pane_id = app.state.view.pane_infos[0].id;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        let todo_id = terminal.todos()[0].id;
+        terminal
+            .remove_todo(todo_id)
+            .expect("the pane should end up with no todos");
+        assert!(terminal.todos().is_empty());
+
+        let indicator = crate::ui::pane_todo_indicator(&app.state, &app.state.view.pane_infos[0])
+            .expect("an empty pane still offers the affordance");
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                indicator.rect.x,
+                indicator.rect.y,
+            ),
+        );
+
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneTodos,
+            "clicking an empty pane's indicator opens its panel"
+        );
+    }
+
     fn add_pane_todo(app: &mut crate::app::App, pane_id: crate::layout::PaneId, text: &str) {
         let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
             .attached_terminal_id
