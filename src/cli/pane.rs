@@ -1,8 +1,9 @@
 use crate::api::schema::{
-    Method, OutputMatch, PaneCurrentParams, PaneDirection, PaneEdgesParams,
-    PaneFocusDirectionParams, PaneInputSetParams, PaneLayoutParams, PaneListParams,
-    PaneMoveDestination, PaneMoveParams, PaneNeighborParams, PaneProcessInfoParams, PaneReadParams,
-    PaneReleaseAgentParams, PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
+    LayoutBalanceParams, LayoutPreset, LayoutSetPresetParams, Method, OutputMatch,
+    PaneCurrentParams, PaneDirection, PaneEdgesParams, PaneFocusDirectionParams,
+    PaneInputSetParams, PaneLayoutParams, PaneListParams, PaneMoveDestination, PaneMoveParams,
+    PaneNeighborParams, PaneProcessInfoParams, PaneReadParams, PaneReleaseAgentParams,
+    PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneRightClickTarget, PaneSendInputParams,
     PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams, PaneTarget,
     PaneWaitForOutputParams, PaneZoomMode, PaneZoomParams, ReadFormat, ReadSource, Request,
@@ -20,6 +21,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "current" => pane_current(&args[1..]),
         "get" => pane_get(&args[1..]),
         "layout" => pane_layout(&args[1..]),
+        "balance" => pane_balance(&args[1..]),
         "process-info" => pane_process_info(&args[1..]),
         "neighbor" => pane_neighbor(&args[1..]),
         "edges" => pane_edges(&args[1..]),
@@ -141,6 +143,63 @@ fn parse_pane_current_args(
 }
 
 fn pane_layout(args: &[String]) -> std::io::Result<i32> {
+    // `--set <preset>` rebuilds the layout into a preset; without it this is the
+    // read-only layout query. Remaining args select the target (--pane/--current).
+    let mut preset: Option<LayoutPreset> = None;
+    let mut rest: Vec<String> = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--set" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --set (even-h|even-v|tiled)");
+                    return Ok(2);
+                };
+                let Some(parsed) = parse_layout_preset(value) else {
+                    eprintln!("unknown layout preset: {value} (even-h|even-v|tiled)");
+                    return Ok(2);
+                };
+                preset = Some(parsed);
+                index += 2;
+            }
+            other => {
+                rest.push(other.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    let pane_id = match parse_optional_current_pane_args_from_env(&rest) {
+        Ok(pane_id) => pane_id,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+
+    match preset {
+        Some(preset) => super::runtime::pane_layout_set_preset(LayoutSetPresetParams {
+            tab_id: None,
+            pane_id,
+            preset,
+        }),
+        None => super::print_response(&super::send_request(&Request {
+            id: "cli:pane:layout".into(),
+            method: Method::PaneLayout(PaneLayoutParams { pane_id }),
+        })?),
+    }
+}
+
+fn parse_layout_preset(value: &str) -> Option<LayoutPreset> {
+    match value {
+        "even-h" | "even-horizontal" => Some(LayoutPreset::EvenHorizontal),
+        "even-v" | "even-vertical" => Some(LayoutPreset::EvenVertical),
+        "tiled" => Some(LayoutPreset::Tiled),
+        _ => None,
+    }
+}
+
+fn pane_balance(args: &[String]) -> std::io::Result<i32> {
     let pane_id = match parse_optional_current_pane_args_from_env(args) {
         Ok(pane_id) => pane_id,
         Err(message) => {
@@ -149,10 +208,10 @@ fn pane_layout(args: &[String]) -> std::io::Result<i32> {
         }
     };
 
-    super::print_response(&super::send_request(&Request {
-        id: "cli:pane:layout".into(),
-        method: Method::PaneLayout(PaneLayoutParams { pane_id }),
-    })?)
+    super::runtime::pane_balance(LayoutBalanceParams {
+        tab_id: None,
+        pane_id,
+    })
 }
 
 fn pane_process_info(args: &[String]) -> std::io::Result<i32> {
@@ -1671,7 +1730,8 @@ fn print_pane_help() {
     eprintln!("  herdr pane list [--workspace <workspace_id>]");
     eprintln!("  herdr pane current [--pane ID|--current]");
     eprintln!("  herdr pane get <pane_id>");
-    eprintln!("  herdr pane layout [--pane ID|--current]");
+    eprintln!("  herdr pane layout [--set even-h|even-v|tiled] [--pane ID|--current]");
+    eprintln!("  herdr pane balance [--pane ID|--current]");
     eprintln!("  herdr pane process-info [--pane ID|--current]");
     eprintln!("  herdr pane neighbor --direction left|right|up|down [--pane ID|--current]");
     eprintln!("  herdr pane edges [--pane ID|--current]");
