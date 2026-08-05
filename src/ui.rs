@@ -345,9 +345,11 @@ fn compute_view_internal(
         .map(|toast| {
             toast_notification_rect(
                 area,
+                terminal_area,
                 toast,
                 app.config_diagnostic.is_some(),
                 toast.position.unwrap_or(app.toast_config.herdr.position),
+                app.toast_config.herdr.size,
             )
         })
         .unwrap_or_default();
@@ -550,16 +552,20 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
             render_toast_notification(
                 frame,
                 frame.area(),
+                app.view.terminal_area,
                 toast,
                 has_config_diagnostic,
                 toast.position.unwrap_or(app.toast_config.herdr.position),
+                app.toast_config.herdr.size,
                 &app.palette,
             );
             toast_rect = Some(toast_notification_rect(
                 frame.area(),
+                app.view.terminal_area,
                 toast,
                 has_config_diagnostic,
                 toast.position.unwrap_or(app.toast_config.herdr.position),
+                app.toast_config.herdr.size,
             ));
         }
         if app.view.layout == ViewLayout::Mobile {
@@ -840,9 +846,11 @@ mod tests {
 
         let bottom_right_toast = toast_notification_rect(
             area,
+            Rect::default(),
             &toast,
             false,
             crate::config::ToastHerdrPosition::BottomRight,
+            crate::config::ToastHerdrSize::Auto,
         );
         assert_eq!(
             copy_feedback_offset_for_toast(

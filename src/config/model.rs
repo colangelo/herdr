@@ -78,6 +78,18 @@ pub enum ToastHerdrPosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ToastHerdrSize {
+    /// Size the toast to its text content.
+    #[default]
+    Auto,
+    /// At least 40% of the anchor area width, with inner padding.
+    Medium,
+    /// At least 60% of the anchor area width, with inner padding.
+    Large,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ToastClipboardPosition {
     TopLeft,
@@ -230,6 +242,9 @@ pub struct ToastConfig {
 #[serde(default)]
 pub struct HerdrToastConfig {
     pub position: ToastHerdrPosition,
+    /// Toast box size preset: "auto" hugs the text, "medium" and "large"
+    /// widen the box relative to the anchor area. Default: auto.
+    pub size: ToastHerdrSize,
     /// How long a needs-attention toast stays visible, in seconds. 0 keeps it
     /// visible until clicked or replaced. Default: 8.
     pub needs_attention_seconds: u64,
@@ -1230,6 +1245,7 @@ impl Default for HerdrToastConfig {
     fn default() -> Self {
         Self {
             position: ToastHerdrPosition::BottomRight,
+            size: ToastHerdrSize::Auto,
             needs_attention_seconds: 8,
             finished_seconds: 5,
             update_seconds: 3,
@@ -1947,15 +1963,18 @@ position = "top-center"
         let toml = r#"
 [ui.toast.herdr]
 position = "center"
+size = "large"
 needs_attention_seconds = 4
 finished_seconds = 4
 update_seconds = 0
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.toast.herdr.position, ToastHerdrPosition::Center);
+        assert_eq!(config.ui.toast.herdr.size, ToastHerdrSize::Large);
         assert_eq!(config.ui.toast.herdr.needs_attention_seconds, 4);
         assert_eq!(config.ui.toast.herdr.finished_seconds, 4);
         assert_eq!(config.ui.toast.herdr.update_seconds, 0);
+        assert_eq!(Config::default().ui.toast.herdr.size, ToastHerdrSize::Auto);
     }
 
     #[test]
