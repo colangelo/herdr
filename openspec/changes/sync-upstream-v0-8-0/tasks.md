@@ -116,13 +116,11 @@
       as ticket #51 (see the resume brief on
       `internal/research/upstream-proposal-pack-resume-brief`)
 
-## 9. Known history blemishes (disclose in ticket #50 close-out)
+## 9. History blemishes — RESOLVED
 
-- Replay commits 27–41 carry a transient missing-brace parse error in
-  `src/config/model.rs` (bad stitch, repaired in the commit 41 resolution).
-- Replay commits 118–124 carry a live conflict-marker block in
-  `src/ui/sidebar.rs` tests (resolver wrote nothing but the file was staged
-  unchecked; repaired in the commit 125 resolution). Neither affects the
-  final tree; both hurt bisectability inside this replay range only. A
-  surgical `rebase -i` pass could clean them before the force-push if AC
-  wants it.
+Two replay ranges briefly carried a broken tree (missing brace in
+`src/config/model.rs` at picks 27-41; a staged conflict-marker block in
+`src/ui/sidebar.rs` tests at picks 118-124). A surgical `rebase -i` pass
+repaired both source commits before adoption; the final tree is
+byte-identical to the fully verified pre-pass tip and every one of the 225
+replayed commits is marker-free and parses at the repaired files.
