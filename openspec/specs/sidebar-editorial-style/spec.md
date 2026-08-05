@@ -19,15 +19,29 @@ The system SHALL provide `ui.sidebar_style` with values `default` and `editorial
 - **THEN** the section headers render as uppercase text without bold, and the agents sort-toggle label remains functional
 
 ### Requirement: State color overrides
-The system SHALL provide a `[ui.state_colors]` table with optional `working`, `idle`, `done`, `blocked`, and `unknown` colors. Each set value SHALL recolor the matching state glyph (working dot/spinner, idle-seen circle, done check/dot, blocked dot, unknown dot) and the matching state text in both sidebar sections and the collapsed sidebar; unset values SHALL fall back to the theme palette slots used today. The options SHALL apply on config live-reload and be independent of `ui.sidebar_style`.
+The system SHALL provide a `[ui.state_colors]` table with optional `working`,
+`idle`, `done`, `blocked`, and `unknown` colors. Each set value SHALL recolor
+the matching state glyph in upstream v0.8.0's static glyph set (static working
+mark, idle-seen circle, done mark, blocked mark, unknown mark — there is no
+animated spinner) and the matching state text in both sidebar sections and the
+collapsed sidebar; unset values SHALL fall back to the theme palette slots
+used by upstream's distinct status indicators. The options SHALL apply on
+config live-reload and be independent of `ui.sidebar_style`.
 
 #### Scenario: Override applies everywhere
 - **WHEN** `[ui.state_colors] working = "#ffc832"` is set and the config reloads
-- **THEN** working glyphs and working state text in the spaces list, agents panel, and collapsed sidebar all use `#ffc832`
+- **THEN** working glyphs and working state text in the spaces list, agents
+  panel, and collapsed sidebar all use `#ffc832`
 
 #### Scenario: Theme fallback
 - **WHEN** a `[ui.state_colors]` key is unset
-- **THEN** that state renders with the same theme palette color as pre-change
+- **THEN** that state renders with the same theme palette color as upstream's
+  static status indicators
+
+#### Scenario: Working state renders without animation
+- **WHEN** an agent is working and no override recolors the working state
+- **THEN** the working glyph is upstream's static mark, does not animate, and
+  triggers no recurring renders while the agent stays working
 
 ### Requirement: Active-row integrity in editorial mode
 In editorial mode the right-aligned number SHALL render over the active entry's background band without gaps, and the active left/right border bar, active background, and bubble motion SHALL behave exactly as in default mode.
