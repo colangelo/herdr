@@ -966,13 +966,14 @@ impl AppState {
                         let delta_row = mouse.row.abs_diff(press.start_row);
                         // Priority sort derives the visible order from agent
                         // attention, so manual drag reordering is disabled.
-                        let can_reorder = matches!(
-                            self.workspace_sort,
-                            crate::app::state::WorkspaceSort::Manual
-                        ) && self.workspaces.get(press.ws_idx).is_some_and(|ws| {
-                            ws.worktree_space()
-                                .is_none_or(|space| !space.is_linked_worktree)
-                        });
+                        let can_reorder =
+                            matches!(
+                                self.workspace_sort,
+                                crate::app::state::WorkspaceSort::Manual
+                            ) && self.workspaces.get(press.ws_idx).is_some_and(|ws| {
+                                ws.worktree_space()
+                                    .is_none_or(|space| !space.is_linked_worktree)
+                            });
                         if can_reorder && delta_col.max(delta_row) >= WORKSPACE_DRAG_THRESHOLD {
                             self.drag = Some(DragState {
                                 target: DragTarget::WorkspaceReorder {
