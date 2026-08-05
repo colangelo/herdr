@@ -10,68 +10,83 @@
 
 ## 2. Rebase (scratch branch, in the sync worktree)
 
-- [ ] 2.1 `git branch -f reconcile-test master` and
-      `git rebase --onto upstream/master d4e0dd3d reconcile-test`
-- [ ] 2.2 Resolve infra conflicts per skill §2: `.gitignore`, `release.yml`,
-      `ci.yml`, `justfile` (union of test modules), `tests/cli/sessions.rs`
-- [ ] 2.3 Resolve `docs/next/CHANGELOG.md` per-heading; repair the
-      auto-merge contamination (fork entries folded into upstream's
-      released `[0.8.0]` section without conflicting): released `##`
-      sections must end up byte-identical to upstream's, fork entries only
-      under `## Unreleased`; run both duplicate checks (dup `##` headings;
-      dup `###`/entries inside a section)
-- [ ] 2.4 Resolve source conflicts toward upstream structure (design D2);
-      during replay, drop fork hunks that arm/style the spinner
+- [x] 2.1 Rebase `--onto upstream/master d4e0dd3d` — 219 picks replayed,
+      215 landed (4 docs commits became no-ops), zero upstream file deletions
+- [x] 2.2 Infra conflicts resolved per skill §2; upstream's expanded
+      `update-latest-json` (RELEASE_DEPLOY_KEY) kept removed; justfile
+      `release-docs-check` keeps the fork omission plus upstream's new
+      `docs-preview.mjs check`
+- [x] 2.3 Changelog resolved by deterministic reconstruction
+      (`reconstruct_changelog.py`): upstream skeleton + fork `-ac` release
+      sections byte-identical + fork-only entries merged into Unreleased
+      under their fork headings; contamination the auto-merge folded into
+      released sections repaired; both duplicate checks pass and the
+      reconstruction is a fixpoint of the final file
+- [x] 2.4 Spinner-arming fork hunks dropped during replay
       (`next_animation_tick`, `sync_animation_timer*`,
-      `agent_panel_has_animation`, spinner glyph styling)
-- [ ] 2.5 Keep fork-scoped `website/latest.json` over upstream's org-transfer
-      rewrite
+      `agent_panel_has_animation`, `has_working_pane` at both levels,
+      `spinner_frame`/`SPINNERS`, `state_dot`/`agent_icon`); zero residue
+      by grep
+- [x] 2.5 Fork-scoped `website/latest.json` kept; `just latest-json-check`
+      green against the live manifest
 
 ## 3. Motion port (design D1)
 
-- [ ] 3.1 Add `sort_motion_deadline` one-shot beside `toast_deadline` in app
-      state; check it in `handle_scheduled_tasks` and
-      `handle_scheduled_tasks_headless`; fold into
-      `next_headless_loop_deadline`
-- [ ] 3.2 Arm from `workspace_list_motion.next_due()` min
-      `agent_panel_motion.next_due()`; re-sync at every target-order
-      divergence site (state transitions, pane view/focus, config reload);
-      `None` when settled or `ui.sort_motion = "instant"`
-- [ ] 3.3 On fire: tick both motions, request render, re-arm
-- [ ] 3.4 Tests: arming at each divergence site; zero wakes when settled;
-      instant mode never arms; motion cadence follows settle/step timing
-- [ ] 3.5 Delete any remaining `ANIMATION_INTERVAL`/`spinner_tick` residue
+- [x] 3.1–3.3 Not needed as new work: the fork's motion was already
+      deadline-driven — `sort_motion_next_due()` feeds
+      `next_headless_loop_deadline` and `advance_sort_motion` runs in the
+      scheduled-task path on both attached and headless servers; the hunks
+      survived the rebase intact. Only the spinner used the deleted
+      periodic timer.
+- [x] 3.4 Covered by the fork's existing pins (`ListMotion` unit tests,
+      `workspace_entries_hold_order_until_motion_ticks`,
+      `agent_panel_target_keys_match_priority_entries_order`);
+      `sort_motion_next_due` is `None`-gated on `sort_motion_bubble`
+- [x] 3.5 Timer/spinner residue grep clean
 
 ## 4. Glyph re-layer (design D2)
 
-- [ ] 4.1 Verify editorial style, `[ui.state_colors]`, jump numbers,
-      working-display-state each render correctly on upstream's static
-      marks + distinct indicators
-- [ ] 4.2 Point `[ui.state_colors]` fallbacks at upstream's new palette slots
-- [ ] 4.3 Confirm each layer is a separable commit series on the rebased
-      history (extractable as `upstream/master` + cherry-picks)
+- [x] 4.1 Upstream's `state_icon`/`state_icon_symbol` (static marks +
+      `ui.status_indicators` styles) kept as the only glyph source; fork
+      spinner-styling variants dropped at every call site
+      (sidebar/mobile/navigator/status)
+- [x] 4.2 `[ui.state_colors]` threaded through upstream's `state_icon` via
+      `StateIconColors`; fallback slots verified identical to upstream's
+      `state_label_color` palette choices (yellow/green/teal/red/overlay0)
+- [x] 4.3 Layers remain separate commit series on the rebased history
+      (editorial style, state colors, jump numbers, working-display-state)
+- [ ] 4.4 Live render check of the four layers in a running herdr (AC
+      drives; HITL per ticket #50)
 
 ## 5. Protocol (design D3)
 
-- [ ] 5.1 Bump `PROTOCOL_VERSION` to 20 in `src/protocol/wire.rs`
-- [ ] 5.2 Update `tests/cli/sessions.rs` and any manual protocol fixtures
+- [x] 5.1 `PROTOCOL_VERSION` bumped to 20
+- [x] 5.2 `tests/cli/sessions.rs` expectations updated; remaining literal
+      19s verified to be frozen wire-layout/serde fixtures, not version pins
 
 ## 6. Verification
 
-- [ ] 6.1 Fork-surface check per skill §4 (no upstream file deletions;
-      release.yml fork hunks; `release-ac`; workflow YAML parses)
-- [ ] 6.2 Handoff-resurface vs hidden-pane skip: prove a resurfaced working
-      pane still renders; add/extend a characterization test if none covers it
-- [ ] 6.2b Mouse-driven fork UI vs motion decoupling: verify pane todo
-      panel and notification center hover/hit affordances still update;
-      route through the hover-sensitive-zone path if they relied on
-      passive-motion redraws
-- [ ] 6.2c Sidebar aggregate collision (U21): fork behavior wins over
-      upstream's `aggregate_state_done_unseen_beats_working` pinned test;
-      adapt/replace it, keep the fork characterization tests green
-- [ ] 6.3 `just check` with `cargo nextest run --locked --no-fail-fast`;
+- [x] 6.1 Fork-surface check per skill §4 green (no deletions; release.yml
+      fork hunks present, upstream deploy-key job absent; `release-ac`
+      recipe; workflows parse)
+- [~] 6.2 Handoff-resurface covered by the replayed fork test suite;
+      live resurfaced-pane render check pending (AC, with 4.4)
+- [~] 6.2b Todo-panel/notification-center hit-testing covered by unit
+      tests; live hover check pending (AC, with 4.4)
+- [x] 6.2c U21 landed cleanly: the fork's dual-ranking module replaced
+      upstream's done-unseen-beats-working pin during replay;
+      `display_state_working_beats_done_unseen` (+ tab variant) pin the
+      fork behavior
+- [ ] 6.3 `cargo nextest run --locked --no-fail-fast` full-suite green
+      (clippy `-D warnings` and `cargo fmt --check` already green);
       upstream-baseline any failure before attributing it to the rebase
-- [ ] 6.4 Re-run both changelog duplicate checks
+- [x] 6.4 Changelog duplicate checks green (part of reconstruction fixpoint)
+- [ ] 6.5 U9 follow-up (not this change): re-express the copy-mode
+      key-repeat fix in `src/app/input/lease.rs` — the fork's old-model
+      dispatch hunks were dropped with upstream's lease rework; the
+      behavioral test was kept but no longer asserts the removed
+      suppression set. refs
+      https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/9
 
 ## 7. Adopt and post-sync (skill §5–§6)
 
@@ -87,10 +102,23 @@
 
 ## 8. Contribution-effort handoff (ticket #50 resolved-when; do not re-run research)
 
-- [ ] 8.1 Record the post-rebase unit→SHA mapping for the 30-unit
-      inventory (`internal/research/upstream-unit-inventory`), keyed off
-      the `wayfinder/pre-v0.8.0-rebase` tag; keep the tag until re-mapped
+- [x] 8.1 Post-rebase unit→SHA mapping generated (214 of 220 commits map
+      1:1 by subject; 6 docs commits became no-ops — superseded by the
+      changelog reconstruction or upstream's own translations); to be
+      recorded on an `internal` research branch with the tag
+      `wayfinder/pre-v0.8.0-rebase` kept
 - [ ] 8.2 Close https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/50
       with the mapping; re-validation of the contribution findings resumes
       as ticket #51 (see the resume brief on
       `internal/research/upstream-proposal-pack-resume-brief`)
+
+## 9. Known history blemishes (disclose in ticket #50 close-out)
+
+- Replay commits 27–41 carry a transient missing-brace parse error in
+  `src/config/model.rs` (bad stitch, repaired in the commit 41 resolution).
+- Replay commits 118–124 carry a live conflict-marker block in
+  `src/ui/sidebar.rs` tests (resolver wrote nothing but the file was staged
+  unchecked; repaired in the commit 125 resolution). Neither affects the
+  final tree; both hurt bisectability inside this replay range only. A
+  surgical `rebase -i` pass could clean them before the force-push if AC
+  wants it.
