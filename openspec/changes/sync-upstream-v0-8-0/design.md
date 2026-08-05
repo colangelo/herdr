@@ -69,8 +69,10 @@ Port:
 
 Consequence: idle CPU equals upstream's even with motion enabled, so the
 config gate governs the *feature* (animated vs instant reorder), not a CPU
-tradeoff. This port is itself upstream-PR-able ("animation at zero idle
-cost" fits their stated philosophy).
+tradeoff. Per the upstream-effort's locked decisions (resume brief §3),
+bubble motion and the other aesthetic layers stay fork-only — the
+upstream-aligned mechanism is for sync cost and consistency, not a PR
+candidate.
 
 Alternative rejected: replaying the timer config-gated. Re-adds ~441 deleted
 lines, permanent conflict magnet in `headless.rs`/`render_stream.rs`, and
@@ -85,6 +87,13 @@ colors (`[ui.state_colors]`), jump numbers/active-row border, and
 working-display-state rollup. Precedent: `ee3708c5`/`c5311243` did exactly
 this on upstream's token-row rework last sync. Fork commits that style the
 spinner specifically are dropped, not ported.
+
+Known collision (resume brief §6, U21): upstream pins the *opposite*
+aggregate behavior in `aggregate_state_done_unseen_beats_working`
+(`src/workspace/aggregate.rs`) — done-unseen outranks working — while the
+fork's `c33a4e4f` shows working agents in sidebar rows. Fork behavior wins;
+adapt or replace the upstream pinned test with the fork's characterization
+tests (`dabe5e3c`).
 
 ### D3: Protocol version 19 → 20
 
@@ -121,8 +130,19 @@ file loses to the fork's, verified via `just latest-json-check`).
   next unrelated render). Mitigation: `ListMotion` unit tests already pin
   tick semantics; add an arming test at each state-transition site listed
   in D1.
-- **Changelog merge** is a known silent-corruption hazard; run both §2
-  duplicate checks before adopting.
+- **Changelog merge** is a known silent-corruption hazard, and worse than
+  the duplicate checks alone catch: during the first rebase attempt,
+  already-replayed fork docs commits **auto-merged fork entries into
+  upstream's released `[0.8.0]` section without conflicting** (e.g. the
+  fork's protocol-17 `layout.balance` line — upstream's own changelog has
+  no such entry). Final state must satisfy: released `##` sections
+  byte-identical to upstream's; fork entries only under `## Unreleased`;
+  plus both §2 duplicate checks.
+- **Mouse-motion decoupling vs mouse-driven fork UI** (ticket #50): the
+  pane todo panel and notification center may depend on motion repaints
+  that v0.8.0 eliminated. Verify hover/hit affordances on both surfaces
+  still update; if they relied on passive-motion redraws, route them
+  through upstream's hover-sensitive-zone path.
 
 ## Migration Plan
 
@@ -133,6 +153,12 @@ file loses to the fork's, verified via `just latest-json-check`).
    `internal`.
 4. Post-sync sweep: bot workflows, CI green, `just latest-json-check`,
    release-skill drift check.
+5. Record the post-rebase unit→SHA mapping for the 30-unit contribution
+   inventory (ticket #50's resolved-when;
+   https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/50). Keep the
+   tag `wayfinder/pre-v0.8.0-rebase` (= `6afc2a5b` on `internal`) until
+   the inventory is re-mapped. Re-validation of the contribution findings
+   is ticket #51, not this change.
 
 Rollback: `master` is untouched until step 3; before the push, abandon the
 scratch branch. After the push, the old SHA is recorded in the lease and

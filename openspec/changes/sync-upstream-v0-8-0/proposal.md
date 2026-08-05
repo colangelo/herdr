@@ -70,5 +70,12 @@ None.
   `colangelo/herdr`, green CI on pushed master, `just latest-json-check`.
 - Upstreamability: after the sync, each fork feature series should be
   extractable as `upstream/master` + cherry-picks with no fork-only infra
-  entangled; the deadline-driven motion port is itself a candidate upstream
-  contribution (restores animation capability at zero idle cost).
+  entangled. The paused upstream-contribution effort resumes after this
+  rebase (tickets #50/#51; resume brief on
+  `internal/research/upstream-proposal-pack-resume-brief`): this change
+  must record the post-rebase unit→SHA mapping for the 30-unit inventory
+  and preserve the `wayfinder/pre-v0.8.0-rebase` tag. Per its locked
+  decisions, the aesthetic layers (bubble motion, editorial style, motion
+  easing) stay fork-only.
+- Tracker: this rebase is
+  https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/50.
