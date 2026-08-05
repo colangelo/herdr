@@ -14,8 +14,12 @@
       `git rebase --onto upstream/master d4e0dd3d reconcile-test`
 - [ ] 2.2 Resolve infra conflicts per skill §2: `.gitignore`, `release.yml`,
       `ci.yml`, `justfile` (union of test modules), `tests/cli/sessions.rs`
-- [ ] 2.3 Resolve `docs/next/CHANGELOG.md` per-heading; run both duplicate
-      checks (dup `##` headings; dup `###`/entries inside a section)
+- [ ] 2.3 Resolve `docs/next/CHANGELOG.md` per-heading; repair the
+      auto-merge contamination (fork entries folded into upstream's
+      released `[0.8.0]` section without conflicting): released `##`
+      sections must end up byte-identical to upstream's, fork entries only
+      under `## Unreleased`; run both duplicate checks (dup `##` headings;
+      dup `###`/entries inside a section)
 - [ ] 2.4 Resolve source conflicts toward upstream structure (design D2);
       during replay, drop fork hunks that arm/style the spinner
       (`next_animation_tick`, `sync_animation_timer*`,
@@ -58,6 +62,13 @@
       release.yml fork hunks; `release-ac`; workflow YAML parses)
 - [ ] 6.2 Handoff-resurface vs hidden-pane skip: prove a resurfaced working
       pane still renders; add/extend a characterization test if none covers it
+- [ ] 6.2b Mouse-driven fork UI vs motion decoupling: verify pane todo
+      panel and notification center hover/hit affordances still update;
+      route through the hover-sensitive-zone path if they relied on
+      passive-motion redraws
+- [ ] 6.2c Sidebar aggregate collision (U21): fork behavior wins over
+      upstream's `aggregate_state_done_unseen_beats_working` pinned test;
+      adapt/replace it, keep the fork characterization tests green
 - [ ] 6.3 `just check` with `cargo nextest run --locked --no-fail-fast`;
       upstream-baseline any failure before attributing it to the rebase
 - [ ] 6.4 Re-run both changelog duplicate checks
@@ -74,8 +85,12 @@
       `release-ac` if the flow moved; update the CONTEXT PROJECTS entry
 - [ ] 7.5 Remove the task worktree and branch after integration
 
-## 8. Upstreamability follow-ups (record, do not execute here)
+## 8. Contribution-effort handoff (ticket #50 resolved-when; do not re-run research)
 
-- [ ] 8.1 List candidate upstream PRs surfaced by this sync (deadline-driven
-      motion; any glyph-layer piece with general value) with the commits
-      that carry each
+- [ ] 8.1 Record the post-rebase unit→SHA mapping for the 30-unit
+      inventory (`internal/research/upstream-unit-inventory`), keyed off
+      the `wayfinder/pre-v0.8.0-rebase` tag; keep the tag until re-mapped
+- [ ] 8.2 Close https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/50
+      with the mapping; re-validation of the contribution findings resumes
+      as ticket #51 (see the resume brief on
+      `internal/research/upstream-proposal-pack-resume-brief`)
