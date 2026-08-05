@@ -13,7 +13,7 @@
 - Added `ui.show_agent_numbers` to show each agent's jump number (1-9, the `keys.focus_agent` target) on the agent panel status line, with `ui.agent_number_color` to set their color (same syntax as `accent`). Numbers follow the panel's current order, including priority sort. Default off / theme color.
 - Added pane border and title styling options: `ui.pane_border_active_color` and `ui.pane_border_inactive_color` set the focused/unfocused border colors (same syntax as `accent`; unset uses the theme), `ui.pane_border_active_style` sets the focused border weight (`light`, `heavy`, or `double`), and `ui.pane_title_active_color` / `ui.pane_title_inactive_color` set the border title colors (unset follows the matching border color).
 - Added `ui.sidebar_active_border` to draw border lines above and below the active space and agent in the sidebar, styled by `ui.pane_border_active_color` and `ui.pane_border_active_style`. Default off.
-- Added a `center` position for in-app toasts (`ui.toast.herdr.position` and `herdr notification show --position`), floating the toast mid-screen.
+- Added a `center` position for in-app toasts (`ui.toast.herdr.position` and `herdr notification show --position`), floating the toast over the pane area, centered between the panes. Added `ui.toast.herdr.size` presets (`auto`, `medium`, `large`) to widen the toast box.
 - Added per-kind in-app toast durations: `ui.toast.herdr.needs_attention_seconds` (default 8), `finished_seconds` (5), and `update_seconds` (3); `0` keeps that toast visible until clicked or replaced.
 
 ### Changed
