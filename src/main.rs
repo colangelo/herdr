@@ -449,7 +449,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 [ui.toast.herdr]
 # In-app toast position: top-left, top-right, bottom-left, bottom-right, or center.
+# "center" floats the toast over the pane area, between the panes.
 # position = "bottom-right"
+# Toast box size: auto (hug the text), medium (>= 40% of the area width),
+# or large (>= 60%). medium/large add inner padding.
+# size = "auto"
 # How long each toast kind stays visible, in seconds. 0 keeps the toast
 # visible until clicked or replaced.
 # needs_attention_seconds = 8
