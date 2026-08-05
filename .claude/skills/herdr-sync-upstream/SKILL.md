@@ -15,7 +15,11 @@ sync, mostly sidebar/UI features, and it touches `src/` broadly (`src/app/`,
 conflicts, not just workflow-file ones.
 
 Remotes: `origin` = github.com/colangelo/herdr, `internal` = Gitea
-(ac/herdr), `upstream` = github.com/ogulcancelik/herdr.
+(ac/herdr), `upstream` = github.com/ogulcancelik/herdr — upstream moved to
+the `herdrdev` org (2026-07); git redirects the old slug, but `gh`/API calls
+must use `herdrdev/herdr`, and upstream's `scripts/changelog.py`
+`DEFAULT_RELEASE_REPO` now says `herdrdev/herdr` (harmless here: the fork's
+CI and `release-ac` pass `--repo colangelo/herdr` explicitly).
 
 ## 1. Assess
 
