@@ -6,6 +6,10 @@
 - `theme.custom.sidebar_bg` can now give the desktop sidebar its own background without changing built-in theme defaults.
 - Settings and `ui.status_indicators = "symbols"` can now use distinct static shapes for blocked, working, done, idle, and unknown agent states. (#2260)
 - The plugin marketplace now discovers valid manifests at repository roots and subdirectories, groups multiple plugins under each repository, and publishes their versions and exact default-branch commits.
+- Added a balance-panes action (`balance_panes`, `prefix+=` by default) and the `layout.balance` socket API to rebalance every split in the current tab to equal pane sizes, preserving split orientation like tmux `even-horizontal`/`even-vertical`.
+
+### Changed
+- Bumped the client/server protocol version to 17 for the `layout.balance` socket API method.
 
 ### Fixed
 - Configs containing the retired Herdr-written `ui.agent_panel_scope` setting no longer report it as an unknown key after upgrades. (#2292)
