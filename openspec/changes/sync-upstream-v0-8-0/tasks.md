@@ -77,16 +77,20 @@
       upstream's done-unseen-beats-working pin during replay;
       `display_state_working_beats_done_unseen` (+ tab variant) pin the
       fork behavior
-- [ ] 6.3 `cargo nextest run --locked --no-fail-fast` full-suite green
-      (clippy `-D warnings` and `cargo fmt --check` already green);
-      upstream-baseline any failure before attributing it to the rebase
+- [x] 6.3 `just check` fully green: fmt, clippy `-D warnings`, 3398
+      nextest tests, 101 maintenance tests. Post-rebase fixes: test-support
+      `CURRENT_PROTOCOL` and the intentional ping pin to 20, schema artifact
+      regenerated, sidebar tests pinned to the fork layout, and the U9
+      copy-mode repeat fix re-expressed in the input-lease context
+      (`TerminalInputContext::Copy`). The skill's known upstream-baseline
+      flake (`live_handoff_keeps_unmanaged_agent_name...`) passed this run.
 - [x] 6.4 Changelog duplicate checks green (part of reconstruction fixpoint)
-- [ ] 6.5 U9 follow-up (not this change): re-express the copy-mode
-      key-repeat fix in `src/app/input/lease.rs` — the fork's old-model
-      dispatch hunks were dropped with upstream's lease rework; the
-      behavioral test was kept but no longer asserts the removed
-      suppression set. refs
-      https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/9
+- [x] 6.5 U9 re-expressed in the lease model in this change after all
+      (`de4ccfbd`): `TerminalInputContext::Copy` gives copy mode a stable
+      context so held keys reprocess; the context-transition guard stops
+      repeats for keys that leave copy mode; headless routing gained a
+      `routes_to_terminal` guard so Copy-context keys stay on the app-level
+      path. refs https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/9
 
 ## 7. Adopt and post-sync (skill §5–§6)
 
