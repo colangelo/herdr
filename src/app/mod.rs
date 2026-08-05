@@ -223,6 +223,18 @@ pub(crate) struct TerminalInputTarget {
 pub(crate) enum TerminalInputContext {
     Pane,
     Popup(crate::terminal::TerminalId),
+    /// Copy mode holds a stable non-terminal context so held keys repeat
+    /// viewport/cursor motions; leaving copy mode changes the context and
+    /// stops the repeats (same transition guard as `Pane`/`Popup`).
+    Copy,
+}
+
+impl TerminalInputContext {
+    /// Whether keys in this context dispatch through the terminal-key path
+    /// (toward a pane) rather than the app-level key path.
+    pub(crate) fn routes_to_terminal(&self) -> bool {
+        matches!(self, Self::Pane | Self::Popup(_))
+    }
 }
 
 pub(crate) type InputSourceId = u64;
@@ -1882,6 +1894,8 @@ impl App {
             Some(TerminalInputContext::Popup(popup.terminal_id.clone()))
         } else if self.state.mode == Mode::Terminal {
             Some(TerminalInputContext::Pane)
+        } else if self.state.mode == Mode::Copy {
+            Some(TerminalInputContext::Copy)
         } else {
             None
         }
@@ -1925,6 +1939,10 @@ impl App {
                         tracked,
                     ) {
                         break;
+                    }
+                    if !context.routes_to_terminal() {
+                        self.handle_non_terminal_key_headless(key.clone());
+                        continue;
                     }
                     if let Some(target) =
                         self.handle_terminal_key_headless_from(source_id, key.clone())
@@ -2005,7 +2023,10 @@ impl App {
                     match key.kind {
                         crossterm::event::KeyEventKind::Press => {
                             let initial_context = self.terminal_input_context();
-                            let target = if initial_context.is_some() {
+                            let routes_to_terminal = initial_context
+                                .as_ref()
+                                .is_some_and(TerminalInputContext::routes_to_terminal);
+                            let target = if routes_to_terminal {
                                 self.handle_terminal_key_headless_from(source_id, key.clone())
                             } else {
                                 self.handle_non_terminal_key_headless(key.clone());
