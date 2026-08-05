@@ -99,6 +99,23 @@ impl Workspace {
             .unwrap_or((AgentState::Unknown, true))
     }
 
+    /// Most recent agent state change across all panes, for recency tiebreaks
+    /// in attention-sorted lists. `None` when no pane has recorded a change.
+    pub fn last_agent_state_change_seq(
+        &self,
+        terminals: &HashMap<TerminalId, TerminalState>,
+    ) -> Option<u64> {
+        self.tabs
+            .iter()
+            .flat_map(|tab| tab.panes.values())
+            .filter_map(|pane| {
+                terminals
+                    .get(&pane.attached_terminal_id)
+                    .and_then(|terminal| terminal.last_agent_state_change_seq)
+            })
+            .max()
+    }
+
     pub fn pane_details(&self, terminals: &HashMap<TerminalId, TerminalState>) -> Vec<PaneDetail> {
         let multi_tab = self.tabs.len() > 1;
         self.tabs
@@ -191,6 +208,38 @@ mod tests {
 
         assert_eq!(state, AgentState::Idle);
         assert!(!seen);
+    }
+
+    #[test]
+    fn last_agent_state_change_seq_is_max_across_panes() {
+        let mut ws = Workspace::test_new("test");
+        let id2 = ws.test_split(Direction::Horizontal);
+        let root_id = ws.tabs[0]
+            .panes
+            .keys()
+            .find(|id| **id != id2)
+            .copied()
+            .unwrap();
+        let mut terminals = HashMap::new();
+        let mut root_terminal = terminal_for_pane(&ws, root_id);
+        root_terminal.last_agent_state_change_seq = Some(3);
+        terminals.insert(root_terminal.id.clone(), root_terminal);
+        let mut second_terminal = terminal_for_pane(&ws, id2);
+        second_terminal.last_agent_state_change_seq = Some(7);
+        terminals.insert(second_terminal.id.clone(), second_terminal);
+
+        assert_eq!(ws.last_agent_state_change_seq(&terminals), Some(7));
+    }
+
+    #[test]
+    fn last_agent_state_change_seq_none_without_changes() {
+        let ws = Workspace::test_new("test");
+        let mut terminals = HashMap::new();
+        let root = ws.tabs[0].root_pane;
+        let terminal = terminal_for_pane(&ws, root);
+        terminals.insert(terminal.id.clone(), terminal);
+
+        assert_eq!(ws.last_agent_state_change_seq(&terminals), None);
     }
 
     #[test]
