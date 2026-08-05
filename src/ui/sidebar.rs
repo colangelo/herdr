@@ -1644,7 +1644,6 @@ fn render_workspace_list(
     let metrics = workspace_list_scroll_metrics(app, area);
     let scrollbar_rect = workspace_list_scrollbar_rect(app, area);
     let cards = &app.view.workspace_card_areas;
-    let entries = workspace_list_entries(app);
     // Jump labels follow the full visible order so they match what
     // `keys.switch_workspace` (prefix+1..9, a..z) resolves via
     // `workspace_at_visible_position`, regardless of scroll or priority sort.
@@ -1748,16 +1747,6 @@ fn render_workspace_list(
         let parent_group = (!card.indented)
             .then(|| workspace_parent_group_state(app, i))
             .flatten();
-        let is_last_child = card.indented
-            && entries
-                .iter()
-                .position(|entry| {
-                    matches!(
-                        entry,
-                        WorkspaceListEntry::Workspace { ws_idx, .. } if *ws_idx == i
-                    )
-                })
-                .is_none_or(|entry_idx| !next_entry_is_indented_workspace(&entries, entry_idx));
         let (display_state, display_seen) = parent_group
             .as_ref()
             .filter(|(_, collapsed)| *collapsed)
