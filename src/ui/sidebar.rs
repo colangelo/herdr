@@ -3208,7 +3208,9 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(detail_area.x, tenth_row)].symbol(), "a");
         assert_eq!(buffer[(detail_area.x + 1, tenth_row)].symbol(), " ");
-        assert_eq!(buffer[(detail_area.x + 2, tenth_row)].symbol(), "○");
+        // Upstream's static glyph set draws unknown agents as "·" (the fork's
+        // old icon map used "○"); D2 keeps upstream's glyphs as the base.
+        assert_eq!(buffer[(detail_area.x + 2, tenth_row)].symbol(), "·");
         assert_eq!(buffer[(ws_area.x, ws_area.y + 9)].symbol(), "a");
     }
 
@@ -3612,49 +3614,17 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         let buffer = terminal.backend().buffer();
         let cards = &app.view.workspace_card_areas;
+        // Fork layout: the group chevron leads the parent row inline and
+        // children indent three columns; there is no tree rail (the fork's
+        // compact prefix replaced upstream's connector glyphs).
+        assert_eq!(buffer[(cards[0].rect.x, cards[0].rect.y)].symbol(), "▾");
         let parent_name_x = find_symbol_x(buffer, cards[0].rect.y, cards[0].rect.width, "m");
-        let plain_name_x = find_symbol_x(buffer, cards[3].rect.y, cards[3].rect.width, "n");
-        assert_eq!(parent_name_x, plain_name_x);
-        assert_eq!(buffer[(cards[1].rect.x + 3, cards[1].rect.y)].symbol(), "├");
-        assert_eq!(buffer[(cards[2].rect.x + 3, cards[2].rect.y)].symbol(), "└");
-        assert_eq!(
-            buffer[(cards[0].rect.x + cards[0].rect.width - 1, cards[0].rect.y)].symbol(),
-            "▾"
-        );
-    }
-
-    #[test]
-    fn desktop_worktree_connector_uses_full_list_at_viewport_boundary() {
-        let mut app = AppState::test_new();
-        app.workspaces = vec![
-            workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
-            workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
-            workspace_with_worktree_space("review", Some("repo-key"), "/repo/herdr-review"),
-        ];
-        app.sidebar_spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
-        app.sidebar_spaces.row_gap = 0;
-        let area = Rect::new(0, 0, 30, 10);
-        app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
-        assert_eq!(app.view.workspace_card_areas.len(), 2);
-        let list_area = workspace_list_rect(area, app.sidebar_section_split);
-
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal
-            .draw(|frame| {
-                render_workspace_list(
-                    &app,
-                    &TerminalRuntimeRegistry::new(),
-                    frame,
-                    list_area,
-                    false,
-                )
-            })
-            .unwrap();
-
-        let child = app.view.workspace_card_areas[1];
-        assert_eq!(
-            terminal.backend().buffer()[(child.rect.x + 3, child.rect.y)].symbol(),
-            "├"
+        let child_name_x = find_symbol_x(buffer, cards[1].rect.y, cards[1].rect.width, "i");
+        let last_child_name_x = find_symbol_x(buffer, cards[2].rect.y, cards[2].rect.width, "r");
+        assert_eq!(child_name_x, last_child_name_x, "children share one indent");
+        assert!(
+            child_name_x > parent_name_x,
+            "children indent deeper than the parent name ({child_name_x} vs {parent_name_x})"
         );
     }
 
