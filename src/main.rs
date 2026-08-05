@@ -222,6 +222,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # move_pane_prev_tab = "prefix+<"
 # edit_scrollback = "prefix+e"
 # clear_scrollback = ""   # optional, unset by default; purge saved scrollback (tmux clear-history)
+# copy_mode = "prefix+["                    # enter keyboard copy mode for the focused pane
 # copy_mode_page_up = "prefix+pageup"       # enter copy mode + page up in one gesture (tmux copy-mode -u)
 # copy_mode_half_page_up = "prefix+ctrl+u"  # enter copy mode + half page up
 # copy_mode_line_up = "prefix+ctrl+k"       # enter copy mode + one line up; with a non-ctrl+b prefix
@@ -230,6 +231,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # focus_pane_down = "prefix+j"
 # focus_pane_up = "prefix+k"
 # focus_pane_right = "prefix+l"
+# swap_pane_left = "prefix+shift+h"    # swap the focused pane with the pane to the left
+# swap_pane_down = "prefix+shift+j"
+# swap_pane_up = "prefix+shift+k"
+# swap_pane_right = "prefix+shift+l"
 # cycle_pane_next = "prefix+tab"
 # cycle_pane_previous = "prefix+shift+tab"
 # last_pane = ""          # optional, unset by default; bind e.g. "prefix+tab" for global back-and-forth
@@ -242,6 +247,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_down = ""   # optional, e.g. "ctrl+shift+alt+down"
 # resize_pane_up = ""     # optional, e.g. "ctrl+shift+alt+up"
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
+# balance_panes = "prefix+="              # balance all panes in the current tab to equal sizes
+# next_layout = "prefix+space"            # cycle the tab through layout presets (even-h -> even-v -> tiled)
 # toggle_sidebar = "prefix+b"
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
@@ -1127,6 +1134,42 @@ mod tests {
         assert_eq!(
             args_as_utf8(args).unwrap_err(),
             "argument 2 is not valid UTF-8"
+        );
+    }
+
+    /// The `--default-config` template is a hand-maintained string that is
+    /// disjoint from `KeysConfig`, so it drifts every time a keybinding action
+    /// is added. Guard against that: every `pub <field>: BindingConfig` action
+    /// in the struct must be documented as a `[keys]` entry in DEFAULT_CONFIG.
+    #[test]
+    fn default_config_documents_every_binding_action() {
+        // Compile-time copy of the struct source so the check tracks the real fields.
+        const MODEL_SRC: &str = include_str!("config/model.rs");
+
+        let mut missing = Vec::new();
+        for line in MODEL_SRC.lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("pub ") else {
+                continue;
+            };
+            let Some((name, ty)) = rest.split_once(':') else {
+                continue;
+            };
+            if ty.trim().trim_end_matches(',') != "BindingConfig" {
+                continue;
+            }
+            let name = name.trim();
+            // The template documents each action as `# <name> = ...`; the
+            // trailing " = " avoids matching a longer action that shares this
+            // name as a prefix (e.g. copy_mode vs copy_mode_page_up).
+            if !DEFAULT_CONFIG.contains(&format!("{name} = ")) {
+                missing.push(name.to_string());
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "keybinding actions missing from the --default-config [keys] template: {missing:?}"
         );
     }
 }
