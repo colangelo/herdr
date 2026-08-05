@@ -1284,7 +1284,7 @@ mod tests {
             false,
             events,
             Arc::new(Notify::new()),
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(RenderSignal::new()),
         );
 
         let workspace = workspaces.first().expect("workspace should restore");
