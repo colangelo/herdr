@@ -733,7 +733,7 @@ impl App {
             show_workspace_numbers: config.ui.show_workspace_numbers,
             show_agent_numbers: config.ui.show_agent_numbers,
             show_host: config.ui.show_host,
-            host_label: crate::platform::hostname(),
+            host_label: crate::platform::short_hostname(),
             pane_history_persistence: config.experimental.pane_history,
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
