@@ -1054,24 +1054,6 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             if y >= detail_content_area.y + detail_content_area.height {
                 break;
             }
-            let position = detail_idx + 1;
-            let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
-            let position_style = if is_active {
-                Style::default().fg(p.text).bg(p.active_row_bg)
-            } else {
-                Style::default().fg(p.overlay0)
-            };
-            let (icon, icon_style) =
-                state_icon(detail.state, detail.seen, app.status_indicators, p);
-
-            if is_active {
-                let buf = frame.buffer_mut();
-                for x in detail_content_area.x..detail_content_area.x + detail_content_area.width {
-                    buf[(x, y)].set_style(Style::default().bg(p.active_row_bg));
-                }
-            }
-
-            let position_style = Style::default().fg(p.overlay0);
             let symbol = crate::config::jump_symbol(detail_idx).unwrap_or(' ');
             let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
             let row_style = if is_active {

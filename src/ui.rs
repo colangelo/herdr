@@ -120,8 +120,7 @@ pub(crate) use self::{
     },
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
-    tabs::{compute_tab_bar_view, notification_indicator_width},
-    tabs::{compute_tab_bar_view, tab_bar_content_area},
+    tabs::{compute_tab_bar_view, notification_indicator_width, tab_bar_content_area},
     widgets::{centered_popup_rect, modal_stack_areas},
 };
 // The indicator's cells have exactly one definition; the pane renderer reaches
