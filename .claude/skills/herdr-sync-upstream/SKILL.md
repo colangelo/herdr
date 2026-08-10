@@ -43,12 +43,41 @@ git log master..upstream/master --oneline -- src/
 
 ## 2. Rebase on a scratch branch
 
+Tag the pre-sync tip first — it is the revert point, and §5's lease refers to it:
+
+```bash
+git tag -a revert-point/$(date +%F)-pre-upstream-sync master -m "known-good fork master before the sync"
+git push origin --follow-tags && git push internal --follow-tags
+```
+
 ```bash
 BASE=$(git merge-base master upstream/master)
 git branch -f reconcile-test master
 git checkout reconcile-test
 git rebase --onto upstream/master "$BASE" reconcile-test
 ```
+
+**Force `rerere.autoupdate` off for the replay.** It is on globally here, and
+during a rebase it stages its own replayed resolution — which leaves
+`rebase --continue` reporting *"you have staged changes in your working tree"*
+and refusing to proceed, with no `stopped-sha`/`message` left in
+`.git/rebase-merge` to explain why. Run every continue as
+`git -c rerere.autoupdate=false rebase --continue`. If you hit the state anyway,
+recover by committing the staged resolution under the stopped commit's own
+identity — `git commit --no-edit -C $(awk '/^pick /{s=$2} END{print s}' \
+"$(git rev-parse --git-dir)/rebase-merge/done")` — then continue. (Hit
+2026-08-10; cost ~20 min of misdiagnosis.)
+
+**A "keep both sides" auto-resolver must check each side is brace-balanced.**
+Unions are right for import lists, struct fields and match arms that both sides
+merely *append* to. They are wrong when the two sides share a trailing
+continuation — upstream's last match arm and the fork's new arm both ending in
+one `leave_navigate_mode(); }` — because concatenating splices one arm into the
+other. They are also wrong when the sides are *alternative implementations* of
+the same block (upstream reimplementing a feature the fork already has); those
+are brace-balanced, so balance alone will not catch them and the tell is a pile
+of `unused variable` warnings over a duplicated preamble. Log every auto-merged
+block and re-read the log after `cargo check`.
 
 Known conflict patterns:
 - `.gitignore` — upstream appends entries where the fork `.env` block sits: keep both.
@@ -93,6 +122,18 @@ Known conflict patterns:
 - `tests/cli/sessions.rs` — asserts a hardcoded protocol number. Keep the fork's
   value (fork protocol is intentionally ahead of upstream's) and make sure it
   matches `src/protocol/wire.rs::PROTOCOL_VERSION`.
+- **The protocol number collides every sync.** Both sides bump independently from
+  the same base, so upstream keeps landing on the number the fork already took
+  (19 → both, 20 → both). Expect to bump the fork one past upstream's every time.
+  Git may DROP the fork's previous bump commits as redundant when upstream's
+  value catches up — that is correct, but it means the tree silently reverts to
+  upstream's number and you must re-bump. **Sweep for the number, not the
+  commit**, and note the pins come in two shapes: numeric
+  (`assert_eq!(value["result"]["protocol"], N)`) and string
+  (`stdout.contains("  protocol: N")` — the latter only runs in the Linux CLI
+  suite, so macOS `just check` will not catch it). Also regenerate the schema
+  artifact: `HERDR_UPDATE_API_SCHEMA=1 cargo nextest run
+  generated_protocol_schema_artifact_is_current`.
 - If a rebase goes sideways, `git rebase --abort` and retry; master is untouched
   until §5.
 
@@ -171,6 +212,23 @@ git push --force-with-lease=master:$OLD internal master
 If the internal push times out: Tailscale may be stopped (`tailscale status`;
 `tailscale up`), or see the m4m MagicDNS caveat in global CLAUDE.md.
 
+**CI's conventional-commits job validates the WHOLE patch set after a sync**, not
+just the new commits: its range is `$BEFORE_SHA..$AFTER_SHA`, and the force-push
+guard only narrows that to the head commit when `BEFORE_SHA` is *unreachable*.
+Tagging the pre-sync tip (§2) keeps it reachable, so the job re-reads all ~230
+subjects and any long-standing bad one fails the push. Check before pushing:
+
+```bash
+python3 scripts/conventional_commits.py --range "upstream/master..master"
+```
+
+Fix by rewording in place — a `rebase -i` over the patch set with
+`GIT_SEQUENCE_EDITOR` marking the offenders `reword` and `GIT_EDITOR` rewriting
+the subject. Prove it touched nothing else by comparing `git rev-parse
+master^{tree}` before and after; the trees must be identical. (2026-08-10:
+`style: rustfmt after rebase conflict resolutions` — `style` is not an allowed
+type — and `ignore .vscode` had ridden along invisibly for months.)
+
 ## 6. Post-sync checks
 
 - **New upstream bot workflows**: upstream's maintainer automation needs their
@@ -200,6 +258,16 @@ If the internal push times out: Tailscale may be stopped (`tailscale status`;
       --tag "$TAG" --version "$BASE" --protocol "$PROTOCOL" --force \
       --output website/latest.json
   ```
+
+  Since upstream's *verify stable release checksums* (2026-08), that manifest
+  must also carry a 64-char `sha256` per target, asserted by
+  `update::tests::checked_in_website_manifest_matches_update_schema` and by
+  `latest-json-check`. A manifest generated before that lands has no `sha256`
+  map and fails both; regenerate it with the command above — GitHub already
+  records asset digests for the older fork releases, so this needs no re-upload.
+  `latest-json-check` also validates the manifest *published* at
+  raw.githubusercontent, so it stays red until §5's push lands and the raw cache
+  turns over.
 - **Drift check**: skim upstream changes to `justfile` release recipes,
   `scripts/changelog.py`, and `release.yml` — if the release flow moved,
   update `.claude/skills/herdr-release/SKILL.md` and the `release-ac` recipe
