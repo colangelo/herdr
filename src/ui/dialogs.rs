@@ -1197,7 +1197,6 @@ pub(crate) fn confirm_close_button_rects(inner: Rect) -> (Rect, Rect) {
 #[cfg(test)]
 mod tests {
     use crate::{
-        app::{state::WorktreeCreateState, AppState},
         app::{state::WorktreeCreateState, AppState, Mode},
         ui::text_field::TextField,
         workspace::Workspace,
