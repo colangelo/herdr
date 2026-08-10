@@ -27,13 +27,11 @@
 - Added `ui.show_host` (default `true`): shows the herdr server's short host name right-aligned on the sidebar `SPACES` header row, so you can tell which machine a session is on at a glance. Casing follows the header (uppercase in `ui.sidebar_style = "editorial"`, lowercase otherwise); the label hides when the sidebar is too narrow to fit it. The host name is the server's, read once at startup, and is also exposed on the JSON API `ping` response as `hostname`.
 
 ### Changed
-- Bumped the client/server protocol version to 19 for the `notification.list` / `notification.mark_seen` socket API methods and the `notification.posted` event.
+- Desktop tab labels are now centered in their tabs, so the active-tab highlight has symmetric padding.
+- Experimental pane graphics now support bounded named layers, acknowledged full-RGBA primary-layer direct file frames on audited local terminals, owned BGRA fallback, exact pixel mouse input, and placement-only resize replay.
+- Bumped the client/server protocol version to 21, covering upstream's pane terminal bell forwarding and the fork's `notification.list` / `notification.mark_seen` socket API methods and `notification.posted` event.
 - Live handoff (`herdr update --handoff`) now resurfaces working agents without user interaction: the handoff manifest carries each pane's live agent state so working/blocked panes show their real state immediately after the restart, and the new server sweeps all panes in the background (staggered per-pane repaint nudge plus forced detection rescan, no client attach required) to re-verify every agent within seconds. Previously every pane restored as idle and detection only caught up when a pane was viewed or clicked; the one-shot repaint nudge on first client attach has been replaced by the sweep.
 
-### Changed
-- Desktop tab labels are now centered in their tabs, so the active-tab highlight has symmetric padding.
-- Bumped the client/server protocol version to 20 for pane terminal bell forwarding.
-- Experimental pane graphics now support bounded named layers, acknowledged full-RGBA primary-layer direct file frames on audited local terminals, owned BGRA fallback, exact pixel mouse input, and placement-only resize replay.
 
 ### Fixed
 - OpenCode panes now track the root conversation selected in their own TUI for native restore without adopting activity from attached clients. (#2450)
