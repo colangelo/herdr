@@ -2676,27 +2676,52 @@ mod tests {
     }
 
     #[test]
-    fn navigator_ignores_modified_j_and_k() {
+    fn navigator_ignores_unbound_modified_j_k_and_arrows() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.mode = Mode::Navigator;
         state.navigator.selected = 1;
 
-        handle_navigator_key(
-            &mut state,
-            &terminal_runtimes,
-            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
-        );
+        // Upstream ignores every modified j/k here so a stray chord cannot move
+        // the selection. The fork binds `ctrl+j` / `ctrl+k` on purpose (see
+        // `ctrl_j_and_ctrl_k_move_the_navigator_in_both_states`), so the guard
+        // is asserted for the modifiers nothing binds -- and for the arrows,
+        // which keep upstream's unmodified-only rule in both forks.
+        for modifiers in [
+            KeyModifiers::ALT,
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+            KeyModifiers::SHIFT | KeyModifiers::ALT,
+        ] {
+            for code in [KeyCode::Char('j'), KeyCode::Char('k')] {
+                handle_navigator_key(
+                    &mut state,
+                    &terminal_runtimes,
+                    KeyEvent::new(code, modifiers),
+                );
+                assert_eq!(
+                    state.navigator.selected, 1,
+                    "{modifiers:?} + {code:?} should not move the navigator"
+                );
+            }
+        }
 
-        assert_eq!(state.navigator.selected, 1);
-
-        handle_navigator_key(
-            &mut state,
-            &terminal_runtimes,
-            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
-        );
-
-        assert_eq!(state.navigator.selected, 1);
+        for modifiers in [
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+            KeyModifiers::SHIFT,
+        ] {
+            for code in [KeyCode::Down, KeyCode::Up] {
+                handle_navigator_key(
+                    &mut state,
+                    &terminal_runtimes,
+                    KeyEvent::new(code, modifiers),
+                );
+                assert_eq!(
+                    state.navigator.selected, 1,
+                    "{modifiers:?} + {code:?} should not move the navigator"
+                );
+            }
+        }
     }
 
     #[test]
