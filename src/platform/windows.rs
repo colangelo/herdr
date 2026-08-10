@@ -249,16 +249,6 @@ pub(crate) fn encode_windows_conpty_fallback(key: &crate::input::TerminalKey) ->
     )
 }
 
-/// Reads the raw host name from the `COMPUTERNAME` environment variable, which
-/// Windows populates for every process with the machine's NetBIOS name. This
-/// keeps the label a best-effort read with no extra `windows-sys` feature or
-/// FFI; a missing variable simply yields `None`.
-pub(crate) fn raw_hostname() -> Option<String> {
-    let name = std::env::var("COMPUTERNAME").ok()?;
-    let name = name.trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
 #[derive(Debug)]
 struct CachedProcessSnapshot {
     built_at: Instant,

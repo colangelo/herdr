@@ -79,8 +79,11 @@ pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std:
 /// lookup fails or yields an empty name. The short form drops everything from
 /// the first `.` so an FQDN or `.local` suffix never leaks into the UI. Casing
 /// is preserved; callers style it to taste.
-pub fn hostname() -> Option<String> {
-    short_host_label(&raw_hostname()?)
+///
+/// Reads the raw name through the platform `hostname()` above, so there is one
+/// OS lookup per target and this layer only owns the truncation policy.
+pub fn short_hostname() -> Option<String> {
+    short_host_label(&hostname()?)
 }
 
 /// Reduce a raw host name to its short display label: the segment before the
@@ -89,33 +92,6 @@ pub fn hostname() -> Option<String> {
 fn short_host_label(raw: &str) -> Option<String> {
     let short = raw.split('.').next().unwrap_or(raw).trim();
     (!short.is_empty()).then(|| short.to_string())
-}
-
-/// Reads the raw host name from the OS. Unix uses `gethostname(2)`.
-#[cfg(unix)]
-fn raw_hostname() -> Option<String> {
-    // POSIX caps host names at `HOST_NAME_MAX` (255); 256 leaves room for the
-    // trailing NUL. gethostname truncates rather than failing on overflow.
-    let mut buffer = [0_u8; 256];
-    let result =
-        unsafe { libc::gethostname(buffer.as_mut_ptr().cast::<libc::c_char>(), buffer.len()) };
-    if result != 0 {
-        return None;
-    }
-    // gethostname may omit the NUL when the name fills the buffer, so fall back
-    // to the whole buffer length in that case.
-    let end = buffer
-        .iter()
-        .position(|&byte| byte == 0)
-        .unwrap_or(buffer.len());
-    let name = std::str::from_utf8(&buffer[..end]).ok()?.trim();
-    (!name.is_empty()).then(|| name.to_string())
-}
-
-/// Fallback for exotic targets that are neither Unix nor Windows.
-#[cfg(not(any(unix, windows)))]
-fn raw_hostname() -> Option<String> {
-    None
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -468,7 +444,7 @@ mod tests {
     #[test]
     fn hostname_returns_short_dotless_label() {
         // A real host always has a name; assert the label is short and clean.
-        let host = hostname().expect("host name available");
+        let host = short_hostname().expect("host name available");
         assert!(!host.is_empty());
         assert!(
             !host.contains('.'),
