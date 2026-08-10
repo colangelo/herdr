@@ -3507,8 +3507,6 @@ mod tests {
                 Some(64),
                 "missing SHA-256 checksum for {target}"
             );
-                .unwrap_or_else(|| panic!("missing asset URL for {target}"))
-                .url;
             // Fork manifest: the binary/version is the base semver, but releases
             // are tagged `v{version}-ac` (optionally `-ac.N`) on colangelo/herdr.
             assert!(
