@@ -5281,11 +5281,7 @@ mod tests {
             shutting_down: false,
             handoff_in_progress: false,
             #[cfg(unix)]
-            pending_handoff_repaint_nudge: false,
             handoff_detection_sweep: None,
-            #[cfg(unix)]
-            should_quit: Arc::new(AtomicBool::new(false)),
-            #[cfg(windows)]
             should_quit,
             server_event_rx,
             server_event_tx,
