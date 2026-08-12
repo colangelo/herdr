@@ -121,7 +121,7 @@ pub(crate) use self::{
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
     tabs::{compute_tab_bar_view, notification_indicator_width, tab_bar_content_area},
-    widgets::{centered_popup_rect, modal_stack_areas},
+    widgets::{centered_popup_rect, footer_split, modal_stack_areas, FOOTER_ROWS},
 };
 // The indicator's cells have exactly one definition; the pane renderer reaches
 // it through the module with the terminal it already resolved, and the mouse
