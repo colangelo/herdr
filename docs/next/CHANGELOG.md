@@ -100,6 +100,7 @@
 - Elevated Windows panes no longer expose PowerShell's administrator decoration as the terminal title. (#2632, thanks @Pimpmuckl)
 - Modal name inputs now anchor the host IME cursor to the text field instead of the pane behind the dialog. (#1755, #2569, thanks @kataokatsuki)
 - Session Navigator movement ignores modified `j`, `k`, and arrow keys instead of consuming unrelated pane input. (#1981, #2377, thanks @atomsbaza)
+- The notification center and the pane todo panel now leave one blank row between their last entry and the footer buttons, instead of drawing the buttons flush against it.
 - OpenCode panes now track the root conversation selected in their own TUI for native restore without adopting activity from attached clients. (#2450)
 - Server stop requests now bypass pane and API traffic, preventing busy sessions from blocking shutdown or admitting a client while shutdown is pending. (#2612)
 - Fish `Ctrl+Alt` keybindings now work in panes after legacy Alt-prefixed control bytes are decoded with both modifiers. (#2514)
