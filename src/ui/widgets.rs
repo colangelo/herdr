@@ -8,6 +8,31 @@ use ratatui::{
 
 use crate::app::state::Palette;
 
+/// Inner rows a footer occupies: the button row, plus one blank row above it.
+///
+/// Every small modal and panel reserves both, so the buttons never sit flush
+/// against the last content row. It lives here rather than at each call site
+/// because the panels that size their content as "everything but the footer"
+/// (the notification center, the pane todo panel) each lost the gap that way,
+/// while the dialogs kept it only by accident of ending their content early.
+pub(crate) const FOOTER_ROWS: u16 = 2;
+
+/// Splits a panel's inner area into the content rect and the row offset its
+/// buttons sit on, keeping [`FOOTER_ROWS`] between them.
+///
+/// `has_footer` false yields the whole inner area and no button row, so a
+/// panel that hides its footer (an empty notification center) still fills.
+pub(crate) fn footer_split(inner: Rect, has_footer: bool) -> (Rect, Option<u16>) {
+    if !has_footer {
+        return (inner, None);
+    }
+    let content = Rect {
+        height: inner.height.saturating_sub(FOOTER_ROWS),
+        ..inner
+    };
+    (content, Some(inner.height.saturating_sub(1)))
+}
+
 pub(super) fn render_panel_shell(
     frame: &mut Frame,
     area: Rect,

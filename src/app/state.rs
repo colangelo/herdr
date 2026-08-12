@@ -3335,10 +3335,14 @@ mod tests {
             .notification_center_list_window()
             .expect("list window present");
 
-        // The buttons sit on the row directly below the list, and the list
-        // shows exactly the three entries.
+        // One blank row separates the last entry from the buttons — the panel
+        // convention, so nothing sits flush against the footer.
         assert_eq!(button.height, 1);
-        assert_eq!(list.y + list.height, button.y);
+        assert_eq!(
+            list.y + list.height + 1,
+            button.y,
+            "one blank row between the list and the buttons"
+        );
         assert_eq!(buttons.close.y, button.y, "buttons share the footer row");
         assert_eq!(list.height, 3);
         assert!(button.width <= list.width, "button fits within the panel");

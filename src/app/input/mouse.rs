@@ -1546,12 +1546,12 @@ impl AppState {
             .clamp(30, 60)
             .min(screen.width.max(1));
         let rows = (self.notification_log.len().max(1) as u16).min(NOTIFICATION_PANEL_MAX_ROWS);
-        // Reserve one inner row for the footer "Clear all" button when there
-        // are entries to clear.
+        // Reserve the footer block — button row plus the blank row above it —
+        // when there are entries to act on.
         let footer = if self.notification_log.is_empty() {
             0
         } else {
-            1
+            crate::ui::FOOTER_ROWS
         };
         let panel_h = (rows + 2 + footer).min(screen.height.max(1));
         let right = anchor.x + anchor.width;
@@ -1608,21 +1608,14 @@ impl AppState {
             .map(|buttons| buttons.row_y())
     }
 
-    /// The panel's inner list rect (footer excluded) and the first visible
-    /// entry index. Shared by render and mouse hit-testing so they agree.
+    /// The panel's inner list rect (footer block excluded) and the first
+    /// visible entry index. Shared by render and mouse hit-testing so they
+    /// agree, and it stops one row short of the buttons — see
+    /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
         let inner = self.notification_center_inner()?;
-        let footer = if self.notification_center_buttons().is_some() {
-            1
-        } else {
-            0
-        };
-        let list = Rect::new(
-            inner.x,
-            inner.y,
-            inner.width,
-            inner.height.saturating_sub(footer),
-        );
+        let (list, _) =
+            crate::ui::footer_split(inner, self.notification_center_buttons().is_some());
         let selected = self.notification_center.as_ref()?.selected;
         let visible = list.height as usize;
         let start = selected.saturating_sub(visible.saturating_sub(1));
@@ -1674,9 +1667,9 @@ impl AppState {
             .clamp(30, 60)
             .min(screen.width.max(1));
         let rows = (todos.len().max(1) as u16).min(PANE_TODO_PANEL_MAX_ROWS);
-        // The footer row is always reserved: an empty panel still carries add
+        // The footer block is always reserved: an empty panel still carries add
         // and close, and sizing it away is what made a quiet pane a dead end.
-        let panel_h = (rows + 2 + 1).min(screen.height.max(1));
+        let panel_h = (rows + 2 + crate::ui::FOOTER_ROWS).min(screen.height.max(1));
         let right = anchor.x.saturating_add(anchor.width);
         let x = right.saturating_sub(panel_w).max(screen.x);
         let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
@@ -1751,21 +1744,13 @@ impl AppState {
             .map(|buttons| buttons.row_y())
     }
 
-    /// The panel's list rect (footer excluded) and the first visible index.
-    /// Shared by render and hit-testing so they agree on which row is where.
+    /// The panel's list rect (footer block excluded) and the first visible
+    /// index. Shared by render and hit-testing so they agree on which row is
+    /// where, and it stops one row short of the buttons — see
+    /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn pane_todo_panel_list_window(&self) -> Option<(Rect, usize)> {
         let inner = self.pane_todo_panel_inner()?;
-        let footer = if self.pane_todo_panel_buttons().is_some() {
-            1
-        } else {
-            0
-        };
-        let list = Rect::new(
-            inner.x,
-            inner.y,
-            inner.width,
-            inner.height.saturating_sub(footer),
-        );
+        let (list, _) = crate::ui::footer_split(inner, self.pane_todo_panel_buttons().is_some());
         let selected = self.pane_todos.as_ref()?.selected;
         let visible = list.height as usize;
         let start = selected.saturating_sub(visible.saturating_sub(1));

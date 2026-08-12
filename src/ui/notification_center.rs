@@ -62,7 +62,9 @@ impl NotificationCenterButtonRects {
 pub(crate) fn notification_center_button_rects(
     inner: Rect,
 ) -> Option<NotificationCenterButtonRects> {
-    if inner.width == 0 || inner.height < 2 {
+    // Needs room for the whole footer block, blank row included, or the
+    // buttons would sit flush against the last notification.
+    if inner.width == 0 || inner.height < super::widgets::FOOTER_ROWS {
         return None;
     }
     let gap = 2u16;
@@ -379,6 +381,24 @@ mod tests {
 
         // The buttons sit on the row directly above the panel's bottom border.
         assert_eq!(buttons.clear.y, panel.y + panel.height - 2);
+
+        // And the row between the last entry and the buttons renders blank.
+        // Geometry alone would not catch a stray draw into the separator, so
+        // this reads the buffer rather than the rects.
+        let (list, _) = app.notification_center_list_window().expect("list window");
+        let separator_y = list.y + list.height;
+        assert_eq!(
+            separator_y + 1,
+            buttons.clear.y,
+            "separator precedes buttons"
+        );
+        let separator: String = (list.x..list.x + list.width)
+            .map(|x| buffer[(x, separator_y)].symbol())
+            .collect();
+        assert!(
+            separator.trim().is_empty(),
+            "the row above the buttons should be blank, got {separator:?}"
+        );
 
         // Each carries the settings-style filled background (surface0 at
         // rest) with the shortcut hint inside the box.

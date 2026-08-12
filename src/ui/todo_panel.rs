@@ -75,7 +75,9 @@ pub(crate) fn pane_todo_panel_button_rects(
     has_todos: bool,
     has_live_link: bool,
 ) -> Option<PaneTodoPanelButtonRects> {
-    if inner.width == 0 || inner.height < 2 {
+    // Needs room for the whole footer block, blank row included, or the
+    // buttons would sit flush against the last todo.
+    if inner.width == 0 || inner.height < super::widgets::FOOTER_ROWS {
         return None;
     }
     let gap = 2u16;
@@ -738,7 +740,13 @@ mod tests {
             .expect("footer buttons should exist");
         let rect = app.pane_todo_panel_rect().expect("panel rect should exist");
 
-        assert_eq!(list.y + list.height, buttons.row_y());
+        // One blank row separates the last todo from the buttons — the panel
+        // convention, so nothing sits flush against the footer.
+        assert_eq!(
+            list.y + list.height + 1,
+            buttons.row_y(),
+            "one blank row between the list and the buttons"
+        );
         assert_eq!(buttons.row_y(), rect.y + rect.height - 2);
 
         // A short todo pins the panel to its 30-cell minimum, and 28 inner
@@ -754,6 +762,17 @@ mod tests {
         let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
         assert!(footer.contains("a add"));
         assert!(footer.contains("esc close"));
+
+        // The separator row really is blank — geometry alone would not catch a
+        // stray draw into it.
+        let separator = row_text(
+            &buffer,
+            Rect::new(list.x, list.y + list.height, list.width, 1),
+        );
+        assert!(
+            separator.trim().is_empty(),
+            "the row above the buttons should be blank, got {separator:?}"
+        );
     }
 
     #[test]
