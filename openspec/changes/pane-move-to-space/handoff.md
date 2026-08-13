@@ -92,10 +92,29 @@ old dead-end.
 ## Standing objective — this one matters here
 
 The fork's direction is **making features easy to contribute back upstream**.
-#53 is the best PR candidate we have: the API is entirely upstream's and they
-ship no UI for it, so the diff is UI-only and adds no fork opinion. **Keep it
-free of fork-specific styling** (no editorial-sidebar colors, no fork-only config
-knobs) so it can be lifted as a `feat:` PR unchanged. Task 5.3 checks this.
+#53 is a strong PR candidate: `PaneMoveDestination::{NewTab, NewWorkspace}` is
+upstream's own (`src/api/schema/panes.rs`, verified on `upstream/master`
+`42789c8e`) and they ship no UI for it. **Keep it free of fork-specific styling**
+(no editorial-sidebar colors, no fork-only config knobs). Task 5.3 checks this.
+
+**Correction to an earlier framing — measure 5.3 against the right baseline.**
+The widening diff alone does *not* lift cleanly, because the picker it widens is
+itself fork-only. On `upstream/master`, `pane_move` appears only in the API and
+CLI layers (`src/app/api.rs`, `src/app/api/panes.rs`, `src/cli/pane.rs`); it
+appears **nowhere** in `src/app/input/navigate.rs`, `src/ui/dialogs.rs`, or
+`src/app/state.rs`. So `pane_move_target_picker_for_state`,
+`render_pane_move_target_picker_overlay`, `pane_move_target_inner_rect`,
+`PaneMoveTargetEntry`, and `PaneMoveTargetPickerState` are all fork-only. An
+upstream PR therefore carries the whole picker — base plus widening — as one
+`feat:`, not a small delta on existing upstream UI. That is still a clean PR;
+it is just a larger one, and 5.3 should read as "no fork opinion in the combined
+picker" rather than "this diff applies to upstream as-is".
+
+Same reason dissolves the `widgets.rs` tension below: `FOOTER_ROWS` and
+`footer_split` are also fork-only (`src/ui/widgets.rs` exists upstream, those two
+helpers do not). Using them adds no *new* upstream friction, since the picture
+being ported is fork-only regardless — inline the two-row footer reservation at
+lift time. Prefer the helpers, so `overlay-ui-kit` absorption stays a move.
 
 ## Also true
 
