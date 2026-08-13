@@ -70,6 +70,12 @@ herdr
 
 Stopping a server exits its pane processes. Named sessions use `herdr session stop <name>`. See [Install Herdr](/docs/install/#update) for updater, package-manager, and live-handoff behavior.
 
+## Panes look like they are in an SSH session
+
+The server outlives the connection that started it: it runs in the background, keeps going after an SSH session closes, and carries the same environment across live handoffs. A server first started over SSH therefore handed `SSH_CLIENT`, `SSH_CONNECTION`, and `SSH_TTY` to every pane it spawned afterwards, describing a connection that no longer existed, so prompts, shell rc files, and anything else that branches on SSH treated a local pane as remote. Those variables never described the pane's own client either, since any number of local and remote clients may be attached.
+
+Herdr no longer passes the three into panes. `SSH_AUTH_SOCK` is left alone, so forwarded agents stay usable. A pane that is already running keeps the environment it started with, because a running process's environment cannot be changed from outside: open a new pane, or run `unset SSH_CLIENT SSH_CONNECTION SSH_TTY` in the existing shell.
+
 ## The `herdr` command is not found
 
 Restart the terminal so it reloads its environment, then confirm the Herdr install directory is on `PATH`. Package-manager installs must be updated and exposed through that package manager. See [Install Herdr](/docs/install/#verify).
