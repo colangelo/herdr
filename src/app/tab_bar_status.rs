@@ -484,12 +484,16 @@ mod tests {
         let started = unique_temp_path("started");
         let survived = unique_temp_path("survived");
         // The descendant must still be sleeping when the reload aborts it, or
-        // the assertion below proves nothing. The poll loop that waits for
-        // `started` can itself burn up to 500ms, so its sleep has to outlast
-        // that budget with room to spare -- at 0.3s it could fire before the
-        // reload even happened, failing a correct abort on a slow runner.
+        // its absence below proves nothing. Everything between spawning it and
+        // the group kill landing eats into that margin: the poll loop for
+        // `started` alone is budgeted at 500ms, and on a loaded runner the
+        // aborted task's drop -- which is what sends the kill -- is scheduled,
+        // not immediate. At 0.3s the margin could go negative and at 1s it was
+        // still thin enough to lose on macOS CI, so give it seconds of room.
+        // Group membership itself is not the fragile part: a background job
+        // stays in its shell's process group under sh, bash and zsh alike.
         let command = format!(
-            "printf started > {}; (sleep 1; printf survived > {}) & wait",
+            "printf started > {}; (sleep 3; printf survived > {}) & wait",
             started.display(),
             survived.display()
         );
@@ -525,7 +529,7 @@ mod tests {
         );
         // Past the descendant's own deadline, so its absence means it was
         // killed rather than merely not due yet.
-        tokio::time::sleep(Duration::from_millis(1200)).await;
+        tokio::time::sleep(Duration::from_millis(3200)).await;
         assert!(!survived.exists(), "status command descendant survived");
         let _ = std::fs::remove_file(started);
         let _ = std::fs::remove_file(survived);
