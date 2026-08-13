@@ -1115,18 +1115,100 @@ impl SelectionListState {
     }
 }
 
+/// Where the pane-move picker can send a pane. Maps 1:1 onto
+/// [`crate::api::schema::PaneMoveDestination`] at dispatch, so the picker only
+/// has to pick — the API's vocabulary is already correct.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneMoveTarget {
+    /// An existing tab, in the pane's own space or another one.
+    Tab { tab_id: String },
+    /// A new tab in a named space.
+    NewTab { workspace_id: String },
+    /// A new space, created by the move.
+    NewSpace,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneMoveTargetEntry {
-    pub tab_id: String,
+    /// Space this destination belongs to, `None` for the new-space entry.
+    pub workspace_id: Option<String>,
+    /// Display number of a tab destination within its space; unused otherwise.
     pub number: usize,
+    /// Tab label, when the destination is an existing named tab.
     pub label: String,
+    pub target: PaneMoveTarget,
+}
+
+/// One row of the picker. Space headings are rendered but never selectable, so
+/// render and selection read the same list instead of deriving headings twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneMoveTargetItem {
+    SpaceHeading { label: String },
+    Destination(PaneMoveTargetEntry),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneMoveTargetPickerState {
     pub source_pane_id: String,
-    pub entries: Vec<PaneMoveTargetEntry>,
+    pub items: Vec<PaneMoveTargetItem>,
     pub list: SelectionListState,
+}
+
+impl PaneMoveTargetPickerState {
+    /// Builds a picker selecting the first destination, stepping over any
+    /// leading space heading.
+    pub fn new(source_pane_id: String, items: Vec<PaneMoveTargetItem>) -> Self {
+        let selected = items
+            .iter()
+            .position(|item| matches!(item, PaneMoveTargetItem::Destination(_)))
+            .unwrap_or(0);
+        Self {
+            source_pane_id,
+            items,
+            list: SelectionListState::new(selected),
+        }
+    }
+
+    pub fn destination_at(&self, idx: usize) -> Option<&PaneMoveTargetEntry> {
+        match self.items.get(idx) {
+            Some(PaneMoveTargetItem::Destination(entry)) => Some(entry),
+            _ => None,
+        }
+    }
+
+    pub fn selected_destination(&self) -> Option<&PaneMoveTargetEntry> {
+        self.destination_at(self.list.selected)
+    }
+
+    /// Moves the selection to the next destination, stepping over headings and
+    /// staying put when there is none rather than landing on a heading.
+    pub fn select_next(&mut self) {
+        if let Some(idx) = (self.list.selected.saturating_add(1)..self.items.len())
+            .find(|idx| self.destination_at(*idx).is_some())
+        {
+            self.list.select(idx);
+        }
+    }
+
+    /// Mirror of [`Self::select_next`] in the other direction.
+    pub fn select_prev(&mut self) {
+        if let Some(idx) = (0..self.list.selected)
+            .rev()
+            .find(|idx| self.destination_at(*idx).is_some())
+        {
+            self.list.select(idx);
+        }
+    }
+
+    /// Points the selection at `idx` only when it holds a destination, so
+    /// pointer hover cannot park the selection on a heading.
+    pub fn select_destination(&mut self, idx: usize) -> bool {
+        if self.destination_at(idx).is_none() {
+            return false;
+        }
+        self.list.select(idx);
+        true
+    }
 }
 
 #[derive(Debug, Clone)]

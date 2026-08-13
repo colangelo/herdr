@@ -155,7 +155,10 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
         help_entry(keybind_label(&kb.close_pane), "close pane"),
         help_entry(keybind_label(&kb.rename_pane), "rename pane"),
         help_entry(keybind_label(&kb.break_pane), "break pane to new tab"),
-        help_entry(keybind_label(&kb.move_pane_to_tab), "move pane to tab"),
+        help_entry(
+            keybind_label(&kb.move_pane_to_tab),
+            "move pane to tab or space",
+        ),
         help_entry(
             keybind_label(&kb.move_pane_next_tab),
             "move pane to next tab",
