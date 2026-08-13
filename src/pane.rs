@@ -129,8 +129,21 @@ impl PaneLaunchEnv {
     }
 }
 
+/// Connection vars describing the ssh session a herdr process was launched from.
+///
+/// The server outlives that session: it daemonizes, keeps running after the ssh
+/// connection closes, and survives handoffs, so by the time a pane spawns these
+/// usually describe a connection that no longer exists. They never described the
+/// pane's own client either, since any number of local or remote clients may be
+/// attached. A pane that inherits them looks remote to every prompt, shell rc,
+/// and tool that branches on ssh. Absent is more accurate than stale.
+const STALE_SSH_CONNECTION_ENV_VARS: [&str; 3] = ["SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"];
+
 fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
     cmd.env_remove("CODEX_THREAD_ID");
+    for var in STALE_SSH_CONNECTION_ENV_VARS {
+        cmd.env_remove(var);
+    }
     for (key, value) in &launch_env.extra {
         cmd.env(key, value);
     }
@@ -3147,6 +3160,26 @@ mod tests {
         apply_pane_terminal_env(&mut cmd);
 
         assert!(cmd.get_env("WT_SESSION").is_none());
+    }
+
+    #[test]
+    fn pane_launch_env_removes_stale_ssh_connection_vars() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env("SSH_CLIENT", "10.0.0.1 51234 22");
+        cmd.env("SSH_CONNECTION", "10.0.0.1 51234 10.0.0.2 22");
+        cmd.env("SSH_TTY", "/dev/pts/0");
+        cmd.env("SSH_AUTH_SOCK", "/tmp/agent.sock");
+
+        apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default());
+
+        for var in STALE_SSH_CONNECTION_ENV_VARS {
+            assert!(cmd.get_env(var).is_none(), "{var} should not reach panes");
+        }
+        assert_eq!(
+            cmd.get_env("SSH_AUTH_SOCK"),
+            Some(std::ffi::OsStr::new("/tmp/agent.sock")),
+            "agent forwarding stays usable in panes"
+        );
     }
 
     #[tokio::test]
