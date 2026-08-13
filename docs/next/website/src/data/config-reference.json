@@ -833,7 +833,7 @@
           "key": "keys.move_pane_to_tab",
           "type": "keybinding",
           "default": "\"prefix+m\"",
-          "description": "Move the focused pane to another tab via a picker."
+          "description": "Move the focused pane to another tab or space via a picker."
         },
         {
           "key": "keys.move_pane_next_tab",

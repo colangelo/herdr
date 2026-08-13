@@ -61,7 +61,7 @@ A durable list of next steps attached to each pane — the fork's largest additi
 
 - **Layout presets** — `even_horizontal` / `even_vertical` / `tiled` via `layout.set_preset`, cycled with `next_layout` (`prefix+space`), plus `herdr pane layout --set <even-h|even-v|tiled>`.
 - **Balance** — `balance_panes` (`prefix+=`), the `layout.balance` socket method, and `herdr pane balance`.
-- **Pane to tab** — `break_pane` (`prefix+!`), `move_pane_to_tab` (`prefix+m`, destination picker), `move_pane_next_tab` / `move_pane_prev_tab` (`prefix+>` / `prefix+<`), all preserving the running terminal.
+- **Pane to tab or space** — `break_pane` (`prefix+!`), `move_pane_to_tab` (`prefix+m`, destination picker covering tabs in any space, a new tab, or a new space), `move_pane_next_tab` / `move_pane_prev_tab` (`prefix+>` / `prefix+<`), all preserving the running terminal.
 - **Clear scrollback** — `pane.clear` with tmux `clear-history` semantics, `herdr pane clear`, and the `keys.clear_scrollback` binding.
 - **Styling** — `ui.pane_border_active_color` / `_inactive_color`, `ui.pane_border_active_style` (light/heavy/double), `ui.pane_title_active_color` / `_inactive_color`, `ui.pane_active_bg` / `ui.pane_inactive_bg` (tmux `window-active-style`), and `ui.dim_inactive_panes` for always-on dimming of unfocused panes.
 - **Copy mode** — one-gesture pre-scrolled entry with `prefix+pageup`, `prefix+ctrl+u`, `prefix+ctrl+k` (tmux `copy-mode -u`); `ctrl+k` / `ctrl+j` line-wise viewport scroll (vim `ctrl+y`/`ctrl+e`); held escape-coded keys now repeat instead of firing once.
