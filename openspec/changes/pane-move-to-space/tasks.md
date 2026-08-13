@@ -38,5 +38,5 @@ into the shared panel kit — keep the rendering in group 3 expressed through
 ## 5. Verification
 
 - [x] 5.1 `just check` green
-- [ ] 5.2 Dogfood on the `-ac-beta` channel: move a running agent pane to another space and to a new space, and confirm the process and scrollback survive both
+- [x] 5.2 Dogfood on the `-ac-beta` channel: move a running agent pane to another space and to a new space, and confirm the process and scrollback survive both. Ran on `0.8.0-ac-beta.56-cambiaso` after a live handoff that preserved all 18 panes. A throwaway pane kept its terminal id, its scrollback (including history from before the first hop), and a responsive shell across both a cross-space move and a new-space move; the emptied source space closed rather than lingering
 - [x] 5.3 Confirm the diff stays free of fork-only styling, so the change can be lifted as a UI-only upstream PR (refs the wayfinder proposal pack). No fork config knob or editorial-sidebar branch is touched; the only fork-only symbols the diff leans on are `FOOTER_ROWS` / `footer_split`, which the lift inlines as a two-row footer reservation. `workspace_list_entries_expanded` and `display_name_from_terminals` both exist upstream
