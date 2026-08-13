@@ -9,8 +9,9 @@ use ratatui::{
 use super::text::{display_width_u16, truncate_end};
 use super::text_field::TextField;
 use super::widgets::{
-    action_button_row_rects, centered_popup_rect, panel_contrast_fg, render_action_button,
-    render_modal_header, render_modal_shell, render_panel_shell, ActionButtonSpec,
+    action_button_row_rects, centered_popup_rect, footer_split, panel_contrast_fg,
+    render_action_button, render_modal_header, render_modal_shell, render_panel_shell,
+    ActionButtonSpec,
 };
 use crate::app::{state::WorktreeOpenState, AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
@@ -531,9 +532,17 @@ pub(crate) fn open_existing_worktree_button_rects(inner: Rect) -> (Rect, Rect) {
     (rects[0], rects[1])
 }
 
-pub(crate) fn pane_move_target_inner_rect(area: Rect, entry_count: usize) -> Option<Rect> {
-    let height = (entry_count as u16).saturating_add(5).clamp(8, 20);
-    centered_popup_rect(area, 64, height).map(|popup| {
+/// Grows with the grouped list — space headings included — up to the same
+/// ceiling the flat picker used, past which the list scrolls.
+///
+/// Six rows of chrome sit around the list: the modal border, the header, the
+/// subtitle and the footer's blank row plus button row.
+pub(crate) fn pane_move_target_height(item_count: usize) -> u16 {
+    (item_count as u16).saturating_add(6).clamp(8, 20)
+}
+
+pub(crate) fn pane_move_target_inner_rect(area: Rect, item_count: usize) -> Option<Rect> {
+    centered_popup_rect(area, 64, pane_move_target_height(item_count)).map(|popup| {
         Rect::new(
             popup.x + 1,
             popup.y + 1,
@@ -557,9 +566,27 @@ pub(crate) fn pane_move_target_button_rects(inner: Rect) -> (Rect, Rect) {
             },
         ],
         2,
-        inner.height.saturating_sub(1),
+        footer_split(inner, true)
+            .1
+            .unwrap_or_else(|| inner.height.saturating_sub(1)),
     );
     (rects[0], rects[1])
+}
+
+/// Row text for a picked destination. Tabs keep the number/label shape the flat
+/// picker used; the two creating destinations name what they create.
+pub(crate) fn pane_move_target_row_label(entry: &crate::app::state::PaneMoveTargetEntry) -> String {
+    match &entry.target {
+        crate::app::state::PaneMoveTarget::Tab { .. } => {
+            if entry.label.is_empty() {
+                format!("tab {}", entry.number)
+            } else {
+                format!("{} · {}", entry.number, entry.label)
+            }
+        }
+        crate::app::state::PaneMoveTarget::NewTab { .. } => "new tab".to_string(),
+        crate::app::state::PaneMoveTarget::NewSpace => "new space".to_string(),
+    }
 }
 
 pub(super) fn render_pane_move_target_picker_overlay(
@@ -567,13 +594,20 @@ pub(super) fn render_pane_move_target_picker_overlay(
     frame: &mut Frame,
     area: Rect,
 ) {
+    use crate::app::state::PaneMoveTargetItem;
+
     let Some(picker) = app.pane_move_target_picker.as_ref() else {
         return;
     };
 
     super::dim_background(frame, area);
-    let height = (picker.entries.len() as u16).saturating_add(5).clamp(8, 20);
-    let Some(inner) = render_modal_shell(frame, area, 64, height, &app.palette) else {
+    let Some(inner) = render_modal_shell(
+        frame,
+        area,
+        64,
+        pane_move_target_height(picker.items.len()),
+        &app.palette,
+    ) else {
         return;
     };
     if inner.height < 5 {
@@ -583,45 +617,57 @@ pub(super) fn render_pane_move_target_picker_overlay(
     render_modal_header(
         frame,
         Rect::new(inner.x, inner.y, inner.width, 1),
-        "move pane to tab",
+        "move pane",
         &app.palette,
     );
     frame.render_widget(
-        Paragraph::new(" select a destination tab")
-            .style(Style::default().fg(app.palette.overlay0)),
+        Paragraph::new(" select a destination").style(Style::default().fg(app.palette.overlay0)),
         Rect::new(inner.x, inner.y.saturating_add(1), inner.width, 1),
     );
 
-    let max_rows = usize::from(inner.height.saturating_sub(4));
+    let (content, _) = footer_split(inner, true);
+    let max_rows = usize::from(content.height.saturating_sub(2));
     let start = picker
         .list
         .selected
         .saturating_sub(max_rows.saturating_sub(1));
-    for (visible_idx, entry) in picker.entries.iter().skip(start).take(max_rows).enumerate() {
-        let entry_idx = start + visible_idx;
-        let selected = entry_idx == picker.list.selected;
-        let marker = if selected { "›" } else { " " };
-        let text = if entry.label.is_empty() {
-            format!("{marker} tab {}", entry.number)
-        } else {
-            format!("{marker} {} · {}", entry.number, entry.label)
-        };
-        let style = if selected {
-            Style::default()
-                .fg(app.palette.text)
-                .bg(app.palette.surface0)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(app.palette.subtext0)
+    for (visible_idx, item) in picker.items.iter().skip(start).take(max_rows).enumerate() {
+        let item_idx = start + visible_idx;
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(2 + visible_idx as u16),
+            inner.width,
+            1,
+        );
+        let (text, style) = match item {
+            // Same weight the sidebar gives its section headings, so the group
+            // reads as a heading and never as a destination.
+            PaneMoveTargetItem::SpaceHeading { label } => (
+                format!(" {label}"),
+                Style::default()
+                    .fg(app.palette.overlay0)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            PaneMoveTargetItem::Destination(entry) => {
+                let selected = item_idx == picker.list.selected;
+                let marker = if selected { "›" } else { " " };
+                let style = if selected {
+                    Style::default()
+                        .fg(app.palette.text)
+                        .bg(app.palette.surface0)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.palette.subtext0)
+                };
+                (
+                    format!("{marker} {}", pane_move_target_row_label(entry)),
+                    style,
+                )
+            }
         };
         frame.render_widget(
             Paragraph::new(truncate_end(&text, inner.width as usize)).style(style),
-            Rect::new(
-                inner.x,
-                inner.y.saturating_add(2 + visible_idx as u16),
-                inner.width,
-                1,
-            ),
+            row,
         );
     }
 
@@ -1209,10 +1255,10 @@ mod tests {
     };
 
     use super::{
-        confirm_close_overlay_text, display_width_u16, pane_todo_edit_rects,
-        pane_todo_edit_text_area, render_new_linked_worktree_overlay,
-        render_pane_todo_edit_overlay, render_rename_overlay, PANE_TODO_EDIT_POPUP_HEIGHT,
-        PANE_TODO_EDIT_POPUP_WIDTH,
+        confirm_close_overlay_text, display_width_u16, pane_move_target_inner_rect,
+        pane_todo_edit_rects, pane_todo_edit_text_area, render_new_linked_worktree_overlay,
+        render_pane_move_target_picker_overlay, render_pane_todo_edit_overlay,
+        render_rename_overlay, Modifier, PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     };
 
     #[test]
@@ -1901,5 +1947,84 @@ mod tests {
             detail.contains("2 outstanding"),
             "detail should count the outstanding todos: {detail}"
         );
+    }
+    #[test]
+    fn pane_move_picker_renders_space_headings_and_the_new_space_row_last() {
+        use crate::app::state::{
+            PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem, PaneMoveTargetPickerState,
+        };
+
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("main"), Workspace::test_new("other")];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        let own = app.workspaces[0].id.clone();
+        let other = app.workspaces[1].id.clone();
+        let items = vec![
+            PaneMoveTargetItem::SpaceHeading {
+                label: "main".into(),
+            },
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some(own.clone()),
+                number: 2,
+                label: "logs".into(),
+                target: PaneMoveTarget::Tab {
+                    tab_id: format!("{own}:t2"),
+                },
+            }),
+            PaneMoveTargetItem::SpaceHeading {
+                label: "other".into(),
+            },
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some(other.clone()),
+                number: 1,
+                label: "shell".into(),
+                target: PaneMoveTarget::Tab {
+                    tab_id: format!("{other}:t1"),
+                },
+            }),
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: None,
+                number: 0,
+                label: String::new(),
+                target: PaneMoveTarget::NewSpace,
+            }),
+        ];
+        let item_count = items.len();
+        app.pane_move_target_picker = Some(PaneMoveTargetPickerState::new("pane".into(), items));
+        app.mode = Mode::PaneMoveTargetPicker;
+
+        let area = Rect::new(0, 0, 80, 24);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_pane_move_target_picker_overlay(&app, frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let inner = pane_move_target_inner_rect(area, item_count).expect("picker rect");
+
+        let row_text = |row: u16| -> String {
+            (inner.x..inner.x + inner.width)
+                .map(|x| buffer[(x, inner.y + 2 + row)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        };
+        let row_style = |row: u16| buffer[(inner.x + 1, inner.y + 2 + row)].style();
+
+        assert_eq!(row_text(0), " main");
+        assert_eq!(row_style(0).fg, Some(app.palette.overlay0));
+        assert!(row_style(0).add_modifier.contains(Modifier::BOLD));
+        assert_ne!(row_style(0).bg, Some(app.palette.surface0));
+
+        // The first destination, not the heading above it, carries the marker.
+        assert_eq!(row_text(1), "› 2 · logs");
+        assert_eq!(row_style(1).bg, Some(app.palette.surface0));
+
+        // A destination in another space is shown under that space's heading.
+        assert_eq!(row_text(2), " other");
+        assert_eq!(row_text(3), "  1 · shell");
+
+        assert_eq!(row_text(4), "  new space");
+        assert_eq!(item_count, 5, "the new-space row is the last item");
     }
 }

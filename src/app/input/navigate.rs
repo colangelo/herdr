@@ -1386,12 +1386,12 @@ impl App {
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if let Some(picker) = self.state.pane_move_target_picker.as_mut() {
-                    picker.list.move_prev();
+                    picker.select_prev();
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if let Some(picker) = self.state.pane_move_target_picker.as_mut() {
-                    picker.list.move_next(picker.entries.len());
+                    picker.select_next();
                 }
             }
             KeyCode::Enter => self.submit_pane_move_target_picker(),
@@ -1406,14 +1406,53 @@ impl App {
             .as_ref()
             .and_then(|picker| {
                 picker
-                    .entries
-                    .get(picker.list.selected)
-                    .map(|entry| (picker.source_pane_id.clone(), entry.tab_id.clone()))
+                    .selected_destination()
+                    .map(|entry| (picker.source_pane_id.clone(), entry.target.clone()))
             });
         self.state.pane_move_target_picker = None;
         leave_navigate_mode(&mut self.state);
-        if let Some((source_pane_id, target_tab_id)) = selection {
-            self.dispatch_pane_move_to_tab(source_pane_id, target_tab_id);
+        if let Some((source_pane_id, target)) = selection {
+            self.dispatch_pane_move_to_target(source_pane_id, target);
+        }
+    }
+
+    /// Maps a picked destination onto `pane.move`. Every variant goes through
+    /// the same feedback path, so a rejection reads the same wherever it lands.
+    fn dispatch_pane_move_to_target(
+        &mut self,
+        source_pane_id: String,
+        target: crate::app::state::PaneMoveTarget,
+    ) {
+        match target {
+            crate::app::state::PaneMoveTarget::Tab { tab_id } => {
+                self.dispatch_pane_move_to_tab(source_pane_id, tab_id)
+            }
+            crate::app::state::PaneMoveTarget::NewTab { workspace_id } => {
+                self.dispatch_pane_move_with_feedback(
+                    "tui.pane.move_new_tab",
+                    crate::api::schema::PaneMoveParams {
+                        pane_id: source_pane_id,
+                        destination: crate::api::schema::PaneMoveDestination::NewTab {
+                            workspace_id: Some(workspace_id),
+                            label: None,
+                        },
+                        focus: true,
+                    },
+                );
+            }
+            crate::app::state::PaneMoveTarget::NewSpace => {
+                self.dispatch_pane_move_with_feedback(
+                    "tui.pane.move_new_workspace",
+                    crate::api::schema::PaneMoveParams {
+                        pane_id: source_pane_id,
+                        destination: crate::api::schema::PaneMoveDestination::NewWorkspace {
+                            label: None,
+                            tab_label: None,
+                        },
+                        focus: true,
+                    },
+                );
+            }
         }
     }
 
@@ -1741,43 +1780,118 @@ fn focused_pane_move_source(state: &AppState) -> Option<(usize, usize, String)> 
     Some((ws_idx, tab_idx, public_pane_id))
 }
 
+/// Enumerates every place the focused pane can go: its own space first, then
+/// the remaining spaces in the order the sidebar lists them, and finally the
+/// new-space destination on its own.
 fn pane_move_target_picker_for_state(
     state: &AppState,
 ) -> Result<crate::app::state::PaneMoveTargetPickerState, &'static str> {
-    let Some((ws_idx, source_tab_idx, source_pane_id)) = focused_pane_move_source(state) else {
+    use crate::app::state::{PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem};
+
+    let Some((source_ws_idx, source_tab_idx, source_pane_id)) = focused_pane_move_source(state)
+    else {
         return Err("no focused pane");
     };
-    let Some(workspace) = state.workspaces.get(ws_idx) else {
+    let Some(source_workspace) = state.workspaces.get(source_ws_idx) else {
         return Err("workspace disappeared");
     };
-    if workspace
-        .tabs
-        .get(source_tab_idx)
-        .is_some_and(|tab| tab.zoomed)
-    {
+    let Some(source_tab) = source_workspace.tabs.get(source_tab_idx) else {
+        return Err("tab disappeared");
+    };
+    if source_tab.zoomed {
         return Err("pane moves are unavailable while the source tab is zoomed");
     }
+    // Matches `break_pane`: a pane already alone in its tab gains nothing from a
+    // new tab in the same space, so that one destination is not offered.
+    let source_pane_is_alone = source_tab.layout.pane_count() <= 1;
 
-    let entries = workspace
-        .tabs
-        .iter()
-        .enumerate()
-        .filter(|(tab_idx, tab)| *tab_idx != source_tab_idx && !tab.zoomed)
-        .map(|(tab_idx, tab)| crate::app::state::PaneMoveTargetEntry {
-            tab_id: crate::workspace::public_tab_id_for_number(&workspace.id, tab.number),
-            number: tab_idx + 1,
-            label: tab.custom_name.clone().unwrap_or_default(),
-        })
-        .collect::<Vec<_>>();
-    if entries.is_empty() {
-        return Err("there is no other available tab to move into");
+    let mut items = Vec::new();
+    for ws_idx in workspace_move_target_order(state, source_ws_idx) {
+        let Some(workspace) = state.workspaces.get(ws_idx) else {
+            continue;
+        };
+        let own_space = ws_idx == source_ws_idx;
+        let mut destinations = workspace
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(tab_idx, _)| !(own_space && *tab_idx == source_tab_idx))
+            .filter(|(_, tab)| !tab.zoomed)
+            .map(|(tab_idx, tab)| {
+                PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                    workspace_id: Some(workspace.id.clone()),
+                    number: tab_idx + 1,
+                    label: tab.custom_name.clone().unwrap_or_default(),
+                    target: PaneMoveTarget::Tab {
+                        tab_id: crate::workspace::public_tab_id_for_number(
+                            &workspace.id,
+                            tab.number,
+                        ),
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        if !own_space || !source_pane_is_alone {
+            destinations.push(PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some(workspace.id.clone()),
+                number: 0,
+                label: String::new(),
+                target: PaneMoveTarget::NewTab {
+                    workspace_id: workspace.id.clone(),
+                },
+            }));
+        }
+        if destinations.is_empty() {
+            continue;
+        }
+        items.push(PaneMoveTargetItem::SpaceHeading {
+            label: workspace.display_name_from_terminals(&state.terminals),
+        });
+        items.append(&mut destinations);
     }
 
-    Ok(crate::app::state::PaneMoveTargetPickerState {
+    // A new space is always offerable except when the pane is the whole
+    // session: moving it would replace the only space with an identical one.
+    let pane_is_whole_session =
+        state.workspaces.len() == 1 && source_workspace.tabs.len() == 1 && source_pane_is_alone;
+    if !pane_is_whole_session {
+        items.push(PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+            workspace_id: None,
+            number: 0,
+            label: String::new(),
+            target: PaneMoveTarget::NewSpace,
+        }));
+    }
+
+    if !items
+        .iter()
+        .any(|item| matches!(item, PaneMoveTargetItem::Destination(_)))
+    {
+        return Err("there is nowhere to move this pane");
+    }
+
+    Ok(crate::app::state::PaneMoveTargetPickerState::new(
         source_pane_id,
-        entries,
-        list: crate::app::state::SelectionListState::new(0),
-    })
+        items,
+    ))
+}
+
+/// Workspace indices in picker order: the pane's own space, then the rest as
+/// the sidebar lists them. Worktree groups are read expanded so a collapsed
+/// group never hides a destination.
+fn workspace_move_target_order(state: &AppState, source_ws_idx: usize) -> Vec<usize> {
+    let mut order = Vec::with_capacity(state.workspaces.len());
+    order.push(source_ws_idx);
+    order.extend(
+        crate::ui::workspace_list_entries_expanded(state)
+            .into_iter()
+            .filter_map(|entry| match entry {
+                crate::ui::WorkspaceListEntry::Workspace { ws_idx, .. } => {
+                    (ws_idx != source_ws_idx).then_some(ws_idx)
+                }
+            }),
+    );
+    order
 }
 
 fn adjacent_tab_index(current: usize, tab_count: usize, delta: isize) -> Option<usize> {
@@ -2847,8 +2961,63 @@ command = "echo custom"
             .is_some_and(|toast| toast.context.contains("zoomed")));
     }
 
+    fn picker_of(app: &App) -> &crate::app::state::PaneMoveTargetPickerState {
+        app.state
+            .pane_move_target_picker
+            .as_ref()
+            .expect("picker should open")
+    }
+
+    fn picker_targets(
+        picker: &crate::app::state::PaneMoveTargetPickerState,
+    ) -> Vec<crate::app::state::PaneMoveTarget> {
+        picker
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::app::state::PaneMoveTargetItem::Destination(entry) => {
+                    Some(entry.target.clone())
+                }
+                crate::app::state::PaneMoveTargetItem::SpaceHeading { .. } => None,
+            })
+            .collect()
+    }
+
+    fn picker_headings(picker: &crate::app::state::PaneMoveTargetPickerState) -> Vec<String> {
+        picker
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::app::state::PaneMoveTargetItem::SpaceHeading { label } => {
+                    Some(label.clone())
+                }
+                crate::app::state::PaneMoveTargetItem::Destination(_) => None,
+            })
+            .collect()
+    }
+
+    fn select_target(app: &mut App, target: &crate::app::state::PaneMoveTarget) {
+        let picker = app
+            .state
+            .pane_move_target_picker
+            .as_mut()
+            .expect("picker should open");
+        let idx = picker
+            .items
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    crate::app::state::PaneMoveTargetItem::Destination(entry)
+                        if entry.target == *target
+                )
+            })
+            .expect("target should be offered");
+        assert!(picker.select_destination(idx));
+    }
+
     #[test]
-    fn move_target_picker_does_not_open_without_another_tab() {
+    fn move_target_picker_does_not_open_when_the_pane_is_the_whole_session() {
         let mut app = app_with_test_workspaces(&["main"]);
 
         app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
@@ -2863,7 +3032,140 @@ command = "echo custom"
             .state
             .toast
             .as_ref()
-            .is_some_and(|toast| toast.context.contains("no other available tab")));
+            .is_some_and(|toast| toast.context.contains("nowhere to move")));
+    }
+
+    #[test]
+    fn move_target_picker_opens_for_a_lone_tab_holding_more_than_one_pane() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let workspace_id = app.state.workspaces[0].id.clone();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.mode, Mode::PaneMoveTargetPicker);
+        assert_eq!(
+            picker_targets(picker_of(&app)),
+            vec![
+                crate::app::state::PaneMoveTarget::NewTab { workspace_id },
+                crate::app::state::PaneMoveTarget::NewSpace,
+            ]
+        );
+        assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn move_target_picker_groups_every_space_with_the_source_space_first() {
+        let mut app = app_with_test_workspaces(&["one", "two", "three"]);
+        app.state.workspaces[1].test_add_tab(Some("second"));
+        app.state.workspaces[1].active_tab = 0;
+        app.state.workspaces[1].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.active = Some(1);
+        let ids = app
+            .state
+            .workspaces
+            .iter()
+            .map(|ws| ws.id.clone())
+            .collect::<Vec<_>>();
+        let own_second_tab = app.public_tab_id(1, 1).expect("public tab id");
+        let one_first_tab = app.public_tab_id(0, 0).expect("public tab id");
+        let three_first_tab = app.public_tab_id(2, 0).expect("public tab id");
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        let picker = picker_of(&app);
+        assert_eq!(picker_headings(picker), vec!["two", "one", "three"]);
+        assert_eq!(
+            picker_targets(picker),
+            vec![
+                crate::app::state::PaneMoveTarget::Tab {
+                    tab_id: own_second_tab
+                },
+                crate::app::state::PaneMoveTarget::NewTab {
+                    workspace_id: ids[1].clone()
+                },
+                crate::app::state::PaneMoveTarget::Tab {
+                    tab_id: one_first_tab
+                },
+                crate::app::state::PaneMoveTarget::NewTab {
+                    workspace_id: ids[0].clone()
+                },
+                crate::app::state::PaneMoveTarget::Tab {
+                    tab_id: three_first_tab
+                },
+                crate::app::state::PaneMoveTarget::NewTab {
+                    workspace_id: ids[2].clone()
+                },
+                crate::app::state::PaneMoveTarget::NewSpace,
+            ]
+        );
+    }
+
+    #[test]
+    fn move_target_picker_selection_skips_space_headings_and_clamps() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.ensure_test_terminals();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        let picker = picker_of(&app);
+        let heading_indices = picker
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                matches!(
+                    item,
+                    crate::app::state::PaneMoveTargetItem::SpaceHeading { .. }
+                )
+                .then_some(idx)
+            })
+            .collect::<Vec<_>>();
+        assert!(!heading_indices.is_empty());
+        let last_destination = picker.items.len() - 1;
+        // Selection starts on the first destination, never the leading heading.
+        assert_eq!(picker.list.selected, 1);
+
+        for _ in 0..picker.items.len() + 2 {
+            let picker = app
+                .state
+                .pane_move_target_picker
+                .as_mut()
+                .expect("picker open");
+            picker.select_next();
+            assert!(!heading_indices.contains(&picker.list.selected));
+        }
+        assert_eq!(picker_of(&app).list.selected, last_destination);
+
+        for _ in 0..last_destination + 2 {
+            let picker = app
+                .state
+                .pane_move_target_picker
+                .as_mut()
+                .expect("picker open");
+            picker.select_prev();
+            assert!(!heading_indices.contains(&picker.list.selected));
+        }
+        assert_eq!(picker_of(&app).list.selected, 1);
+    }
+
+    #[test]
+    fn move_target_picker_is_rejected_while_the_source_tab_is_zoomed() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.workspaces[0].tabs[0].zoomed = true;
+        app.state.ensure_test_terminals();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pane_move_target_picker.is_none());
+        assert!(app
+            .state
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.context.contains("zoomed")));
     }
 
     #[test]
@@ -2880,19 +3182,109 @@ command = "echo custom"
         app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
 
         assert_eq!(app.state.mode, Mode::PaneMoveTargetPicker);
-        let picker = app
-            .state
-            .pane_move_target_picker
-            .as_ref()
-            .expect("picker should open");
-        assert_eq!(picker.entries.len(), 1);
-        assert_eq!(picker.entries[0].tab_id, available_id);
+        assert_eq!(
+            picker_targets(picker_of(&app)),
+            vec![
+                crate::app::state::PaneMoveTarget::Tab {
+                    tab_id: available_id
+                },
+                crate::app::state::PaneMoveTarget::NewSpace,
+            ]
+        );
 
         app.handle_pane_move_target_picker_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
         assert_eq!(app.state.mode, Mode::Terminal);
         assert!(app.state.pane_move_target_picker.is_none());
         assert_eq!(app.state.workspaces[0].tabs.len(), before_tabs);
+    }
+
+    #[test]
+    fn move_target_picker_moves_a_pane_into_another_space_and_follows_it() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let source = app.state.workspaces[0]
+            .focused_pane_id()
+            .expect("focused pane");
+        let terminal_id = app.state.workspaces[0].tabs[0]
+            .terminal_id(source)
+            .expect("source terminal")
+            .clone();
+        let destination_tab = app.public_tab_id(1, 0).expect("public tab id");
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        select_target(
+            &mut app,
+            &crate::app::state::PaneMoveTarget::Tab {
+                tab_id: destination_tab,
+            },
+        );
+        app.submit_pane_move_target_picker();
+
+        assert_eq!(app.state.active, Some(1));
+        let destination = &app.state.workspaces[1];
+        assert_eq!(destination.tabs[0].panes.len(), 2);
+        assert!(destination
+            .active_tab()
+            .and_then(|tab| tab.terminal_id(destination.focused_pane_id()?))
+            .is_some_and(|id| *id == terminal_id));
+        assert_eq!(app.state.workspaces[0].tabs[0].panes.len(), 1);
+        assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn move_target_picker_new_tab_destination_lands_in_the_chosen_space() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let destination_id = app.state.workspaces[1].id.clone();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        select_target(
+            &mut app,
+            &crate::app::state::PaneMoveTarget::NewTab {
+                workspace_id: destination_id,
+            },
+        );
+        app.submit_pane_move_target_picker();
+
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.workspaces[1].tabs.len(), 2);
+        assert_eq!(app.state.workspaces[1].active_tab, 1);
+        assert_eq!(app.state.workspaces[0].tabs[0].panes.len(), 1);
+        assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn move_target_picker_new_space_destination_leaves_no_empty_tab() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        let extra = app.state.workspaces[0].test_add_tab(Some("extra"));
+        app.state.workspaces[0].active_tab = extra;
+        app.state.ensure_test_terminals();
+        let source = app.state.workspaces[0]
+            .focused_pane_id()
+            .expect("focused pane");
+        let terminal_id = app.state.workspaces[0].tabs[extra]
+            .terminal_id(source)
+            .expect("source terminal")
+            .clone();
+
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        select_target(&mut app, &crate::app::state::PaneMoveTarget::NewSpace);
+        app.submit_pane_move_target_picker();
+
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.active, Some(1));
+        let created = &app.state.workspaces[1];
+        assert_eq!(created.tabs.len(), 1);
+        assert_eq!(created.tabs[0].panes.len(), 1);
+        assert!(created
+            .active_tab()
+            .and_then(|tab| tab.terminal_id(created.focused_pane_id()?))
+            .is_some_and(|id| *id == terminal_id));
+        assert!(app.state.toast.is_none());
     }
 
     #[test]

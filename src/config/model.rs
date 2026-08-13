@@ -591,7 +591,7 @@ pub struct KeysConfig {
     pub rename_pane: BindingConfig,
     /// Break the focused pane into a new tab. Default: "prefix+!".
     pub break_pane: BindingConfig,
-    /// Move the focused pane to another tab via a picker. Default: "prefix+m".
+    /// Move the focused pane to another tab or space via a picker. Default: "prefix+m".
     pub move_pane_to_tab: BindingConfig,
     /// Move the focused pane to the next tab without wrapping. Default: "prefix+>".
     pub move_pane_next_tab: BindingConfig,
