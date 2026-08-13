@@ -38,7 +38,7 @@ Panes:
 | Zoom the focused pane | `prefix+z` |
 | Close pane | `prefix+x` |
 | Break pane into a new tab | `prefix+!` |
-| Move pane to a chosen tab | `prefix+m` |
+| Move pane to a chosen tab or space | `prefix+m` |
 | Move pane to next / previous tab | `prefix+>` / `prefix+<` |
 | Swap panes | `prefix+shift+h/j/k/l` |
 | Resize mode | `prefix+r` |
@@ -58,7 +58,7 @@ Tabs:
 | Rename tab | `prefix+shift+t` |
 | Close tab | `prefix+shift+x` |
 
-Pane moves preserve the pane's running process and terminal contents. `prefix+m` opens a destination picker; the quick next/previous actions follow the current tab order and stop at the first or last tab instead of wrapping. Pane moves are unavailable when the source or destination tab is zoomed.
+Pane moves preserve the pane's running process and terminal contents. `prefix+m` opens a destination picker listing every place the pane can go: the other tabs of its own space, the tabs of every other space, a new tab in any of them, and a new space created by the move. Destinations are grouped under their space, with the pane's own space first; the space headings are labels, not destinations, so the selection steps over them. Picking a destination in another space switches to that space with the moved pane focused. The quick next/previous actions stay within the current space, follow the current tab order and stop at the first or last tab instead of wrapping. Pane moves are unavailable when the source or destination tab is zoomed.
 
 Workspaces and session:
 
