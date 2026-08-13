@@ -135,9 +135,24 @@ try {
         } catch {
             Write-Host "server stop during cleanup failed: $($_.Exception.Message)"
         }
-        Wait-Process -Id $server.Id -Timeout 10 -ErrorAction SilentlyContinue
-        $server.Refresh()
-        if (-not $server.HasExited) {
+        # The server usually exits during `server stop`, so the wait can find it
+        # already gone. That is the success path, but it surfaces as an error the
+        # script's `Stop` preference turns terminating -- thrown from `finally`,
+        # which discards whatever the try block actually failed on. Catch it so a
+        # real smoke failure is never masked by its own cleanup.
+        try {
+            Wait-Process -Id $server.Id -Timeout 10 -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "wait for server exit during cleanup: $($_.Exception.Message)"
+        }
+        $serverExited = $true
+        try {
+            $server.Refresh()
+            $serverExited = $server.HasExited
+        } catch {
+            Write-Host "server state during cleanup unavailable: $($_.Exception.Message)"
+        }
+        if (-not $serverExited) {
             & taskkill.exe /PID $server.Id /T /F 2>&1 | Out-Null
         }
     }
