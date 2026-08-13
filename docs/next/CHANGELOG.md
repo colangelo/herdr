@@ -34,6 +34,7 @@
 
 
 ### Fixed
+- Panes no longer inherit `SSH_CLIENT`, `SSH_CONNECTION`, and `SSH_TTY` from the environment the server was started in. The server outlives that connection — it daemonizes, keeps running after the ssh session closes, and carries the same environment across every handoff — so a server first started over ssh left every pane it spawned looking like it was running on a connection that no longer existed, to prompts, shell rc files, and anything else that branches on ssh. The vars never described the pane's own client either, since any number of local and remote clients may be attached. `SSH_AUTH_SOCK` is untouched, so forwarded agents still reach panes.
 - The notification center and the pane todo panel now leave one blank row between their last entry and the footer buttons, instead of drawing the buttons flush against it.
 - OpenCode panes now track the root conversation selected in their own TUI for native restore without adopting activity from attached clients. (#2450)
 - Server stop requests now bypass pane and API traffic, preventing busy sessions from blocking shutdown or admitting a client while shutdown is pending. (#2612)
