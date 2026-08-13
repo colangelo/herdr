@@ -483,8 +483,13 @@ mod tests {
     async fn reload_aborts_an_in_flight_command_task_and_its_descendants() {
         let started = unique_temp_path("started");
         let survived = unique_temp_path("survived");
+        // The descendant must still be sleeping when the reload aborts it, or
+        // the assertion below proves nothing. The poll loop that waits for
+        // `started` can itself burn up to 500ms, so its sleep has to outlast
+        // that budget with room to spare -- at 0.3s it could fire before the
+        // reload even happened, failing a correct abort on a slow runner.
         let command = format!(
-            "printf started > {}; (sleep 0.3; printf survived > {}) & wait",
+            "printf started > {}; (sleep 1; printf survived > {}) & wait",
             started.display(),
             survived.display()
         );
@@ -518,7 +523,9 @@ mod tests {
                 .await
                 .is_err()
         );
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        // Past the descendant's own deadline, so its absence means it was
+        // killed rather than merely not due yet.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
         assert!(!survived.exists(), "status command descendant survived");
         let _ = std::fs::remove_file(started);
         let _ = std::fs::remove_file(survived);
