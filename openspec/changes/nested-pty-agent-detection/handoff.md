@@ -68,7 +68,6 @@ Two intermittent master failures are tracked and were investigated already.
   <https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/57>.
 - The Windows ConPTY smoke step, intermittently. Its cleanup no longer masks the
   real error (`afd78a87`), so a recurrence should now say what actually failed:
-  <https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/58> — see
   <https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/56>.
 
 ## Sequencing already applied
