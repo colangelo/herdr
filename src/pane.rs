@@ -338,6 +338,30 @@ fn foreground_member_cwd_different_from_shell(
     None
 }
 
+/// Directory of the foreground job running one PTY below `pid`, when a wrapper
+/// process owns a nested PTY. `None` for the ordinary case where the pane's own
+/// child holds the terminal, so the caller keeps its existing answer.
+#[cfg(unix)]
+fn nested_foreground_job_cwd(pid: u32) -> Option<std::path::PathBuf> {
+    let job = crate::platform::nested_foreground_job(pid)?;
+    foreground_job_cwd(&job, usable_process_cwd)
+}
+
+/// The job's directory: its leader's, falling back to any member that can
+/// answer. The leader is the process the user is actually sitting in front of,
+/// so a member that merely inherited a different directory must not win.
+#[cfg(unix)]
+fn foreground_job_cwd(
+    job: &crate::platform::ForegroundJob,
+    mut cwd_of: impl FnMut(u32) -> Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    job.processes
+        .iter()
+        .filter(|process| process.pid == job.process_group_id)
+        .chain(job.processes.iter())
+        .find_map(|process| cwd_of(process.pid))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ForegroundShellAgentAction {
     ObserveProbe,
@@ -3022,6 +3046,33 @@ impl PaneRuntime {
         crate::platform::process_cwd(pid)
     }
 
+    /// The pane's working directory as a user would name it, resolved at
+    /// keypress time rather than per render.
+    ///
+    /// `cwd` answers from the pane's direct child, which stays frozen in the
+    /// launch directory whenever a wrapper - `atuin`, a container shim, an
+    /// agent runner - re-runs the real shell inside a PTY of its own. This
+    /// reaches across that boundary, at the cost of a process-tree lookup that
+    /// has no business in a render-scaled loop. Deliberately not folded into
+    /// `cwd`, which the sidebar calls per pane per render.
+    pub fn interactive_cwd(&self) -> Option<std::path::PathBuf> {
+        if let Some(cwd) = self
+            .reported_cwd
+            .lock()
+            .ok()
+            .and_then(|reported_cwd| reported_cwd.clone())
+        {
+            return Some(cwd);
+        }
+
+        let pid = self.child_pid.load(Ordering::Acquire);
+        #[cfg(unix)]
+        if let Some(cwd) = nested_foreground_job_cwd(pid) {
+            return Some(cwd);
+        }
+        crate::platform::process_cwd(pid)
+    }
+
     pub fn child_pid(&self) -> Option<u32> {
         let pid = self.child_pid.load(Ordering::Acquire);
         (pid > 0).then_some(pid)
@@ -3170,6 +3221,55 @@ mod tests {
         apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default());
 
         assert!(cmd.get_env("CODEX_THREAD_ID").is_none());
+    }
+
+    #[cfg(unix)]
+    fn test_foreground_job(process_group_id: u32, pids: &[u32]) -> crate::platform::ForegroundJob {
+        crate::platform::ForegroundJob {
+            process_group_id,
+            processes: pids
+                .iter()
+                .map(|pid| crate::platform::ForegroundProcess {
+                    pid: *pid,
+                    name: format!("p{pid}"),
+                    argv0: None,
+                    argv: None,
+                    cmdline: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreground_job_cwd_prefers_the_leader_over_an_earlier_member() {
+        let job = test_foreground_job(20, &[10, 20]);
+
+        let cwd = foreground_job_cwd(&job, |pid| {
+            Some(std::path::PathBuf::from(format!("/p{pid}")))
+        });
+
+        assert_eq!(cwd, Some(std::path::PathBuf::from("/p20")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreground_job_cwd_falls_back_to_a_member_when_the_leader_cannot_answer() {
+        let job = test_foreground_job(20, &[10, 20]);
+
+        let cwd = foreground_job_cwd(&job, |pid| {
+            (pid != 20).then(|| std::path::PathBuf::from(format!("/p{pid}")))
+        });
+
+        assert_eq!(cwd, Some(std::path::PathBuf::from("/p10")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreground_job_cwd_is_none_when_nothing_can_answer() {
+        let job = test_foreground_job(20, &[10, 20]);
+
+        assert_eq!(foreground_job_cwd(&job, |_| None), None);
     }
 
     #[test]
