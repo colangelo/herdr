@@ -1,66 +1,16 @@
 # pane-todos
 
-## MODIFIED Requirements
+## REMOVED Requirements
 
 ### Requirement: Pane todo indicator
 
-Every pane that draws a top border SHALL show a todo indicator at the far right
-of it, whether or not the pane holds todos, so the affordance is in the same
-place on every such pane and a pane with no todos can still be opened by mouse.
-A pane that draws no top border SHALL show no indicator, since there is no
-chrome to carry it; the bindable action remains the path there.
+Replaced by "Always-on pane todo indicator": the indicator was conditional on a pane holding
+todos, and this change makes it unconditional on every pane that draws a top
+border. The scenario "A quiet pane is unchanged" asserted that an empty pane
+draws no indicator, which is exactly the behaviour being replaced, so the
+requirement is rewritten wholesale rather than scenario-patched.
 
-The indicator SHALL distinguish three states: a pane with outstanding todos
-carries their count, a pane whose todos are all done carries the glyph without a
-count, and a pane with no todos carries the glyph rendered in the dimmest tone
-so it reads as an empty affordance rather than as completed work.
-
-The indicator SHALL be colored by the highest outstanding priority when
-outstanding todos exist, and SHALL be configurable off, suppressing all three
-states. The region used to draw the indicator and the region that accepts a
-click SHALL be derived from a single shared definition. When pane width forces a
-choice the indicator SHALL win: it is laid out first and the title takes what is
-left, dropping itself when that is too narrow. The indicator SHALL be omitted
-only when the pane cannot carry the glyph and its enclosing border corners at
-all.
-
-#### Scenario: Outstanding count is shown
-
-- **WHEN** a pane holds three not-done todos and one done todo
-- **THEN** its indicator shows a count of three
-
-#### Scenario: An empty pane still offers the affordance
-
-- **WHEN** a pane with a top border has no todos
-- **THEN** the indicator is drawn without a count in the dimmest tone
-- **AND** activating it opens that pane's todo panel
-
-#### Scenario: A pane without a top border carries no indicator
-
-- **WHEN** a pane draws no top border
-- **THEN** no indicator is drawn for it regardless of its todos
-
-#### Scenario: The indicator outlives the title in a squeeze
-
-- **WHEN** a pane is too narrow to show both the indicator and its title
-- **THEN** the indicator is drawn and the title gives up the space
-- **WHEN** the pane cannot carry the glyph and its border corners at all
-- **THEN** the indicator is omitted
-
-#### Scenario: Empty is distinguishable from all-done
-
-- **WHEN** one pane has no todos and another pane's todos are all done
-- **THEN** both show the glyph without a count, rendered in different tones
-
-#### Scenario: The indicator can be turned off
-
-- **WHEN** the pane todo indicator is configured off
-- **THEN** no indicator is drawn for any pane, including panes holding todos
-
-#### Scenario: Click target matches what is drawn
-
-- **WHEN** the indicator is drawn for a pane
-- **THEN** the cells that respond to a click are exactly the cells drawn
+## MODIFIED Requirements
 
 ### Requirement: Cross-pane todo links
 
@@ -217,3 +167,65 @@ left unbound by default.
 - **WHEN** the keybinding help panel is shown
 - **THEN** every action introduced by this feature is listed, showing `unset` for
   any that has no binding
+
+## ADDED Requirements
+
+### Requirement: Always-on pane todo indicator
+
+Every pane that draws a top border SHALL show a todo indicator at the far right
+of it, whether or not the pane holds todos, so the affordance is in the same
+place on every such pane and a pane with no todos can still be opened by mouse.
+A pane that draws no top border SHALL show no indicator, since there is no
+chrome to carry it; the bindable action remains the path there.
+
+The indicator SHALL distinguish three states: a pane with outstanding todos
+carries their count, a pane whose todos are all done carries the glyph without a
+count, and a pane with no todos carries the glyph rendered in the dimmest tone
+so it reads as an empty affordance rather than as completed work.
+
+The indicator SHALL be colored by the highest outstanding priority when
+outstanding todos exist, and SHALL be configurable off, suppressing all three
+states. The region used to draw the indicator and the region that accepts a
+click SHALL be derived from a single shared definition. When pane width forces a
+choice the indicator SHALL win: it is laid out first and the title takes what is
+left, dropping itself when that is too narrow. The indicator SHALL be omitted
+only when the pane cannot carry the glyph and its enclosing border corners at
+all.
+
+#### Scenario: Outstanding count is shown
+
+- **WHEN** a pane holds three not-done todos and one done todo
+- **THEN** its indicator shows a count of three
+
+#### Scenario: An empty pane still offers the affordance
+
+- **WHEN** a pane with a top border has no todos
+- **THEN** the indicator is drawn without a count in the dimmest tone
+- **AND** activating it opens that pane's todo panel
+
+#### Scenario: A pane without a top border carries no indicator
+
+- **WHEN** a pane draws no top border
+- **THEN** no indicator is drawn for it regardless of its todos
+
+#### Scenario: The indicator outlives the title in a squeeze
+
+- **WHEN** a pane is too narrow to show both the indicator and its title
+- **THEN** the indicator is drawn and the title gives up the space
+- **WHEN** the pane cannot carry the glyph and its border corners at all
+- **THEN** the indicator is omitted
+
+#### Scenario: Empty is distinguishable from all-done
+
+- **WHEN** one pane has no todos and another pane's todos are all done
+- **THEN** both show the glyph without a count, rendered in different tones
+
+#### Scenario: The indicator can be turned off
+
+- **WHEN** the pane todo indicator is configured off
+- **THEN** no indicator is drawn for any pane, including panes holding todos
+
+#### Scenario: Click target matches what is drawn
+
+- **WHEN** the indicator is drawn for a pane
+- **THEN** the cells that respond to a click are exactly the cells drawn
