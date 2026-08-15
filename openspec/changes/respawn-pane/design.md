@@ -68,6 +68,28 @@ todos, scrollback. Replaced: the child process. Cleared: agent runtime identity
 (via the existing `clear_agent_runtime_identity_after_respawn`), so detection
 re-identifies whatever the pane becomes rather than reporting the dead agent.
 
+## Decision 6: the respawn cwd sees through a wrapper's nested PTY
+
+Dogfooding found respawn restarting in the wrong directory. The pane's direct
+child here is `atuin`, which re-runs the real shell inside a PTY of its own and
+never leaves its launch directory, so every cwd source that asks the pane's own
+child answers with where the pane started.
+
+`PaneRuntime::interactive_cwd` prefers the shell's own report (OSC 7), then the
+foreground job one PTY below (`platform::nested_foreground_job`), then the
+direct child. It stays out of the cheap `cwd()` that the sidebar calls per pane
+per render: walking the process tree is affordable for a keypress, not for a
+frame. The same limitation still affects that cheap path — split inheritance and
+`pane.get` — and is tracked separately as
+https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/63.
+
+## Decision 7: respawn does not move focus
+
+The refocus lives in the agent-exit caller, not in the shared primitive. Leaving
+it shared meant a scripted `pane.respawn` of a background pane pulled the UI to
+another workspace, which contradicts "preserve the pane's placement". The
+keybinding respawns the focused pane, so it is unaffected either way.
+
 ## Alternatives considered
 
 - **Close plus re-split.** What the user does today; loses position and id, and
