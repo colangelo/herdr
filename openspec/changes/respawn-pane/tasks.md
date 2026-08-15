@@ -43,4 +43,4 @@ group 2 the gate, group 3 the surfaces that call it.
       commented entry in the `src/main.rs` config template
 - [x] 3.4 Docs: keyboard page and the pane CLI reference under
       `docs/next/website/src/content/docs/`
-- [ ] 3.5 `just check` green; dogfood on `-ac-beta` against a real wedged pane
+- [x] 3.5 `just check` green; dogfood on `-ac-beta` against a real wedged pane

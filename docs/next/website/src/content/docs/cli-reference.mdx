@@ -213,6 +213,8 @@ herdr pane respawn <pane_id>
 `pane respawn` restarts a pane's process in place. The pane keeps its ID,
 position, size, label, and todos; only the process is replaced. A pane launched
 with a command re-runs that command, and a plain shell pane gets a fresh shell.
+The replacement starts in the pane's current directory, not the one the pane was
+launched in, and the respawn never moves focus.
 When the pane still holds live work — a running child process or outstanding
 todos — the first request returns `confirmation_required` and changes nothing;
 repeating it confirms and respawns. Use it to recover a wedged agent or dev
