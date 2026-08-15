@@ -75,6 +75,8 @@ pub(super) fn render_app_scroll_overlay(app: &AppState, frame: &mut Frame, area:
         Span::raw(" "),
         Span::styled("^u/^d", key),
         Span::styled(" page  ", dim),
+        Span::styled("^k/^j", key),
+        Span::styled(" line  ", dim),
         Span::styled("g/G", key),
         Span::styled(" top/bottom  ", dim),
         Span::styled("q/esc", key),

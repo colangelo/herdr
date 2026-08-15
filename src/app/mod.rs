@@ -607,7 +607,7 @@ impl App {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
-            pending_app_scroll_keys: Vec::new(),
+            pending_app_scroll_sends: Vec::new(),
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,

@@ -3,26 +3,29 @@
 //! has no scrollback for copy mode to enter.
 
 use bytes::Bytes;
-use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 
 use crate::{
-    app::{state::AppScrollState, App, AppState, Mode},
+    app::{
+        state::{AppScrollSend, AppScrollState},
+        App, AppState, Mode,
+    },
     input::TerminalKey,
     terminal::TerminalRuntimeRegistry,
 };
 
 use super::copy_mode::CopyModeEntryScroll;
 
-/// The key forwarded to the application for a scroll intent, or `None` for
-/// keys the mode swallows. The vocabulary is deliberately the pager one:
-/// arrow keys mean prompt history in shell-like TUIs, so no line granularity.
-fn passthrough_key(key: &TerminalKey) -> Option<KeyCode> {
+/// The send forwarded to the application for a scroll intent, or `None` for
+/// keys the mode swallows. The vocabulary is the pager one; line granularity
+/// rides on wheel ticks (see `AppScrollSend`).
+fn passthrough_send(key: &TerminalKey) -> Option<AppScrollSend> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     if alt {
         return None;
     }
-    match key.code {
+    let forwarded_key = match key.code {
         KeyCode::Char('u' | 'U') if ctrl => Some(KeyCode::PageUp),
         KeyCode::Char('d' | 'D') if ctrl => Some(KeyCode::PageDown),
         KeyCode::PageUp if !ctrl => Some(KeyCode::PageUp),
@@ -31,6 +34,19 @@ fn passthrough_key(key: &TerminalKey) -> Option<KeyCode> {
         KeyCode::Char('G') if !ctrl => Some(KeyCode::End),
         KeyCode::Home if !ctrl => Some(KeyCode::Home),
         KeyCode::End if !ctrl => Some(KeyCode::End),
+        _ => None,
+    };
+    if let Some(code) = forwarded_key {
+        return Some(AppScrollSend::Key(TerminalKey::new(
+            code,
+            KeyModifiers::empty(),
+        )));
+    }
+    match key.code {
+        KeyCode::Char('k' | 'K') if ctrl => Some(AppScrollSend::WheelUp),
+        KeyCode::Char('j' | 'J') if ctrl => Some(AppScrollSend::WheelDown),
+        KeyCode::Char('k') | KeyCode::Up if !ctrl => Some(AppScrollSend::WheelUp),
+        KeyCode::Char('j') | KeyCode::Down if !ctrl => Some(AppScrollSend::WheelDown),
         _ => None,
     }
 }
@@ -71,14 +87,19 @@ impl AppState {
         self.mode = Mode::AppScroll;
         // "Half page" has no distinct terminal key; alt-screen applications
         // page at their own granularity, so both page gestures send PageUp.
-        // The line gesture enters the mode without a key: no line-scroll key
-        // exists that is safe to send blind.
-        if matches!(
-            entry,
-            CopyModeEntryScroll::Page | CopyModeEntryScroll::HalfPage
-        ) {
-            self.pending_app_scroll_keys
-                .push(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty()));
+        // The line gesture forwards one wheel tick, which is dropped at drain
+        // time on panes with no wheel support.
+        match entry {
+            CopyModeEntryScroll::Page | CopyModeEntryScroll::HalfPage => {
+                self.pending_app_scroll_sends
+                    .push(AppScrollSend::Key(TerminalKey::new(
+                        KeyCode::PageUp,
+                        KeyModifiers::empty(),
+                    )));
+            }
+            CopyModeEntryScroll::Line => {
+                self.pending_app_scroll_sends.push(AppScrollSend::WheelUp);
+            }
         }
         true
     }
@@ -118,9 +139,8 @@ impl AppState {
             self.leave_app_scroll_mode();
             return;
         }
-        if let Some(code) = passthrough_key(&key) {
-            self.pending_app_scroll_keys
-                .push(TerminalKey::new(code, KeyModifiers::empty()));
+        if let Some(send) = passthrough_send(&key) {
+            self.pending_app_scroll_sends.push(send);
         }
     }
 }
@@ -132,17 +152,19 @@ impl App {
         }
         self.state.update_dismissed = true;
         self.state.handle_app_scroll_key(key);
-        self.dispatch_pending_app_scroll_keys();
+        self.dispatch_pending_app_scroll_sends();
     }
 
-    /// Encode and send the keys the passthrough mode queued. Losing the pane
-    /// or its runtime exits the mode instead of erroring: the application the
-    /// user was scrolling is gone.
-    pub(crate) fn dispatch_pending_app_scroll_keys(&mut self) {
-        if self.state.pending_app_scroll_keys.is_empty() {
+    /// Encode and send what the passthrough mode queued. Wheel ticks are
+    /// encoded per the pane's mouse protocol (a mouse report at the pane's
+    /// centre, or alternate-scroll arrows) and are dropped on panes that
+    /// support neither. Losing the pane or its runtime exits the mode instead
+    /// of erroring: the application the user was scrolling is gone.
+    pub(crate) fn dispatch_pending_app_scroll_sends(&mut self) {
+        if self.state.pending_app_scroll_sends.is_empty() {
             return;
         }
-        let keys = std::mem::take(&mut self.state.pending_app_scroll_keys);
+        let sends = std::mem::take(&mut self.state.pending_app_scroll_sends);
         let target = self
             .state
             .app_scroll
@@ -153,8 +175,13 @@ impl App {
             let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
                 return false;
             };
-            for key in keys {
-                let bytes = runtime.encode_terminal_key(key);
+            for send in sends {
+                let bytes = match send {
+                    AppScrollSend::Key(key) => runtime.encode_terminal_key(key),
+                    wheel @ (AppScrollSend::WheelUp | AppScrollSend::WheelDown) => self
+                        .encode_app_scroll_wheel(runtime, pane_id, &wheel)
+                        .unwrap_or_default(),
+                };
                 if bytes.is_empty() {
                     continue;
                 }
@@ -166,6 +193,41 @@ impl App {
         });
         if !sent {
             self.state.leave_app_scroll_mode();
+        }
+    }
+
+    /// A wheel tick has no key encoding: it becomes a mouse report at the
+    /// pane's centre when the application captures the mouse, alternate-scroll
+    /// arrows when it opted into DECSET 1007, and nothing otherwise.
+    fn encode_app_scroll_wheel(
+        &self,
+        runtime: &crate::terminal::TerminalRuntime,
+        pane_id: crate::layout::PaneId,
+        wheel: &AppScrollSend,
+    ) -> Option<Vec<u8>> {
+        let kind = match wheel {
+            AppScrollSend::WheelUp => MouseEventKind::ScrollUp,
+            AppScrollSend::WheelDown => MouseEventKind::ScrollDown,
+            AppScrollSend::Key(_) => return None,
+        };
+        let rect = self.state.pane_info_by_id(pane_id)?.inner_rect;
+        let mouse = MouseEvent {
+            kind,
+            column: rect.x + rect.width / 2,
+            row: rect.y + rect.height / 2,
+            modifiers: KeyModifiers::empty(),
+        };
+        match runtime.wheel_routing() {
+            Some(crate::pane::WheelRouting::MouseReport) => {
+                runtime.scroll_reset();
+                let position = self.state.pane_mouse_position(runtime, rect, mouse)?;
+                runtime.encode_mouse_wheel(kind, position, KeyModifiers::empty())
+            }
+            Some(crate::pane::WheelRouting::AlternateScroll) => {
+                runtime.scroll_reset();
+                runtime.encode_alternate_scroll(kind)
+            }
+            _ => None,
         }
     }
 }
@@ -286,7 +348,7 @@ mod tests {
         drain(&mut rx);
 
         press(&mut app, KeyCode::Char('x'), KeyModifiers::empty()).await;
-        press(&mut app, KeyCode::Up, KeyModifiers::empty()).await;
+        press(&mut app, KeyCode::Tab, KeyModifiers::empty()).await;
 
         assert!(drain(&mut rx).is_empty());
         assert_eq!(app.state.mode, Mode::AppScroll);
@@ -326,13 +388,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn line_gesture_enters_without_sending() {
-        let (mut app, _pane_id, mut rx) = app_with_alt_screen_pane();
+    async fn line_gesture_without_wheel_support_enters_and_drops_the_tick() {
+        // Alt screen with mouse reporting off and DECSET 1007 explicitly
+        // disabled (it defaults on): the wheel tick has no encoding, so the
+        // gesture enters the mode and sends nothing.
+        let (mut app, _pane_id, mut rx) =
+            app_with_channel_pane(b"\x1b[?1049h\x1b[?1007lalt content");
 
         prefix_gesture(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL).await;
 
         assert_eq!(app.state.mode, Mode::AppScroll);
         assert!(drain(&mut rx).is_empty());
+    }
+
+    const ALT_SCREEN_MOUSE_BYTES: &[u8] = b"\x1b[?1049h\x1b[?1000h\x1b[?1006halt content";
+    const ALT_SCREEN_1007_BYTES: &[u8] = b"\x1b[?1049h\x1b[?1007halt content";
+
+    #[tokio::test]
+    async fn line_keys_send_wheel_reports_on_a_mouse_capturing_pane() {
+        let (mut app, _pane_id, mut rx) = app_with_channel_pane(ALT_SCREEN_MOUSE_BYTES);
+        prefix_gesture(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL).await;
+        drain(&mut rx);
+
+        press(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL).await;
+        press(&mut app, KeyCode::Char('j'), KeyModifiers::CONTROL).await;
+        press(&mut app, KeyCode::Up, KeyModifiers::empty()).await;
+        press(&mut app, KeyCode::Down, KeyModifiers::empty()).await;
+
+        // SGR wheel reports: button 64 = up, 65 = down, both as presses (M).
+        let sent = drain(&mut rx);
+        let text = String::from_utf8_lossy(&sent);
+        let ups = text.matches("\x1b[<64;").count();
+        let downs = text.matches("\x1b[<65;").count();
+        assert_eq!((ups, downs), (2, 2), "sent: {text:?}");
+        assert_eq!(app.state.mode, Mode::AppScroll);
+    }
+
+    #[tokio::test]
+    async fn line_gesture_sends_one_wheel_up_where_supported() {
+        let (mut app, _pane_id, mut rx) = app_with_channel_pane(ALT_SCREEN_MOUSE_BYTES);
+
+        prefix_gesture(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL).await;
+
+        assert_eq!(app.state.mode, Mode::AppScroll);
+        let sent = drain(&mut rx);
+        assert!(
+            String::from_utf8_lossy(&sent).starts_with("\x1b[<64;"),
+            "sent: {sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn line_keys_use_alternate_scroll_arrows_under_decset_1007() {
+        let (mut app, pane_id, mut rx) = app_with_channel_pane(ALT_SCREEN_1007_BYTES);
+        prefix_gesture(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL).await;
+        drain(&mut rx);
+
+        press(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL).await;
+        press(&mut app, KeyCode::Char('j'), KeyModifiers::CONTROL).await;
+
+        let rt = app
+            .state
+            .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane_id)
+            .expect("runtime");
+        let mut expected = rt
+            .encode_alternate_scroll(crossterm::event::MouseEventKind::ScrollUp)
+            .expect("alternate scroll up");
+        expected.extend(
+            rt.encode_alternate_scroll(crossterm::event::MouseEventKind::ScrollDown)
+                .expect("alternate scroll down"),
+        );
+        assert_eq!(drain(&mut rx), expected);
     }
 
     #[tokio::test]
