@@ -304,6 +304,94 @@ fn closing_pane_terminates_processes_inside_it() {
 }
 
 #[test]
+fn pane_respawn_replaces_the_process_and_keeps_the_pane_id() {
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+
+    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+
+    let created = run_cli(
+        &socket_path,
+        &["workspace", "create", "--cwd", base.to_str().unwrap()],
+    );
+    assert!(created.status.success());
+
+    let split = run_cli(
+        &socket_path,
+        &["pane", "split", "1-1", "--direction", "right"],
+    );
+    assert!(split.status.success());
+    let split_json: serde_json::Value = serde_json::from_slice(&split.stdout).unwrap();
+    let pane_id = split_json["result"]["pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let pid_file = base.join("pane-respawn.pid");
+    let command = format!(
+        "python3 -c 'import os,time,pathlib; pathlib.Path(r\"{}\").write_text(str(os.getpid())); time.sleep(1000)'",
+        pid_file.display()
+    );
+    let ran = run_cli(&socket_path, &["pane", "run", &pane_id, &command]);
+    assert!(
+        ran.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let pid = wait_for_pid_file(&pid_file, Duration::from_secs(5)).unwrap_or_else(|err| {
+        panic!("failed to read pane child pid: {err}");
+    });
+    assert!(process_exists(pid), "child process was not running");
+
+    // A live child prompts first, and the pending confirmation is the answer:
+    // the repeat consumes it and proceeds. Same token pattern as pane close.
+    let asked = run_cli(&socket_path, &["pane", "respawn", &pane_id]);
+    assert_eq!(asked.status.code(), Some(1));
+    let asked_json: serde_json::Value = serde_json::from_slice(&asked.stderr).unwrap();
+    assert_eq!(
+        asked_json["error"]["code"], "confirmation_required",
+        "response: {asked_json}"
+    );
+    assert!(
+        process_exists(pid),
+        "nothing is replaced before the confirmation"
+    );
+
+    let respawned = run_cli(&socket_path, &["pane", "respawn", &pane_id]);
+    let respawned_json: serde_json::Value = serde_json::from_slice(&respawned.stdout).unwrap();
+    assert_eq!(respawned_json["result"]["type"], "ok");
+    assert!(
+        wait_for_pid_exit(pid, Duration::from_secs(5)),
+        "process {pid} survived the respawn"
+    );
+
+    // The stable pane id is the observable difference from close-and-resplit.
+    let panes = run_cli(&socket_path, &["pane", "list"]);
+    let panes_json: serde_json::Value = serde_json::from_slice(&panes.stdout).unwrap();
+    assert!(
+        panes_json["result"]["panes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|pane| pane["pane_id"] == pane_id.as_str()),
+        "the respawned pane keeps its id: {panes_json}"
+    );
+
+    let unknown = run_cli(&socket_path, &["pane", "respawn", "9-9"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    let unknown_json: serde_json::Value = serde_json::from_slice(&unknown.stderr).unwrap();
+    assert!(
+        unknown_json["error"].is_object(),
+        "an unknown pane id is an error: {unknown_json}"
+    );
+
+    cleanup_spawned_herdr(herdr, base);
+}
+
+#[test]
 fn closing_workspace_terminates_processes_inside_it() {
     let base = unique_test_dir();
     let config_home = base.join("config");

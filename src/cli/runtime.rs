@@ -125,6 +125,13 @@ pub(super) fn pane_close(pane_id: String) -> std::io::Result<i32> {
     print_method_response("cli:pane:close", Method::PaneClose(PaneTarget { pane_id }))
 }
 
+pub(super) fn pane_respawn(pane_id: String) -> std::io::Result<i32> {
+    print_method_response(
+        "cli:pane:respawn",
+        Method::PaneRespawn(PaneTarget { pane_id }),
+    )
+}
+
 pub(super) fn pane_balance(params: LayoutBalanceParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:balance", Method::LayoutBalance(params))
 }

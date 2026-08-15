@@ -658,6 +658,11 @@ fn pane_command() -> Command {
                 .args(current_pane_args()),
         )
         .subcommand(id_command("close", "pane_id", "Close a pane"))
+        .subcommand(id_command(
+            "respawn",
+            "pane_id",
+            "Restart a pane's process in place",
+        ))
         .subcommand(
             Command::new("send-text")
                 .about("Send literal text to a pane")
