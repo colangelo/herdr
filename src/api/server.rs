@@ -472,6 +472,7 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::PaneReleaseAgent(_) => "pane.release_agent",
         Method::PaneClearScrollback(_) => "pane.clear",
         Method::PaneClose(_) => "pane.close",
+        Method::PaneRespawn(_) => "pane.respawn",
         Method::PopupClose(_) => "popup.close",
         Method::EventsSubscribe(_) => "events.subscribe",
         Method::EventsWait(_) => "events.wait",

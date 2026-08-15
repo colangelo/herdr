@@ -1058,6 +1058,24 @@ fn confirm_close_overlay_text(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
 ) -> (String, String) {
+    if let Some(pane_id) = app.confirm_respawn_pane {
+        let label = app
+            .pane_terminal(pane_id)
+            .and_then(|terminal| terminal.border_label(true))
+            .unwrap_or_else(|| "this pane".to_string());
+        let outstanding = app
+            .pane_terminal(pane_id)
+            .map(|terminal| terminal.outstanding_todo_count())
+            .unwrap_or(0);
+        let detail = if outstanding == 1 {
+            format!("{label} - restarts the process, 1 outstanding todo")
+        } else if outstanding > 1 {
+            format!("{label} - restarts the process, {outstanding} outstanding todos")
+        } else {
+            format!("{label} - restarts the process")
+        };
+        return ("Respawn pane and kill what is running?".to_string(), detail);
+    }
     if let Some(pane_id) = app.confirm_close_pane {
         let outstanding = app
             .pane_terminal(pane_id)
@@ -1946,6 +1964,30 @@ mod tests {
         assert!(
             detail.contains("2 outstanding"),
             "detail should count the outstanding todos: {detail}"
+        );
+    }
+
+    #[test]
+    fn confirm_respawn_text_says_the_process_is_being_replaced() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("current")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.ensure_test_terminals();
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        app.confirm_respawn_pane = Some(pane_id);
+
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let (title, detail) = confirm_close_overlay_text(&app, &terminal_runtimes);
+
+        assert_eq!(title, "Respawn pane and kill what is running?");
+        assert!(
+            detail.contains("restarts the process"),
+            "detail should say the process is replaced: {detail}"
+        );
+        assert!(
+            !detail.contains("outstanding"),
+            "a pane with no todos should not mention them: {detail}"
         );
     }
     #[test]

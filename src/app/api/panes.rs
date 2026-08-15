@@ -1603,6 +1603,7 @@ impl App {
         };
         self.state.forget_pane_todo_ui(pane_id);
         self.state.remove_plugin_pane_records([pane_id]);
+        self.respawn_replaced_runtimes.remove(&pane_id);
         if should_close_workspace {
             self.state.selected = ws_idx;
             self.state.close_selected_workspace();
@@ -1638,6 +1639,40 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Whether the pane still has a live child process. Deliberately the cheap
+    /// `child_pid()` fact rather than a process-table probe: this is a
+    /// keypress-time decision, not a render-loop one, and `Some` is exactly
+    /// "something is still running here".
+    pub(super) fn pane_has_live_child(&self, ws_idx: usize, pane_id: PaneId) -> bool {
+        self.lookup_runtime_sender(ws_idx, pane_id)
+            .and_then(crate::terminal::TerminalRuntime::child_pid)
+            .is_some()
+    }
+
+    pub(super) fn handle_pane_respawn(&mut self, id: String, target: PaneTarget) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
+            return pane_not_found(id, &target.pane_id);
+        };
+        // Gating here rather than in the TUI means an external pane.respawn
+        // over the socket gets the same answer the keybinding does.
+        let has_live_child = self.pane_has_live_child(ws_idx, pane_id);
+        if self
+            .state
+            .confirm_pane_respawn(ws_idx, pane_id, has_live_child)
+        {
+            return encode_error(
+                id,
+                "confirmation_required",
+                "this pane still has live work; repeat the request to confirm",
+            );
+        }
+        if !self.respawn_pane_runtime(pane_id, crate::app::api::RespawnTarget::LaunchArgv) {
+            return encode_error(id, "respawn_failed", "failed to respawn the pane process");
+        }
+        self.emit_pane_updated(ws_idx, pane_id);
+        encode_success(id, ResponseResult::Ok {})
     }
 
     pub(super) fn handle_pane_send_keys(

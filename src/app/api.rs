@@ -28,6 +28,17 @@ enum RuntimeExitAction {
     ClosePane,
 }
 
+/// What a respawn should start in the pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RespawnTarget {
+    /// Re-run the pane's recorded launch argv, falling back to the shell when
+    /// the pane has none. What a user-requested respawn asks for.
+    LaunchArgv,
+    /// Always a fresh shell. What the agent-exit path asks for, so a launch
+    /// command that exited on its own leaves a usable shell behind.
+    Shell,
+}
+
 impl App {
     pub(crate) fn dispatch_api_request(
         &mut self,
@@ -202,6 +213,12 @@ impl App {
         }
 
         if let AppEvent::PaneDied { pane_id } = &ev {
+            // The exit of a runtime a respawn deliberately replaced. The pane is
+            // already running its replacement, so this reports nothing about the
+            // pane's current process.
+            if self.respawn_replaced_runtimes.remove(pane_id) {
+                return;
+            }
             if self
                 .state
                 .popup_pane
@@ -219,7 +236,7 @@ impl App {
                 self.emit_terminal_or_system_agent_notifications(std::slice::from_ref(&update));
             }
             if self.runtime_exit_action(*pane_id) == RuntimeExitAction::RespawnShell
-                && self.respawn_shell_for_launch_pane(*pane_id)
+                && self.respawn_pane_runtime(*pane_id, RespawnTarget::Shell)
             {
                 self.overlay_panes.remove(pane_id);
                 self.render_dirty.request_generic();
@@ -549,7 +566,17 @@ impl App {
         }
     }
 
-    fn respawn_shell_for_launch_pane(&mut self, pane_id: crate::layout::PaneId) -> bool {
+    /// Replace a pane's process without touching the pane. Keeps the pane id,
+    /// terminal id, cwd, size, launch env, layout position, label, and todos;
+    /// swaps only the runtime behind `terminal_id`.
+    ///
+    /// `RespawnTarget::LaunchArgv` re-runs the pane's recorded launch command,
+    /// `RespawnTarget::Shell` always starts a shell.
+    pub(crate) fn respawn_pane_runtime(
+        &mut self,
+        pane_id: crate::layout::PaneId,
+        target: RespawnTarget,
+    ) -> bool {
         let Some((ws_idx, pane_state)) = self.find_pane(pane_id) else {
             return false;
         };
@@ -559,6 +586,12 @@ impl App {
         };
 
         let cwd = terminal.cwd.clone();
+        // `None` for a plain shell pane, which is exactly the fallback
+        // condition - no extra bookkeeping needed to tell the two apart.
+        let launch_argv = match target {
+            RespawnTarget::LaunchArgv => terminal.launch_argv.clone(),
+            RespawnTarget::Shell => None,
+        };
         let (rows, cols) = self
             .terminal_runtimes
             .get(&terminal_id)
@@ -567,35 +600,70 @@ impl App {
         let Some(launch_env) = self.pane_launch_env(ws_idx, pane_id, Vec::new()) else {
             return false;
         };
-        let runtime = match crate::terminal::TerminalRuntime::spawn(
-            pane_id,
-            rows,
-            cols,
-            cwd,
-            self.state.pane_scrollback_limit_bytes,
-            self.state.host_terminal_theme,
-            self.state.host_terminal_appearance,
-            crate::pane::PaneShellConfig::new(&self.state.default_shell, self.state.shell_mode),
-            &launch_env,
-            self.event_tx.clone(),
-            self.render_notify.clone(),
-            self.render_dirty.clone(),
-        ) {
+        let spawned = match &launch_argv {
+            Some(argv) => crate::terminal::TerminalRuntime::spawn_argv_command(
+                pane_id,
+                rows,
+                cols,
+                cwd,
+                argv,
+                &launch_env,
+                crate::pane::AgentDetection::Enabled,
+                self.state.pane_scrollback_limit_bytes,
+                self.state.host_terminal_theme,
+                self.state.host_terminal_appearance,
+                self.event_tx.clone(),
+                self.render_notify.clone(),
+                self.render_dirty.clone(),
+            ),
+            None => crate::terminal::TerminalRuntime::spawn(
+                pane_id,
+                rows,
+                cols,
+                cwd,
+                self.state.pane_scrollback_limit_bytes,
+                self.state.host_terminal_theme,
+                self.state.host_terminal_appearance,
+                crate::pane::PaneShellConfig::new(&self.state.default_shell, self.state.shell_mode),
+                &launch_env,
+                self.event_tx.clone(),
+                self.render_notify.clone(),
+                self.render_dirty.clone(),
+            ),
+        };
+        let runtime = match spawned {
             Ok(runtime) => runtime,
             Err(err) => {
                 tracing::warn!(
                     pane = pane_id.raw(),
                     terminal = %terminal_id,
                     err = %err,
-                    "failed to respawn shell after launch command exited"
+                    "failed to respawn pane runtime"
                 );
                 return false;
             }
         };
 
-        self.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        let replaced = self.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        if let Some(replaced) = replaced {
+            // The replaced process is still alive here; killing it makes it
+            // report an exit that names this pane. Absorb that one event so the
+            // exit-action path does not close a pane that is already running
+            // its replacement.
+            if replaced.child_pid().is_some() {
+                self.respawn_replaced_runtimes.insert(pane_id);
+            }
+            replaced.shutdown();
+        }
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.clear_agent_runtime_identity_after_respawn();
+            // The clear drops `launch_argv` because the agent-exit path leaves a
+            // shell behind. Here the command is what came back, so put it
+            // back - otherwise a second respawn would silently degrade to a
+            // shell.
+            if let Some(argv) = launch_argv {
+                terminal.launch_argv = Some(argv);
+            }
         }
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
         self.schedule_session_save();
@@ -1276,6 +1344,7 @@ impl App {
                 return self.handle_pane_clear_scrollback(request.id, target)
             }
             Method::PaneClose(target) => return self.handle_pane_close(request.id, target),
+            Method::PaneRespawn(target) => return self.handle_pane_respawn(request.id, target),
             Method::PopupClose(_) => {
                 return if self.close_popup_pane() {
                     responses::encode_success(request.id, ResponseResult::Ok {})
@@ -2305,6 +2374,215 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+    }
+
+    fn app_with_single_pane_workspace() -> (App, crate::layout::PaneId, crate::terminal::TerminalId)
+    {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let workspace = crate::workspace::Workspace::test_new("respawn");
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace
+            .terminal_id(pane_id)
+            .cloned()
+            .expect("test pane should have a terminal");
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        (app, pane_id, terminal_id)
+    }
+
+    fn shutdown_test_runtimes(app: &mut App) {
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn respawn_pane_runtime_reruns_the_recorded_launch_argv() {
+        let (mut app, pane_id, terminal_id) = app_with_single_pane_workspace();
+        let marker = std::env::temp_dir().join(format!(
+            "herdr-respawn-argv-{}-{}",
+            std::process::id(),
+            pane_id.raw()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let argv = vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!("printf ok > {}; sleep 30", marker.display()),
+        ];
+
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.launch_argv = Some(argv.clone());
+        terminal.set_manual_label("keep me".into());
+        terminal
+            .add_todo(
+                "unfinished",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !marker.exists() {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            marker.exists(),
+            "respawned pane should have re-run its recorded launch argv"
+        );
+        let _ = std::fs::remove_file(&marker);
+
+        assert!(app.find_pane(pane_id).is_some(), "pane should survive");
+        assert_eq!(
+            app.state
+                .workspaces
+                .first()
+                .and_then(|ws| ws.terminal_id(pane_id)),
+            Some(&terminal_id),
+            "pane should keep its terminal id"
+        );
+        let terminal = app
+            .state
+            .terminals
+            .get(&terminal_id)
+            .expect("terminal should survive the respawn");
+        assert_eq!(
+            terminal.launch_argv.as_ref(),
+            Some(&argv),
+            "the launch argv must survive so a second respawn re-runs it too"
+        );
+        assert_eq!(terminal.manual_label.as_deref(), Some("keep me"));
+        assert_eq!(terminal.outstanding_todo_count(), 1);
+
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn respawn_pane_runtime_falls_back_to_a_shell_without_launch_argv() {
+        let (mut app, pane_id, terminal_id) = app_with_single_pane_workspace();
+        assert!(app
+            .state
+            .terminals
+            .get(&terminal_id)
+            .is_some_and(|terminal| terminal.launch_argv.is_none()));
+
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+
+        assert!(
+            app.terminal_runtimes
+                .get(&terminal_id)
+                .and_then(|runtime| runtime.child_pid())
+                .is_some(),
+            "a shell pane should come back with a live child"
+        );
+        assert!(app
+            .state
+            .terminals
+            .get(&terminal_id)
+            .is_some_and(|terminal| terminal.launch_argv.is_none()));
+
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn respawn_pane_runtime_clears_agent_runtime_identity() {
+        let (mut app, pane_id, terminal_id) = app_with_single_pane_workspace();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.set_agent_name("codex".into());
+        terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:codex".into(),
+            agent: "codex".into(),
+            session_ref: crate::agent_resume::AgentSessionRef::id("codex-session")
+                .expect("test session id should be valid"),
+        });
+
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+
+        let terminal = app
+            .state
+            .terminals
+            .get(&terminal_id)
+            .expect("terminal should survive the respawn");
+        assert!(terminal.agent_name.is_none());
+        assert!(terminal.persisted_agent_session.is_none());
+
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn replaced_runtime_exit_does_not_close_the_respawned_pane() {
+        let (mut app, pane_id, terminal_id) = app_with_single_pane_workspace();
+
+        // The first respawn installs a runtime; the second replaces a live one,
+        // which is the case that produces a stale exit for this pane.
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+        assert!(app
+            .terminal_runtimes
+            .get(&terminal_id)
+            .and_then(|runtime| runtime.child_pid())
+            .is_some());
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+        assert!(
+            app.respawn_replaced_runtimes.contains(&pane_id),
+            "the replaced runtime's exit is expected and must be absorbed"
+        );
+
+        app.handle_internal_event(AppEvent::PaneDied { pane_id });
+
+        assert!(
+            app.find_pane(pane_id).is_some(),
+            "the pane is already running its replacement, so it must not close"
+        );
+        assert!(
+            !app.respawn_replaced_runtimes.contains(&pane_id),
+            "one entry absorbs exactly one exit"
+        );
+
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
+    async fn respawn_pane_runtime_shell_target_ignores_the_launch_argv() {
+        let (mut app, pane_id, terminal_id) = app_with_single_pane_workspace();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.launch_argv = Some(vec!["definitely-not-a-real-command".to_string()]);
+
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::Shell));
+
+        assert!(
+            app.state
+                .terminals
+                .get(&terminal_id)
+                .is_some_and(|terminal| terminal.launch_argv.is_none()),
+            "the agent-exit path leaves a shell behind, so the argv is dropped"
+        );
+
+        shutdown_test_runtimes(&mut app);
     }
 
     #[cfg(windows)]
