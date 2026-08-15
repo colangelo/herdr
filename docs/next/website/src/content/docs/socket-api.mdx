@@ -105,7 +105,7 @@ Raw socket method names use dot notation:
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
-| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.clear`, `pane.close`, `pane.wait_for_output` |
+| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.clear`, `pane.close`, `pane.respawn`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio`, `layout.balance`, `layout.set_preset` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
@@ -378,6 +378,22 @@ empty:
 ```
 
 The response is `type: "ok"`. Unknown pane ids fail with `pane_not_found`.
+
+`pane.respawn` replaces the target pane's process without removing the pane.
+The pane keeps its pane id, terminal id, position, size, label, and todos; a
+pane launched with a command re-runs that command, and a plain shell pane gets
+a fresh shell. The pane's agent runtime identity is cleared so detection
+re-identifies whatever comes back:
+
+```json
+{"id":"req_respawn","method":"pane.respawn","params":{"pane_id":"w1:p1"}}
+```
+
+The response is `type: "ok"`. A pane that still holds live work — a running
+child process or outstanding todos — fails the first request with
+`confirmation_required` and is left untouched; repeating the request confirms
+and respawns, the same confirmation the keybinding applies. Unknown pane ids
+fail with `pane_not_found`.
 
 The CLI wrapper for `notification.show` is:
 

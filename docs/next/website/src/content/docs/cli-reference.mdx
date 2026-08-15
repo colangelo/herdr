@@ -207,7 +207,16 @@ herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--n
 herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]
 herdr pane clear [<pane_id>|--pane ID|--current]
 herdr pane close <pane_id>
+herdr pane respawn <pane_id>
 ```
+
+`pane respawn` restarts a pane's process in place. The pane keeps its ID,
+position, size, label, and todos; only the process is replaced. A pane launched
+with a command re-runs that command, and a plain shell pane gets a fresh shell.
+When the pane still holds live work — a running child process or outstanding
+todos — the first request returns `confirmation_required` and changes nothing;
+repeating it confirms and respawns. Use it to recover a wedged agent or dev
+server without losing the pane's place in the layout.
 
 For pane commands that accept `--current`, Herdr uses the calling pane's
 `HERDR_PANE_ID` when the command runs inside a Herdr pane. For `pane split`,
