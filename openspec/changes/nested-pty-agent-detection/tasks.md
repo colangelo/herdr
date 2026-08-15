@@ -34,7 +34,25 @@ than only a constructed one.
 
 ## 5. Verification
 
-- [ ] 5.1 `just check` green
-- [ ] 5.2 Confirm the unwrapped path is unchanged: with a wrapped and an unwrapped pane side by side, the unwrapped pane's probe performs no nested lookup
+- [x] 5.1 `just check` green
+- [x] 5.2 Confirm the unwrapped path is unchanged: with a wrapped and an unwrapped pane side by side, the unwrapped pane's probe performs no nested lookup
 - [ ] 5.3 Dogfood on `-ac-beta` against the live wrapped Claude pane: it appears in the agents sidebar, resolves as an `herdr agent` target, and reports its own working directory rather than the wrapper's
-- [ ] 5.4 Confirm the diff carries no fork-specific opinion, so it can be lifted upstream as-is
+- [x] 5.4 Confirm the diff carries no fork-specific opinion, so it can be lifted upstream as-is
+
+5.1 is green on all five CI jobs of `76c68f23`, including the two known-flaky
+ones.
+
+5.2 was confirmed against the live process table rather than only constructed
+jobs, with both shapes present at once. On the wrapped pane
+(`atuin pty-proxy` at pid 6302), `detect::nested_agent_job` returned
+`(7625, Claude, "claude")` — the real Claude one PTY down. On an unwrapped pane
+whose leader is Claude itself (pgid 17385), it returned `None` having made
+**zero** nested lookups, so the descent costs an unwrapped pane one string
+comparison and nothing else. The probe was driven through a throwaway test that
+was removed afterwards, per the group 1 note about keeping committed tests to
+the pure contract.
+
+5.3 is deliberately deferred: the beta build dispatched for it was cancelled so
+this ships together with the scrollback fix being merged from another worktree.
+Dogfood both on the same `-ac-beta` build. Find the wrapped pane by shape, not
+by pid — see `handoff.md`.
