@@ -17,8 +17,11 @@ group 2 the gate, group 3 the surfaces that call it.
 ## 2. The confirmation gate
 
 - [ ] 2.1 Add `confirm_respawn_pane: Option<PaneId>` (`src/app/state.rs`),
-      mutually exclusive with `confirm_close_pane`, and assert pane liveness for
-      it in `assert_invariants_for_test`
+      mutually exclusive with `confirm_close_pane`, and clear it in the same
+      per-pane cleanup that clears `confirm_close_pane` (`state.rs:2081`).
+      Note: `confirm_close_pane` is deliberately NOT in
+      `assert_invariants_for_test` — it relies on that cleanup — so follow the
+      cleanup pattern rather than adding a lone assertion for the new token
 - [ ] 2.2 `confirm_pane_respawn(ws_idx, pane_id)` (`src/app/actions.rs`)
       mirroring `confirm_pane_close_with_todos`: consume a pending token,
       otherwise prompt when `child_pid().is_some()` or outstanding todos exist
