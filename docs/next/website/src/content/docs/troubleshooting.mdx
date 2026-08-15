@@ -76,6 +76,18 @@ The server outlives the connection that started it: it runs in the background, k
 
 Herdr no longer passes the three into panes. `SSH_AUTH_SOCK` is left alone, so forwarded agents stay usable. A pane that is already running keeps the environment it started with, because a running process's environment cannot be changed from outside: open a new pane, or run `unset SSH_CLIENT SSH_CONNECTION SSH_TTY` in the existing shell.
 
+## An agent pane is missing from the agents sidebar
+
+Herdr identifies the agent in a pane by reading the foreground job of that pane's own PTY. A shell wrapper that allocates a PTY of its own defeats that: the pane's PTY carries only the wrapper, and the agent runs one PTY down where the scan cannot reach. The pane then looks like a plain shell that happens to be printing an agent's interface — absent from the agents sidebar and from `agent.list`, unresolvable by `herdr agent read`, `send`, `wait`, and `explain`, and reporting the wrapper's working directory rather than its own.
+
+[Atuin](https://atuin.sh)'s `pty-proxy` is the wrapper this happens with in practice. It ships in Atuin v18.13, its init snippet enables it by default, and it wraps every interactive shell so it can read OSC 133 marks and capture each command's output. Check for it with:
+
+```bash
+ps -eo pid,tty,command | grep "atuin pty-proxy"
+```
+
+Herdr looks behind an explicit set of wrapper process names, currently `atuin` alone, and identifies the agent from the PTY the wrapper owns. Everything the pane reports — the agent, its process name, and its working directory — then comes from that job. A wrapper not in the set is left alone, so the pane reports no agent rather than the wrong one. If you use a PTY wrapper Herdr does not recognise, open an issue naming its process name.
+
 ## The `herdr` command is not found
 
 Restart the terminal so it reloads its environment, then confirm the Herdr install directory is on `PATH`. Package-manager installs must be updated and exposed through that package manager. See [Install Herdr](/docs/install/#verify).
