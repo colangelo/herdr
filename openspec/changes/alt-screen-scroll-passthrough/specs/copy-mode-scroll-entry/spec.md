@@ -64,14 +64,23 @@ copy-mode entry.
 When a copy-mode scroll entry action fires on a pane whose terminal is in the
 alternate screen, Herdr SHALL enter a scroll passthrough mode pinned to that
 pane. On entry, the page and half-page actions SHALL forward one `PageUp` key
-to the pane's application; the line action SHALL enter without forwarding a
-key.
+to the pane's application; the line action SHALL forward one wheel-up tick as
+specified below.
 
 While the mode is active, Herdr SHALL forward scroll intents to the pinned
 pane's application: `Ctrl-U` and `PageUp` SHALL send `PageUp`; `Ctrl-D` and
 `PageDown` SHALL send `PageDown`; `g` and `Home` SHALL send `Home`; `Shift-G`
 and `End` SHALL send `End`. Forwarded keys SHALL be encoded through the pane's
 terminal input state (the same encoding a physical key press would receive).
+
+For line-granular scrolling, `Ctrl-K`, `k`, and `Up` SHALL send one wheel-up
+tick, and `Ctrl-J`, `j`, and `Down` one wheel-down tick. A wheel tick SHALL be
+encoded exactly as a physical wheel event over the pane would be: a mouse
+report at the pane's centre when the application captures the mouse,
+alternate-scroll arrow keys when the pane is in alternate-scroll mode
+(DECSET 1007), and dropped without effect when the pane supports neither.
+Arrow keys SHALL NOT be forwarded as key presses.
+
 `Esc`, `q`, and `Enter` SHALL exit the mode back to terminal input without
 forwarding anything. The prefix chord SHALL enter prefix mode, as it does from
 copy mode. All other keys SHALL be swallowed without reaching the application.
@@ -99,6 +108,26 @@ panes, entering ordinary copy mode over the visible screen.
   and then `Ctrl-D`
 - **THEN** the application receives `PageUp`, `PageUp`, then `PageDown`
 - **AND** the mode remains active throughout
+
+#### Scenario: Line keys scroll a mouse-capturing application
+
+- **WHEN** the passthrough mode is active on a pane whose application captures
+  the mouse and the user presses `Ctrl-K` and then `Ctrl-J`
+- **THEN** the application receives a wheel-up and then a wheel-down mouse
+  report positioned inside the pane
+
+#### Scenario: Line keys respect alternate-scroll mode
+
+- **WHEN** the passthrough mode is active on a pane in alternate-scroll mode
+  (DECSET 1007) without mouse capture and the user presses `Ctrl-K`
+- **THEN** the application receives the alternate-scroll arrow encoding for one
+  wheel-up tick
+
+#### Scenario: Line keys drop where no wheel path exists
+
+- **WHEN** the passthrough mode is active on a pane with mouse capture off and
+  alternate-scroll disabled and the user presses `Ctrl-K`
+- **THEN** the application receives nothing and the mode remains active
 
 #### Scenario: Exit returns keys to the application
 

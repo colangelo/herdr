@@ -53,21 +53,32 @@ is "this key goes to the application", so it encodes and sends, nothing else.
 
 ## Decision 3: key vocabulary is the pager vocabulary, nothing more
 
-| In the mode        | Sent to the application |
-| ------------------ | ----------------------- |
-| `ctrl+u`, `PgUp`   | `PageUp`                |
-| `ctrl+d`, `PgDn`   | `PageDown`              |
-| `g`, `Home`        | `Home`                  |
-| `shift+g`, `End`   | `End`                   |
-| `Esc`, `q`, `Enter`| nothing — exit the mode |
-| prefix chord       | nothing — enter prefix mode (as copy mode does) |
-| anything else      | nothing — swallowed (as copy mode does) |
+| In the mode           | Sent to the application |
+| --------------------- | ----------------------- |
+| `ctrl+u`, `PgUp`      | `PageUp`                |
+| `ctrl+d`, `PgDn`      | `PageDown`              |
+| `ctrl+k`, `k`, `Up`   | one wheel-up tick       |
+| `ctrl+j`, `j`, `Down` | one wheel-down tick     |
+| `g`, `Home`           | `Home`                  |
+| `shift+g`, `End`      | `End`                   |
+| `Esc`, `q`, `Enter`   | nothing — exit the mode |
+| prefix chord          | nothing — enter prefix mode (as copy mode does) |
+| anything else         | nothing — swallowed (as copy mode does) |
 
 Entry gestures map the same way: the page and half-page gestures send one
 `PageUp` on entry ("half" vs "full" has no distinct terminal key; Claude Code
-pages by half-screens on `PgUp` anyway), the line gesture enters without
-sending (no universal line-scroll key exists that is safe — arrow keys are
-prompt history in shell-like TUIs).
+pages by half-screens on `PgUp` anyway), the line gesture sends one wheel-up
+tick.
+
+Line granularity cannot ride on a key: no universal line-scroll key exists,
+and forwarding arrow key presses would type into prompt history in shell-like
+TUIs. Instead a wheel tick is synthesized and encoded exactly as herdr already
+encodes a physical wheel event over that pane (`wheel_routing()`): a mouse
+report at the pane's centre for mouse-capturing applications (Claude Code
+scrolls a few lines per tick), `encode_alternate_scroll` arrows under
+DECSET 1007 (which ghostty-vt defaults on for alt-screen apps), and dropped
+when neither path exists. The arrow keys are safe to bind here because they
+map to wheel ticks, never to forwarded arrow presses.
 
 Key-release events are ignored on entry to the handler, mirroring
 `handle_copy_mode_key`; synthesized keys are press events.

@@ -60,6 +60,19 @@ presentation and docs.
       click that refocuses another pane is caught by the focus-mismatch exit
       on the next key; wheel events keep their per-pane routing untouched
 
+## 2b. Line-granular scrolling (added after live dogfood feedback)
+
+- [x] 2b.1 Extend the pending queue to `AppScrollSend { Key, WheelUp,
+      WheelDown }` (`src/app/state.rs`); map `ctrl+k`/`k`/`Up` and
+      `ctrl+j`/`j`/`Down` to wheel ticks, and the line entry gesture to one
+      wheel-up tick
+- [x] 2b.2 Drain encodes a tick per the pane's wheel routing: mouse report at
+      the pane's centre (`pane_mouse_position` widened to `pub(super)`),
+      alternate-scroll arrows under DECSET 1007, dropped otherwise
+- [x] 2b.3 Tests: wheel reports on a mouse-capturing pane (SGR 64/65), arrows
+      under 1007, dropped with 1007 explicitly disabled (it defaults on in
+      ghostty-vt), line entry sends one tick where supported
+
 ## 3. Presentation and docs
 
 - [x] 3.1 Indicator on the focused pane while the mode is active, naming the
