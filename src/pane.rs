@@ -139,9 +139,23 @@ impl PaneLaunchEnv {
 /// and tool that branches on ssh. Absent is more accurate than stale.
 const STALE_SSH_CONNECTION_ENV_VARS: [&str; 3] = ["SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"];
 
+/// Atuin's PTY proxy marks the shell it wrapped, so a shell that re-runs its rc
+/// inside the proxy does not wrap itself again.
+///
+/// Same staleness as the ssh vars above: the value describes a proxy between
+/// some *other* shell and its terminal, not one between this pane's shell and
+/// this pane's PTY. A pane that inherits it skips wrapping, and Atuin's OSC 133
+/// output capture silently stops working there — the failure reports nothing,
+/// it just never records. Clearing them lets each pane's shell decide for
+/// itself, which is what Atuin already does per tmux pane.
+const STALE_PTY_PROXY_ENV_VARS: [&str; 2] = ["ATUIN_PTY_PROXY_ACTIVE", "ATUIN_PTY_PROXY_TMUX"];
+
 fn apply_pane_launch_env(cmd: &mut CommandBuilder, launch_env: &PaneLaunchEnv) {
     cmd.env_remove("CODEX_THREAD_ID");
     for var in STALE_SSH_CONNECTION_ENV_VARS {
+        cmd.env_remove(var);
+    }
+    for var in STALE_PTY_PROXY_ENV_VARS {
         cmd.env_remove(var);
     }
     for (key, value) in &launch_env.extra {
@@ -3179,6 +3193,25 @@ mod tests {
             cmd.get_env("SSH_AUTH_SOCK"),
             Some(std::ffi::OsStr::new("/tmp/agent.sock")),
             "agent forwarding stays usable in panes"
+        );
+    }
+
+    #[test]
+    fn pane_launch_env_removes_stale_pty_proxy_vars() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env("ATUIN_PTY_PROXY_ACTIVE", "1");
+        cmd.env("ATUIN_PTY_PROXY_TMUX", "");
+        cmd.env("ATUIN_SESSION", "019ffa9d6d347ca1bbe547421eef391f");
+
+        apply_pane_launch_env(&mut cmd, &PaneLaunchEnv::default());
+
+        for var in STALE_PTY_PROXY_ENV_VARS {
+            assert!(cmd.get_env(var).is_none(), "{var} should not reach panes");
+        }
+        assert_eq!(
+            cmd.get_env("ATUIN_SESSION"),
+            Some(std::ffi::OsStr::new("019ffa9d6d347ca1bbe547421eef391f")),
+            "only the proxy's own re-entry marks are stale, not the rest of atuin"
         );
     }
 
