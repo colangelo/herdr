@@ -824,6 +824,12 @@
           "description": "Close the focused pane."
         },
         {
+          "key": "keys.respawn_pane",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+x\"",
+          "description": "Restart the focused pane's process in place."
+        },
+        {
           "key": "keys.break_pane",
           "type": "keybinding",
           "default": "\"prefix+!\"",

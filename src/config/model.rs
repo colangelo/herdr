@@ -639,6 +639,8 @@ pub struct KeysConfig {
     pub split_horizontal: BindingConfig,
     /// Close the focused pane. Default: "prefix+x"
     pub close_pane: BindingConfig,
+    /// Restart the focused pane's process in place. Default: "prefix+ctrl+x"
+    pub respawn_pane: BindingConfig,
     /// Toggle zoom for the focused pane. Default: "prefix+z"
     #[serde(alias = "fullscreen")]
     pub zoom: BindingConfig,
@@ -796,6 +798,8 @@ pub(crate) struct KeysConfigOverlay {
     split_horizontal: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     close_pane: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    respawn_pane: Option<BindingConfig>,
     #[serde(alias = "fullscreen", skip_serializing_if = "Option::is_none")]
     zoom: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -899,6 +903,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(split_vertical);
         apply_field!(split_horizontal);
         apply_field!(close_pane);
+        apply_field!(respawn_pane);
         apply_field!(zoom);
         apply_field!(resize_mode);
         apply_field!(resize_pane_left);
@@ -1016,6 +1021,7 @@ impl KeysConfig {
         copy_effective_action_field!(split_vertical, keybinds.split_vertical);
         copy_effective_action_field!(split_horizontal, keybinds.split_horizontal);
         copy_effective_action_field!(close_pane, keybinds.close_pane);
+        copy_effective_action_field!(respawn_pane, keybinds.respawn_pane);
         copy_effective_action_field!(zoom, keybinds.zoom);
         copy_effective_action_field!(resize_mode, keybinds.resize_mode);
         copy_effective_action_field!(resize_pane_left, keybinds.resize_pane_left);
@@ -1449,6 +1455,7 @@ impl Default for KeysConfig {
             split_vertical: BindingConfig::one("prefix+v"),
             split_horizontal: BindingConfig::one("prefix+minus"),
             close_pane: BindingConfig::one("prefix+x"),
+            respawn_pane: BindingConfig::one("prefix+ctrl+x"),
             zoom: BindingConfig::one("prefix+z"),
             resize_mode: BindingConfig::one("prefix+r"),
             resize_pane_left: BindingConfig::empty(),
