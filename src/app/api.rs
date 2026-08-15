@@ -245,6 +245,13 @@ impl App {
             if self.runtime_exit_action(*pane_id) == RuntimeExitAction::RespawnShell
                 && self.respawn_pane_runtime(*pane_id, RespawnTarget::Shell)
             {
+                // The agent-exit path refocuses so the user lands on the shell
+                // that replaced the agent. Deliberately here and not in the
+                // primitive: a scripted respawn of a background pane must not
+                // pull the UI to another workspace.
+                if let Some((ws_idx, _)) = self.find_pane(*pane_id) {
+                    self.state.focus_pane_in_workspace(ws_idx, *pane_id);
+                }
                 self.overlay_panes.remove(pane_id);
                 self.render_dirty.request_generic();
                 self.render_notify.notify_one();
@@ -593,7 +600,16 @@ impl App {
             return false;
         };
 
-        let cwd = terminal.cwd.clone();
+        // The pane's *current* directory, not the one it was launched in. A
+        // respawn restarts where the pane actually is, and `terminal.cwd` only
+        // tracks that when the shell reports it (OSC 7), so a pane that has
+        // been `cd`-ed in an unintegrated shell would otherwise come back in
+        // the wrong directory. Falls back to the recorded cwd.
+        let cwd = self
+            .terminal_runtimes
+            .get(&terminal_id)
+            .and_then(|runtime| runtime.cwd())
+            .unwrap_or_else(|| terminal.cwd.clone());
         // `None` for a plain shell pane, which is exactly the fallback
         // condition - no extra bookkeeping needed to tell the two apart.
         let launch_argv = match target {
@@ -613,7 +629,7 @@ impl App {
                 pane_id,
                 rows,
                 cols,
-                cwd,
+                cwd.clone(),
                 argv,
                 &launch_env,
                 crate::pane::AgentDetection::Enabled,
@@ -628,7 +644,7 @@ impl App {
                 pane_id,
                 rows,
                 cols,
-                cwd,
+                cwd.clone(),
                 self.state.pane_scrollback_limit_bytes,
                 self.state.host_terminal_theme,
                 self.state.host_terminal_appearance,
@@ -664,6 +680,9 @@ impl App {
             replaced.shutdown();
         }
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+            // The pane is genuinely rooted here now, so the recorded cwd
+            // follows it rather than persisting the launch directory.
+            terminal.cwd = cwd;
             terminal.clear_agent_runtime_identity_after_respawn();
             // The clear drops `launch_argv` because the agent-exit path leaves a
             // shell behind. Here the command is what came back, so put it
@@ -673,7 +692,6 @@ impl App {
                 terminal.launch_argv = Some(argv);
             }
         }
-        self.state.focus_pane_in_workspace(ws_idx, pane_id);
         self.schedule_session_save();
         true
     }
@@ -2531,6 +2549,101 @@ mod tests {
             .expect("terminal should survive the respawn");
         assert!(terminal.agent_name.is_none());
         assert!(terminal.persisted_agent_session.is_none());
+
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn respawn_restarts_in_the_pane_s_current_directory() {
+        let (mut app, pane_id, terminal_id) = app_with_single_pane_workspace();
+        let moved_to = std::env::temp_dir()
+            .join(format!("herdr-respawn-cwd-{}", std::process::id()))
+            .join("deeper");
+        std::fs::create_dir_all(&moved_to).expect("test directory should be creatable");
+        let moved_to =
+            std::fs::canonicalize(&moved_to).expect("test directory should canonicalize");
+        let marker = moved_to.join("pwd");
+
+        // A shell that has been `cd`-ed away from its launch directory without
+        // reporting it, which is what leaves `terminal.cwd` stale.
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.cwd = std::path::PathBuf::from("/");
+        terminal.launch_argv = Some(vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!(
+                "cd {}; pwd > {}; sleep 30",
+                moved_to.display(),
+                marker.display()
+            ),
+        ]);
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !marker.exists() {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(marker.exists(), "the first respawn should have started");
+
+        // The second respawn must land in the directory the pane is in now,
+        // not the stale launch directory.
+        let _ = std::fs::remove_file(&marker);
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        terminal.launch_argv = Some(vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!("pwd > {}; sleep 30", marker.display()),
+        ]);
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !marker.exists() {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let reported = std::fs::read_to_string(&marker).unwrap_or_default();
+        assert_eq!(
+            reported.trim(),
+            moved_to.to_string_lossy(),
+            "the respawn must restart where the pane actually is"
+        );
+        assert_eq!(
+            app.state
+                .terminals
+                .get(&terminal_id)
+                .map(|terminal| terminal.cwd.clone()),
+            Some(moved_to.clone()),
+            "the recorded cwd follows the pane rather than staying stale"
+        );
+
+        shutdown_test_runtimes(&mut app);
+        let _ = std::fs::remove_dir_all(moved_to.parent().unwrap_or(&moved_to));
+    }
+
+    #[tokio::test]
+    async fn respawn_does_not_pull_focus_to_the_pane_s_workspace() {
+        let (mut app, pane_id, _) = app_with_single_pane_workspace();
+        app.state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("elsewhere"));
+        app.state.active = Some(1);
+        app.state.selected = 1;
+
+        assert!(app.respawn_pane_runtime(pane_id, RespawnTarget::LaunchArgv));
+
+        assert_eq!(
+            app.state.active,
+            Some(1),
+            "a scripted respawn of a background pane must not move the UI"
+        );
 
         shutdown_test_runtimes(&mut app);
     }
