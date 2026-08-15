@@ -213,6 +213,58 @@ pub fn identify_agent(process_name: &str) -> Option<Agent> {
     parse_agent_label(process_name)
 }
 
+/// Process names of PTY wrappers identification will look behind.
+///
+/// A wrapper here replaces the pane's shell with itself and re-runs that shell
+/// inside a PTY it allocates, so the pane's own PTY carries only the wrapper
+/// and any agent runs one level down, out of reach of the foreground scan.
+///
+/// - `atuin`: `atuin pty-proxy`, shipped in Atuin v18.13 and enabled by its
+///   init snippet, wraps every interactive shell it initialises so it can read
+///   OSC 133 marks and capture each command's output.
+///
+/// Matching on the bare process name is deliberately loose: a name that matches
+/// something other than the wrapper costs one bounded lookup that finds no
+/// nested PTY and yields nothing, which is the same answer as not matching.
+const NESTED_PTY_WRAPPER_NAMES: [&str; 1] = ["atuin"];
+
+fn is_nested_pty_wrapper(process: &crate::platform::ForegroundProcess) -> bool {
+    let name = normalized_agent_lookup_name(path_basename(
+        process.argv0.as_deref().unwrap_or(&process.name),
+    ));
+    NESTED_PTY_WRAPPER_NAMES.contains(&name.as_str())
+}
+
+/// The process group leader of `job` when it is a recognised PTY wrapper.
+///
+/// Only the leader qualifies: it is the process the pane's PTY handed control
+/// to, so it is the only member that can own a nested PTY on the pane's behalf.
+/// A non-leader member matching the set is a wrapper some other process
+/// started, and following it would be the guesswork the set exists to avoid.
+fn nested_pty_wrapper_leader(job: &crate::platform::ForegroundJob) -> Option<u32> {
+    let leader = job
+        .processes
+        .iter()
+        .find(|process| process.pid == job.process_group_id)?;
+    is_nested_pty_wrapper(leader).then_some(leader.pid)
+}
+
+/// Identify an agent in the PTY a recognised wrapper owns, one level below
+/// `job`, and return that nested job alongside it.
+///
+/// Yields `None` when `job`'s leader is not a recognised wrapper, when it owns
+/// no nested PTY, or when nothing in that PTY is recognisable. The descent is
+/// one level by construction: this never recurses.
+pub fn nested_agent_job(
+    job: &crate::platform::ForegroundJob,
+    nested_foreground_job: impl FnOnce(u32) -> Option<crate::platform::ForegroundJob>,
+) -> Option<(crate::platform::ForegroundJob, Agent, String)> {
+    let wrapper = nested_pty_wrapper_leader(job)?;
+    let nested = nested_foreground_job(wrapper)?;
+    let (agent, process_name) = identify_agent_in_job(&nested)?;
+    Some((nested, agent, process_name))
+}
+
 pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Agent, String)> {
     if let Some(process) = job
         .processes
