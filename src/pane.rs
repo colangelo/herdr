@@ -4069,6 +4069,25 @@ mod tests {
     }
 
     #[test]
+    fn a_wrapped_pane_is_not_re_probed_on_every_tick() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "claude")],
+        };
+
+        // What `tcgetpgrp` reports on the pane's own PTY. The nested group
+        // never appears there, so reporting it as the probed group would look
+        // like a foreground change on the very next tick and re-probe forever.
+        let observed = Some(42);
+        let result = wrapped_pane_probe("atuin", Some(nested), &lookups);
+        let tracked = process_group_for_change_tracking(observed, result.process_group_id);
+
+        assert_eq!(tracked, observed);
+        assert!(!foreground_group_changed(observed, tracked));
+    }
+
+    #[test]
     fn unrecognized_wrapper_does_not_descend() {
         let lookups = std::cell::Cell::new(0);
         let nested = crate::platform::ForegroundJob {
