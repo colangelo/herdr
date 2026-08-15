@@ -36,7 +36,7 @@ than only a constructed one.
 
 - [x] 5.1 `just check` green
 - [x] 5.2 Confirm the unwrapped path is unchanged: with a wrapped and an unwrapped pane side by side, the unwrapped pane's probe performs no nested lookup
-- [ ] 5.3 Dogfood on `-ac-beta` against the live wrapped Claude pane: it appears in the agents sidebar, resolves as an `herdr agent` target, and reports its own working directory rather than the wrapper's
+- [x] 5.3 Dogfood on `-ac-beta` against the live wrapped Claude pane: it appears in the agents sidebar, resolves as an `herdr agent` target, and reports its own working directory rather than the wrapper's
 - [x] 5.4 Confirm the diff carries no fork-specific opinion, so it can be lifted upstream as-is
 
 5.1 is green on all five CI jobs of `76c68f23`, including the two known-flaky
@@ -52,7 +52,26 @@ comparison and nothing else. The probe was driven through a throwaway test that
 was removed afterwards, per the group 1 note about keeping committed tests to
 the pure contract.
 
-5.3 is deliberately deferred: the beta build dispatched for it was cancelled so
-this ships together with the scrollback fix being merged from another worktree.
-Dogfood both on the same `-ac-beta` build. Find the wrapped pane by shape, not
-by pid — see `handoff.md`.
+5.3 ran on `0.8.0-ac-beta.59-conceicao`, the combined build that also carries
+the alt-screen scroll passthrough work, against the same live wrapped pane the
+report was filed from — `wG:p1`, an `atuin pty-proxy` on ttys005 with `zsh` and
+Claude on ttys006. All three checks pass:
+
+- It appears in `agent list` as `claude`, `agent_status: working`, having been
+  absent entirely before.
+- It resolves as an `herdr agent` target: `agent get`, `agent read` and
+  `agent explain` all answer for it. `agent explain` previously failed with
+  `agent_not_found`, so it is a direct before/after.
+- `foreground_cwd` is `/Users/ac/_sync/dev/_mcp/protonmail-imap`, the agent's
+  own directory, where the wrapper sits in `/Users/ac/_sync/dev/direction`.
+
+One field is knowingly left reading the wrapper: `PaneInfo.cwd`, which is the
+pane *shell's* directory rather than a foreground-job fact, and reaches the API
+through `PaneRuntime::cwd()` — OSC 7 if the shell reported one, else the pane
+child's cwd. Atuin's proxy captures output but does not forward the inner
+shell's OSC 7, so the fallback lands on the wrapper. It is out of this change's
+scope by the same reasoning as the "Teaching Atuin about Herdr" non-goal, and
+the two fields are expected to differ anyway — an unwrapped pane running
+pyright shows the same split. Nothing user-facing depends on it here: the
+workspace label resolves to `protonmail-mcp`, and new panes inherit through
+`follow_cwd`, which does follow the identified job.
