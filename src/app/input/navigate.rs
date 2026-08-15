@@ -405,6 +405,11 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::RespawnPane => {
+                if !self.respawn_focused_pane_via_api_requires_confirmation() {
+                    leave_navigate_mode(&mut self.state);
+                }
+            }
             NavigateAction::EditScrollback => {}
             NavigateAction::CopyMode => self.state.enter_copy_mode(&self.terminal_runtimes),
             NavigateAction::CopyModePageUp => {
@@ -678,6 +683,19 @@ impl App {
             return false;
         };
         self.runtime_pane_close("tui.pane.close", pane_id);
+        self.state.mode == Mode::ConfirmClose
+    }
+
+    /// Reads the resulting mode to learn whether the gate raised a
+    /// confirmation, exactly as the close binding does.
+    pub(crate) fn respawn_focused_pane_via_api_requires_confirmation(&mut self) -> bool {
+        let Some((ws_idx, pane_id)) = self.focused_pane_target() else {
+            return false;
+        };
+        let Some(pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+            return false;
+        };
+        self.runtime_pane_respawn("tui.pane.respawn", pane_id);
         self.state.mode == Mode::ConfirmClose
     }
 
@@ -1922,6 +1940,7 @@ pub(crate) enum NavigateAction {
     SplitVertical,
     SplitHorizontal,
     ClosePane,
+    RespawnPane,
     EditScrollback,
     CopyMode,
     CopyModePageUp,
@@ -2096,6 +2115,7 @@ fn non_indexed_action_for_key(
         (&kb.split_vertical, NavigateAction::SplitVertical),
         (&kb.split_horizontal, NavigateAction::SplitHorizontal),
         (&kb.close_pane, NavigateAction::ClosePane),
+        (&kb.respawn_pane, NavigateAction::RespawnPane),
         (&kb.zoom, NavigateAction::Zoom),
         (&kb.resize_mode, NavigateAction::EnterResizeMode),
         (&kb.resize_pane_left, NavigateAction::ResizePaneLeft),
@@ -2378,6 +2398,9 @@ pub(super) fn execute_navigate_action_in_context(
                 leave_navigate_mode(state);
             }
         }
+        // Respawn replaces a PTY, which pure state has no view of, so the
+        // state-only twin has nothing to do. `App` owns the real dispatch.
+        NavigateAction::RespawnPane => leave_navigate_mode(state),
         NavigateAction::EditScrollback => {}
         NavigateAction::CopyMode => state.enter_copy_mode(terminal_runtimes),
         NavigateAction::CopyModePageUp => {
@@ -4790,6 +4813,56 @@ navigate_pane_down = "ctrl+j"
         assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.mode, Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn prefix_ctrl_x_is_bound_to_respawn_pane_by_default() {
+        let state = AppState::test_new();
+
+        let action = non_indexed_action_for_key(
+            &state,
+            &TerminalKey::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+            BindingDispatch::Prefix,
+        );
+
+        assert_eq!(action, Some(NavigateAction::RespawnPane));
+        assert_eq!(
+            non_indexed_action_for_key(
+                &state,
+                &TerminalKey::new(KeyCode::Char('x'), KeyModifiers::NONE),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::ClosePane),
+            "respawn sits one modifier from close, and must not shadow it"
+        );
+    }
+
+    #[tokio::test]
+    async fn tui_respawn_pane_with_outstanding_todos_opens_confirmation_via_api() {
+        let mut app = app_with_test_workspaces(&["main"]);
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Navigate;
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "unfinished",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+
+        app.execute_tui_navigate_action(NavigateAction::RespawnPane, ActionContext::Navigate);
+
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.confirm_respawn_pane, Some(pane_id));
     }
 
     #[test]

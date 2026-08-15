@@ -153,6 +153,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
         help_entry(keybind_label(&kb.split_vertical), "split vertical"),
         help_entry(keybind_label(&kb.split_horizontal), "split horizontal"),
         help_entry(keybind_label(&kb.close_pane), "close pane"),
+        help_entry(keybind_label(&kb.respawn_pane), "respawn pane"),
         help_entry(keybind_label(&kb.rename_pane), "rename pane"),
         help_entry(keybind_label(&kb.break_pane), "break pane to new tab"),
         help_entry(
@@ -499,5 +500,22 @@ mod tests {
         assert_eq!(filtered[0].1[0].1, "close pane");
 
         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+    }
+
+    /// A shortcut that works but is absent from `prefix+?` is incomplete work.
+    #[test]
+    fn respawn_pane_is_discoverable_in_the_help_panel() {
+        let state = crate::app::state::AppState::test_new();
+
+        let entry = keybind_help_groups(&state)
+            .into_iter()
+            .find(|(group, _)| *group == "panes")
+            .expect("the panes group should exist")
+            .1
+            .into_iter()
+            .find(|(_, label)| label == "respawn pane")
+            .expect("respawn pane should appear in the help panel");
+
+        assert_eq!(entry.0, "prefix+ctrl+x");
     }
 }

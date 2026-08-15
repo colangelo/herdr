@@ -236,6 +236,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # split_vertical = "prefix+v"
 # split_horizontal = "prefix+minus"
 # close_pane = "prefix+x"
+# respawn_pane = "prefix+ctrl+x"   # restart the focused pane's process in place
 # zoom = "prefix+z"       # legacy alias: fullscreen
 # resize_mode = "prefix+r"
 # resize_pane_left = ""   # optional, e.g. "ctrl+shift+alt+left" resizes without entering resize mode
