@@ -311,6 +311,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn held_key_repeats_scroll_the_application() {
+        // The regression this guards: Mode::AppScroll had no
+        // TerminalInputContext, so plan_repeat saw a None context and dropped
+        // every KeyEventKind::Repeat — a held ctrl+u scrolled exactly once.
+        let (mut app, pane_id, mut rx) = app_with_alt_screen_pane();
+        prefix_gesture(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL).await;
+        drain(&mut rx);
+
+        for kind in [
+            KeyEventKind::Press,
+            KeyEventKind::Repeat,
+            KeyEventKind::Repeat,
+        ] {
+            app.handle_raw_input_event(crate::raw_input::RawInputEvent::Key(
+                TerminalKey::new(KeyCode::Char('u'), KeyModifiers::CONTROL).with_kind(kind),
+            ))
+            .await;
+        }
+
+        let page_up = encoded(&app, pane_id, KeyCode::PageUp);
+        let sent = drain(&mut rx);
+        assert_eq!(
+            sent.len(),
+            page_up.len() * 3,
+            "expected three PageUp sends (press + two repeats), got {sent:?}"
+        );
+        assert_eq!(app.state.mode, Mode::AppScroll);
+    }
+
+    #[tokio::test]
     async fn passthrough_repeats_and_pages_both_ways() {
         let (mut app, pane_id, mut rx) = app_with_alt_screen_pane();
         prefix_gesture(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL).await;

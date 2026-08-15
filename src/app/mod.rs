@@ -220,6 +220,10 @@ pub(crate) enum TerminalInputContext {
     /// viewport/cursor motions; leaving copy mode changes the context and
     /// stops the repeats (same transition guard as `Pane`/`Popup`).
     Copy,
+    /// The alt-screen scroll passthrough mode holds its own stable
+    /// non-terminal context for the same reason, and a distinct one from
+    /// `Copy` so a transition between the two modes still stops the repeats.
+    AppScroll,
 }
 
 impl TerminalInputContext {
@@ -1847,6 +1851,8 @@ impl App {
             Some(TerminalInputContext::Pane)
         } else if self.state.mode == Mode::Copy {
             Some(TerminalInputContext::Copy)
+        } else if self.state.mode == Mode::AppScroll {
+            Some(TerminalInputContext::AppScroll)
         } else {
             None
         }
@@ -4459,6 +4465,36 @@ mod tests {
             ))
             .await;
         assert!(repeat_handled);
+    }
+
+    #[tokio::test]
+    async fn app_scroll_mode_has_its_own_repeat_context() {
+        // Key repeat is gated on terminal_input_context(): a None context makes
+        // plan_repeat drop every Repeat event. The passthrough mode exists for
+        // held scroll motions, so it must yield a context — and a distinct one
+        // from Copy, so moving between the two modes still stops the repeats.
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+
+        app.state.mode = Mode::AppScroll;
+        let app_scroll = app.terminal_input_context();
+        assert_eq!(app_scroll, Some(TerminalInputContext::AppScroll));
+
+        app.state.mode = Mode::Copy;
+        assert_eq!(
+            app.terminal_input_context(),
+            Some(TerminalInputContext::Copy)
+        );
+        assert_ne!(app_scroll, app.terminal_input_context());
+
+        // It stays on the app-level key path, not the pane-forwarding one.
+        assert!(!TerminalInputContext::AppScroll.routes_to_terminal());
+
+        // Prefix mode still yields no context, so modal keys cannot repeat.
+        app.state.mode = Mode::Prefix;
+        assert_eq!(app.terminal_input_context(), None);
     }
 
     #[tokio::test]
