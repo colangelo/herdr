@@ -575,6 +575,12 @@ fn sync_content_change_acquisition(
 #[derive(Debug, Clone)]
 struct ProcessProbeResult {
     process_group_id: Option<u32>,
+    /// The process group the agent was identified in, when that was a PTY
+    /// below the pane's own. `None` for every pane that identified normally,
+    /// which is what keeps the reported facts of an unwrapped pane unchanged.
+    /// Unix-only: no Windows wrapper presents a nested PTY to descend into.
+    #[cfg(unix)]
+    nested_process_group_id: Option<u32>,
     foreground_is_pane_shell: bool,
     agent: Option<Agent>,
     process_name: Option<String>,
@@ -620,7 +626,39 @@ fn process_probe_result(
 ) -> ProcessProbeResult {
     ProcessProbeResult {
         process_group_id: Some(job.process_group_id),
+        #[cfg(unix)]
+        nested_process_group_id: None,
         foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
+        agent: Some(agent),
+        process_name: Some(process_name),
+    }
+}
+
+/// Result for an agent identified behind a recognised PTY wrapper.
+///
+/// The agent, its process name and — through `foreground_is_pane_shell` — which
+/// process holds the foreground come from `nested_job`, the job the agent was
+/// actually identified in, and `nested_process_group_id` carries that job on so
+/// the working directory the pane reports follows it too.
+///
+/// The tracked process group stays the pane's own: the nested group never
+/// appears on the pane's PTY, so tracking it would read as a foreground change
+/// on every tick and re-probe the pane continuously.
+fn nested_process_probe_result(
+    job: &crate::platform::ForegroundJob,
+    nested_job: &crate::platform::ForegroundJob,
+    pid: u32,
+    agent: Agent,
+    process_name: String,
+) -> ProcessProbeResult {
+    ProcessProbeResult {
+        process_group_id: Some(job.process_group_id),
+        #[cfg(unix)]
+        nested_process_group_id: Some(nested_job.process_group_id),
+        foreground_is_pane_shell: nested_job
+            .processes
+            .iter()
+            .any(|process| process.pid == pid),
         agent: Some(agent),
         process_name: Some(process_name),
     }
@@ -645,6 +683,7 @@ fn probe_foreground_process_from_jobs(
     foreground_pgid: Option<u32>,
     leader_job: Option<crate::platform::ForegroundJob>,
     foreground_job: impl FnOnce() -> Option<crate::platform::ForegroundJob>,
+    nested_foreground_job: impl FnOnce(u32) -> Option<crate::platform::ForegroundJob>,
     read_hint: impl Fn(u32) -> Option<Agent> + Copy,
 ) -> ProcessProbeResult {
     if let Some(job) = leader_job.as_ref() {
@@ -679,8 +718,19 @@ fn probe_foreground_process_from_jobs(
         }
 
         let identified = crate::detect::identify_agent_in_job(job);
+        if identified.is_none() {
+            // Only now, with the pane's own job exhausted, is it worth asking
+            // whether a recognised wrapper is hiding the agent one PTY down.
+            if let Some((nested_job, agent, process_name)) =
+                crate::detect::nested_agent_job(job, nested_foreground_job)
+            {
+                return nested_process_probe_result(job, &nested_job, pid, agent, process_name);
+            }
+        }
         return ProcessProbeResult {
             process_group_id: Some(job.process_group_id),
+            #[cfg(unix)]
+            nested_process_group_id: None,
             foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
             agent: identified.as_ref().map(|(agent, _)| *agent),
             process_name: identified.map(|(_, process_name)| process_name),
@@ -689,6 +739,8 @@ fn probe_foreground_process_from_jobs(
 
     ProcessProbeResult {
         process_group_id: foreground_pgid,
+        #[cfg(unix)]
+        nested_process_group_id: None,
         foreground_is_pane_shell: false,
         agent: None,
         process_name: None,
@@ -701,14 +753,28 @@ fn probe_foreground_process(pid: u32, foreground_pgid: Option<u32>) -> ProcessPr
         foreground_pgid,
         foreground_pgid.and_then(crate::detect::foreground_group_leader_job),
         || crate::detect::foreground_job(pid),
+        crate::platform::nested_foreground_job,
         crate::platform::process_agent_hint,
     )
+}
+
+/// Publish the process group an agent was identified in below the pane's own
+/// PTY, so the working directory the pane reports follows that job instead of
+/// the wrapper's. Zero means the pane identified from its own foreground job,
+/// or identified nothing.
+#[cfg(unix)]
+fn publish_nested_agent_process_group(cell: &AtomicU32, probe: &ProcessProbeResult) {
+    cell.store(
+        probe.nested_process_group_id.unwrap_or(0),
+        Ordering::Relaxed,
+    );
 }
 
 #[cfg(unix)]
 fn spawn_basic_detection_task(
     pane_id: PaneId,
     child_pid: Arc<AtomicU32>,
+    nested_agent_process_group_id: Arc<AtomicU32>,
     terminal: Arc<PaneTerminal>,
     detection_content_seq: Arc<AtomicU64>,
     full_lifecycle_authority_active: Arc<AtomicBool>,
@@ -822,6 +888,7 @@ fn spawn_basic_detection_task(
                 let had_process_probe = has_process_probe;
                 has_process_probe = true;
                 let probe = probe_foreground_process(pid, foreground_pgid);
+                publish_nested_agent_process_group(&nested_agent_process_group_id, &probe);
                 let process_group_id = probe.process_group_id;
                 let tracked_process_group_id =
                     process_group_for_change_tracking(foreground_pgid, process_group_id);
@@ -1082,6 +1149,11 @@ pub struct PaneRuntime {
     io: PaneRuntimeIo,
     current_size: Cell<(u16, u16, u32, u32)>,
     child_pid: Arc<AtomicU32>,
+    /// Process group an agent was identified in one PTY below this pane's own,
+    /// published by the detection task. Zero when the pane identified normally.
+    /// Unix-only: no Windows wrapper presents a nested PTY to descend into.
+    #[cfg(unix)]
+    nested_agent_process_group_id: Arc<AtomicU32>,
     reported_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
     child_wait_completed: Option<Arc<AtomicBool>>,
     kitty_keyboard_flags: Arc<AtomicU16>,
@@ -1963,6 +2035,7 @@ impl PaneRuntime {
         }
         let terminal = Arc::new(PaneTerminal::new(pane_terminal));
         let child_pid = Arc::new(AtomicU32::new(child_pid));
+        let nested_agent_process_group_id = Arc::new(AtomicU32::new(0));
         let reported_cwd = Arc::new(Mutex::new(None));
         let kitty_keyboard_flags = Arc::new(AtomicU16::new(keyboard_protocol_flags));
         let content_seq = Arc::new(AtomicU64::new(0));
@@ -2038,6 +2111,7 @@ impl PaneRuntime {
         let (detect_handle, detect_reset_notify, pending_release) = spawn_basic_detection_task(
             pane_id,
             child_pid.clone(),
+            nested_agent_process_group_id.clone(),
             terminal.clone(),
             detection_content_seq.clone(),
             full_lifecycle_authority_active.clone(),
@@ -2051,6 +2125,7 @@ impl PaneRuntime {
             io,
             current_size: Cell::new((rows, cols, cell_width_px, cell_height_px)),
             child_pid,
+            nested_agent_process_group_id,
             reported_cwd,
             child_wait_completed: None,
             kitty_keyboard_flags,
@@ -2108,6 +2183,8 @@ impl PaneRuntime {
 
         // --- Child watcher task ---
         let child_pid = Arc::new(AtomicU32::new(0));
+        #[cfg(unix)]
+        let nested_agent_process_group_id = Arc::new(AtomicU32::new(0));
         let reported_cwd = Arc::new(Mutex::new(None));
         let child_wait_completed = Arc::new(AtomicBool::new(false));
         let content_seq = Arc::new(AtomicU64::new(0));
@@ -2216,6 +2293,8 @@ impl PaneRuntime {
             const TICK_PENDING_RELEASE: Duration = Duration::from_millis(50);
 
             let child_pid = child_pid.clone();
+            #[cfg(unix)]
+            let nested_agent_process_group_id_for_task = nested_agent_process_group_id.clone();
             let terminal = terminal.clone();
             let state_events = events.clone();
             let detection_content_seq = detection_content_seq.clone();
@@ -2361,6 +2440,11 @@ impl PaneRuntime {
                         has_process_probe = true;
                         if pid > 0 {
                             let probe = probe_foreground_process(pid, foreground_pgid);
+                            #[cfg(unix)]
+                            publish_nested_agent_process_group(
+                                &nested_agent_process_group_id_for_task,
+                                &probe,
+                            );
                             let process_name = probe.process_name;
                             let process_group_id = probe.process_group_id;
                             let tracked_process_group_id = process_group_for_change_tracking(
@@ -2602,6 +2686,8 @@ impl PaneRuntime {
             io,
             current_size: Cell::new((rows, cols, 0, 0)),
             child_pid,
+            #[cfg(unix)]
+            nested_agent_process_group_id,
             reported_cwd,
             child_wait_completed: Some(child_wait_completed),
             kitty_keyboard_flags,
@@ -3034,12 +3120,26 @@ impl PaneRuntime {
         (pid > 0).then_some(pid)
     }
 
+    /// The foreground process group whose facts this pane reports.
+    ///
+    /// Its own, unless the detection probe identified an agent one PTY below —
+    /// behind a recognised wrapper — in which case the group that agent was
+    /// identified in. Reading the wrapper's group instead would have the pane
+    /// advertise a directory its session has never been in.
+    #[cfg(unix)]
+    fn reported_foreground_process_group_id(&self) -> Option<u32> {
+        let nested = self.nested_agent_process_group_id.load(Ordering::Relaxed);
+        if nested > 0 {
+            return Some(nested);
+        }
+        self.io.foreground_process_group_id()
+    }
+
     pub fn follow_cwd(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]
         {
             let leader_cwd = self
-                .io
-                .foreground_process_group_id()
+                .reported_foreground_process_group_id()
                 .and_then(usable_process_cwd);
             leader_cwd.or_else(|| self.cwd())
         }
@@ -3057,8 +3157,7 @@ impl PaneRuntime {
             let pid = self.child_pid.load(Ordering::Acquire);
             let shell_cwd = absolute_process_cwd(pid);
             let foreground_pgid = self
-                .io
-                .foreground_process_group_id()
+                .reported_foreground_process_group_id()
                 .or_else(|| crate::platform::foreground_process_group_id(pid));
             let leader_cwd = foreground_pgid.and_then(absolute_process_cwd);
 
@@ -3136,6 +3235,9 @@ impl PaneRuntime {
                 },
                 current_size: Cell::new((rows, cols, 0, 0)),
                 child_pid: Arc::new(AtomicU32::new(0)),
+                #[cfg(unix)]
+                #[cfg(unix)]
+                nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
                 reported_cwd: Arc::new(Mutex::new(None)),
                 child_wait_completed: None,
                 kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
@@ -3294,6 +3396,51 @@ mod tests {
         *runtime.reported_cwd.lock().unwrap() = Some(cwd.clone());
 
         assert_eq!(runtime.follow_cwd(), Some(cwd));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wrapped_pane_reports_the_working_directory_of_the_identified_job() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let nested_cwd = std::env::temp_dir().join(format!(
+            "herdr-nested-agent-cwd-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&nested_cwd).expect("create nested agent cwd");
+        let expected_cwd = nested_cwd
+            .canonicalize()
+            .expect("canonical nested agent cwd");
+        let mut agent = std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 30"])
+            .current_dir(&nested_cwd)
+            .spawn()
+            .expect("spawn stand-in agent in the nested cwd");
+
+        // The wrapper's own directory, which the pane reported before the
+        // descent existed.
+        let (runtime, _rx) = PaneRuntime::test_with_channel(80, 24);
+        let wrapper_cwd = std::env::temp_dir();
+        *runtime.reported_cwd.lock().unwrap() = Some(wrapper_cwd.clone());
+
+        let unwrapped = runtime.follow_cwd();
+        runtime
+            .nested_agent_process_group_id
+            .store(agent.id(), Ordering::Relaxed);
+        let wrapped = runtime.follow_cwd();
+
+        let _ = agent.kill();
+        let _ = agent.wait();
+        let _ = std::fs::remove_dir(&nested_cwd);
+
+        assert_eq!(
+            unwrapped,
+            Some(wrapper_cwd),
+            "a pane with no nested identification reports its own facts"
+        );
+        assert_eq!(wrapped, Some(expected_cwd));
     }
 
     #[test]
@@ -3744,6 +3891,8 @@ mod tests {
             },
             current_size: Cell::new((80, 24, 0, 0)),
             child_pid: Arc::new(AtomicU32::new(0)),
+            #[cfg(unix)]
+            nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
@@ -3776,6 +3925,8 @@ mod tests {
             },
             current_size: Cell::new((80, 24, 0, 0)),
             child_pid: Arc::new(AtomicU32::new(0)),
+            #[cfg(unix)]
+            nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
@@ -3851,6 +4002,11 @@ mod tests {
         );
     }
 
+    /// Nested lookup for a pane that is not behind a PTY wrapper.
+    fn no_nested_job(_pid: u32) -> Option<crate::platform::ForegroundJob> {
+        None
+    }
+
     fn foreground_process(pid: u32, name: &str) -> crate::platform::ForegroundProcess {
         crate::platform::ForegroundProcess {
             pid,
@@ -3906,6 +4062,7 @@ mod tests {
             Some(99),
             Some(job),
             || None,
+            no_nested_job,
             |pid| (pid == 99).then_some(Agent::Claude),
         );
 
@@ -3925,6 +4082,7 @@ mod tests {
             Some(99),
             None,
             || Some(job),
+            no_nested_job,
             |pid| (pid == 99).then_some(Agent::Claude),
         );
 
@@ -3947,6 +4105,7 @@ mod tests {
             Some(99),
             None,
             || Some(job),
+            no_nested_job,
             |pid| (pid == 100).then_some(Agent::Claude),
         );
 
@@ -3969,11 +4128,193 @@ mod tests {
             Some(99),
             None,
             || Some(job),
+            no_nested_job,
             |pid| (pid == 100).then_some(Agent::Claude),
         );
 
         assert_eq!(result.agent, Some(Agent::Claude));
         assert_eq!(result.process_name.as_deref(), Some("claude"));
+    }
+
+    /// A pane whose PTY carries only `leader_name`, with `nested` one PTY down.
+    fn wrapped_pane_probe(
+        leader_name: &str,
+        nested: Option<crate::platform::ForegroundJob>,
+        nested_lookups: &std::cell::Cell<u32>,
+    ) -> ProcessProbeResult {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![foreground_process(42, leader_name)],
+        };
+
+        probe_foreground_process_from_jobs(
+            42,
+            Some(42),
+            None,
+            || Some(job),
+            |pid| {
+                nested_lookups.set(nested_lookups.get() + 1);
+                assert_eq!(pid, 42, "the descent starts from the process group leader");
+                nested
+            },
+            |_| None,
+        )
+    }
+
+    #[test]
+    fn recognized_wrapper_identifies_the_agent_in_the_pty_it_owns() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "claude")],
+        };
+
+        let result = wrapped_pane_probe("atuin", Some(nested), &lookups);
+
+        assert_eq!(result.agent, Some(Agent::Claude));
+        assert_eq!(result.process_name.as_deref(), Some("claude"));
+        assert_eq!(lookups.get(), 1);
+        // The pane's own group stays the tracked one; the nested group never
+        // appears on the pane's PTY.
+        assert_eq!(result.process_group_id, Some(42));
+        assert!(!result.foreground_is_pane_shell);
+    }
+
+    #[test]
+    fn unrecognized_wrapper_does_not_descend() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "claude")],
+        };
+
+        let result = wrapped_pane_probe("script", Some(nested), &lookups);
+
+        assert_eq!(result.agent, None);
+        assert_eq!(lookups.get(), 0);
+    }
+
+    #[test]
+    fn recognized_wrapper_with_nothing_behind_it_reports_no_agent() {
+        let lookups = std::cell::Cell::new(0);
+
+        let result = wrapped_pane_probe("atuin", None, &lookups);
+
+        assert_eq!(result.agent, None);
+        assert_eq!(result.process_name, None);
+        assert_eq!(result.process_group_id, Some(42));
+        assert_eq!(lookups.get(), 1);
+    }
+
+    #[test]
+    fn recognized_wrapper_hiding_no_agent_reports_no_agent() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "zsh")],
+        };
+
+        let result = wrapped_pane_probe("atuin", Some(nested), &lookups);
+
+        assert_eq!(result.agent, None);
+        assert_eq!(lookups.get(), 1);
+    }
+
+    #[test]
+    fn agent_in_the_pane_own_job_wins_and_skips_the_nested_lookup() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "codex")],
+        };
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 42,
+            processes: vec![
+                foreground_process(42, "atuin"),
+                foreground_process(43, "claude"),
+            ],
+        };
+
+        let result = probe_foreground_process_from_jobs(
+            42,
+            Some(42),
+            None,
+            || Some(job),
+            |_| {
+                lookups.set(lookups.get() + 1);
+                Some(nested)
+            },
+            |_| None,
+        );
+
+        assert_eq!(result.agent, Some(Agent::Claude));
+        assert_eq!(lookups.get(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapped_pane_reports_the_nested_job_as_its_foreground_group() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "claude")],
+        };
+
+        let result = wrapped_pane_probe("atuin", Some(nested), &lookups);
+
+        // The cwd surfaces read this group, so a wrapped pane stops reporting
+        // the wrapper's directory.
+        assert_eq!(result.nested_process_group_id, Some(200));
+        assert_eq!(result.process_name.as_deref(), Some("claude"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pane_without_nested_identification_reports_only_its_own_job() {
+        let lookups = std::cell::Cell::new(0);
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process(99, "codex")],
+        };
+
+        let identified = probe_foreground_process_from_jobs(
+            42,
+            Some(99),
+            None,
+            || Some(job),
+            no_nested_job,
+            |_| None,
+        );
+        let unidentified = wrapped_pane_probe("atuin", None, &lookups);
+
+        assert_eq!(identified.nested_process_group_id, None);
+        assert_eq!(identified.process_group_id, Some(99));
+        assert_eq!(unidentified.nested_process_group_id, None);
+        assert_eq!(unidentified.process_group_id, Some(42));
+    }
+
+    #[test]
+    fn unwrapped_pane_performs_no_nested_lookup() {
+        let lookups = std::cell::Cell::new(0);
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 99,
+            processes: vec![foreground_process(99, "vim")],
+        };
+
+        let result = probe_foreground_process_from_jobs(
+            42,
+            Some(99),
+            None,
+            || Some(job),
+            |_| {
+                lookups.set(lookups.get() + 1);
+                None
+            },
+            |_| None,
+        );
+
+        assert_eq!(result.agent, None);
+        assert_eq!(lookups.get(), 0);
     }
 
     fn process_probe_input() -> ProcessProbeInput {
