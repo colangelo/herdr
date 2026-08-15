@@ -1085,6 +1085,24 @@ mod tests {
     }
 
     #[test]
+    fn proc_stat_parsing_reads_the_controlling_terminal() {
+        // "pid (comm) state ppid pgrp session tty_nr tpgid ...", with a comm
+        // that contains both a space and a close paren.
+        assert_eq!(
+            controlling_terminal_from_stat("123 (name with ) paren) S 1 456 789 34816 456"),
+            Some(34816)
+        );
+    }
+
+    #[test]
+    fn proc_stat_parsing_reports_no_controlling_terminal_as_none() {
+        assert_eq!(
+            controlling_terminal_from_stat("123 (daemon) S 1 456 789 0 -1"),
+            None
+        );
+    }
+
+    #[test]
     fn clipboard_commands_prefer_wayland_when_available() {
         let _guard = env_lock().lock().unwrap();
         unsafe {
