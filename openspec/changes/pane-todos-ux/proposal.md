@@ -55,8 +55,11 @@ save.
 
 ## Impact
 
-- Affected specs: `pane-todos` (three requirements modified: indicator, links,
-  panel and editing).
+- Affected specs: `pane-todos` — links and panel-and-editing modified; the
+  conditional `Pane todo indicator` requirement removed and replaced by
+  `Always-on pane todo indicator`, because making the affordance unconditional
+  inverts its "a quiet pane draws no indicator" scenario rather than refining
+  it.
 - Affected code: `src/ui/panes.rs` (indicator states), `src/ui/todo_panel.rs`
   (add affordance, empty-state footer), `src/app/input/modal.rs` (panel add key,
   link control opens the picker), `src/app/state.rs` (navigator selection
