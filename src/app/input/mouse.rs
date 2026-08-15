@@ -1895,7 +1895,7 @@ impl AppState {
         self.tab_bar_position == crate::config::TabBarPositionConfig::Bottom
             && matches!(
                 self.mode,
-                Mode::Navigate | Mode::Prefix | Mode::Copy | Mode::Resize
+                Mode::Navigate | Mode::Prefix | Mode::Copy | Mode::AppScroll | Mode::Resize
             )
             && self.on_tab_bar(col, row)
     }

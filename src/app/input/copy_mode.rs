@@ -87,7 +87,9 @@ impl AppState {
     /// then scroll up by the requested amount. If copy mode is already active on the focused pane,
     /// only scroll — re-entering would clobber the entry scroll anchor (`entry_offset_from_bottom`)
     /// and the cursor. Stale copy mode on another pane is cancelled first (restoring that pane's
-    /// scroll) before entering fresh on the focused pane.
+    /// scroll) before entering fresh on the focused pane. A pane whose application owns the
+    /// alternate screen has no scrollback to enter, so fresh entry diverts to the app-scroll
+    /// passthrough mode instead (see `try_enter_app_scroll_mode`).
     pub(crate) fn enter_copy_mode_scrolled(
         &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
@@ -96,6 +98,9 @@ impl AppState {
         if !(self.copy_mode.is_some() && self.copy_mode_pane_is_focused()) {
             if self.copy_mode.is_some() {
                 self.cancel_copy_mode(terminal_runtimes);
+            }
+            if self.try_enter_app_scroll_mode(terminal_runtimes, scroll) {
+                return;
             }
             self.enter_copy_mode(terminal_runtimes);
             if self.copy_mode.is_none() {
