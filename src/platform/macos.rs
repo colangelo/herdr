@@ -20,7 +20,9 @@ pub(crate) use super::unix_common::{
     StatusCommandGuard,
 };
 
+// `proc_listpids` selectors from <sys/proc_info.h>.
 const PROC_PGRP_ONLY: u32 = 2;
+const PROC_PPID_ONLY: u32 = 6;
 const SERVER_NOFILE_LIMIT_TARGET: libc::rlim_t = 8192;
 
 pub(crate) fn should_draw_host_cursor_by_default() -> bool {
@@ -328,7 +330,42 @@ pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJo
     })
 }
 
+/// The foreground job of the PTY this process owns, or `None` when it owns no
+/// PTY of its own.
+pub fn nested_foreground_job(pid: u32) -> Option<ForegroundJob> {
+    if pid == 0 {
+        return None;
+    }
+
+    let parent_terminal = controlling_terminal(pid)?;
+    super::nested_foreground_job_from_children(
+        parent_terminal,
+        child_pids(pid)
+            .into_iter()
+            .map(|child| (child, controlling_terminal(child))),
+        foreground_job,
+    )
+}
+
+/// Device id of a process's controlling terminal, or `None` when it has none.
+///
+/// The kernel reports "no controlling terminal" as `NODEV`, i.e. `(dev_t)-1`.
+fn controlling_terminal(pid: u32) -> Option<u64> {
+    let terminal = process_bsdinfo(pid)?.e_tdev;
+    (terminal != u32::MAX).then_some(u64::from(terminal))
+}
+
 fn process_group_pids(process_group_id: u32) -> Vec<u32> {
+    listed_pids(PROC_PGRP_ONLY, process_group_id)
+}
+
+fn child_pids(parent_pid: u32) -> Vec<u32> {
+    listed_pids(PROC_PPID_ONLY, parent_pid)
+}
+
+/// Run `proc_listpids` for one selector, growing the buffer until the kernel
+/// stops filling it completely.
+fn listed_pids(selector: u32, value: u32) -> Vec<u32> {
     let mut capacity = 16usize;
 
     for _ in 0..8 {
@@ -336,8 +373,8 @@ fn process_group_pids(process_group_id: u32) -> Vec<u32> {
         let buffer_bytes = pids.len() * std::mem::size_of::<libc::pid_t>();
         let returned_bytes = unsafe {
             libc::proc_listpids(
-                PROC_PGRP_ONLY,
-                process_group_id,
+                selector,
+                value,
                 pids.as_mut_ptr() as *mut libc::c_void,
                 buffer_bytes as libc::c_int,
             )
