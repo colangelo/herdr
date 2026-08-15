@@ -858,6 +858,7 @@ pub(super) fn confirm_close_accept(state: &mut AppState) {
 pub(super) fn confirm_close_cancel(state: &mut AppState) {
     state.confirm_close_workspace_id = None;
     state.confirm_close_pane = None;
+    state.confirm_respawn_pane = None;
     state.mode = Mode::Navigate;
 }
 
@@ -1535,6 +1536,25 @@ impl App {
     }
 
     pub(super) fn confirm_close_accept_via_api(&mut self) {
+        // Respawn first, and mutually exclusive with the close token, so the
+        // prompt on screen is always the action that runs. The retry re-enters
+        // the respawn gate, which consumes the token and proceeds.
+        if let Some(pane_id) = self.state.confirm_respawn_pane {
+            let ws_idx = self.state.selected;
+            match self.public_pane_id(ws_idx, pane_id) {
+                Some(public_pane_id) => {
+                    self.runtime_pane_respawn("tui.pane.respawn", public_pane_id);
+                }
+                None => self.state.confirm_respawn_pane = None,
+            }
+            self.state.mode = if self.state.active.is_some() {
+                Mode::Terminal
+            } else {
+                Mode::Navigate
+            };
+            return;
+        }
+
         // A pending pane confirmation is what is on screen; the retry re-enters
         // close_pane, which consumes the token and proceeds. Without this branch
         // the modal would close the whole workspace.
@@ -4356,6 +4376,121 @@ mod tests {
         assert!(
             app.state.workspaces.is_empty(),
             "the last pane closing takes its workspace with it"
+        );
+    }
+
+    fn respawn_pane_via_api(app: &mut App, pane_id: crate::layout::PaneId) -> serde_json::Value {
+        let public_pane_id = app
+            .public_pane_id(0, pane_id)
+            .expect("pane should have a public id");
+        let raw = app.handle_api_request(crate::api::schema::Request {
+            id: "test".into(),
+            method: crate::api::schema::Method::PaneRespawn(crate::api::schema::PaneTarget {
+                pane_id: public_pane_id,
+            }),
+        });
+        serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    #[test]
+    fn respawning_a_pane_with_outstanding_todos_asks_first() {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        let response = respawn_pane_via_api(&mut app, pane_id);
+
+        assert_eq!(response["error"]["code"], "confirmation_required");
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.confirm_respawn_pane, Some(pane_id));
+        assert!(
+            app.terminal_runtimes.len() == 0,
+            "nothing is respawned before the answer"
+        );
+    }
+
+    #[tokio::test]
+    async fn accepting_the_confirmation_respawns_the_pane_in_place() {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        respawn_pane_via_api(&mut app, pane_id);
+
+        app.confirm_close_accept_via_api();
+
+        assert!(
+            app.state.confirm_respawn_pane.is_none(),
+            "the pending token is consumed, so the retry goes through"
+        );
+        assert!(
+            app.find_pane(pane_id).is_some(),
+            "the pane keeps its identity across a respawn"
+        );
+        assert_eq!(
+            app.state.workspaces[0].terminal_id(pane_id),
+            Some(&terminal_id),
+            "the pane keeps its terminal id across a respawn"
+        );
+        assert!(
+            app.terminal_runtimes.get(&terminal_id).is_some(),
+            "a replacement runtime is installed behind the same terminal id"
+        );
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
+    #[test]
+    fn cancelling_a_respawn_confirmation_leaves_the_process_alone() {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        respawn_pane_via_api(&mut app, pane_id);
+
+        confirm_close_cancel(&mut app.state);
+
+        assert!(app.state.confirm_respawn_pane.is_none());
+        assert!(app.find_pane(pane_id).is_some());
+        assert!(
+            app.terminal_runtimes.len() == 0,
+            "cancelling must not replace the pane's process"
+        );
+    }
+
+    #[test]
+    fn respawning_an_unknown_pane_is_an_error() {
+        let mut app = app_with_pane_todos(&[]);
+        app.state.close_pane_todos();
+
+        let raw = app.handle_api_request(crate::api::schema::Request {
+            id: "test".into(),
+            method: crate::api::schema::Method::PaneRespawn(crate::api::schema::PaneTarget {
+                pane_id: "nope-42".into(),
+            }),
+        });
+        let response: serde_json::Value =
+            serde_json::from_str(&raw).expect("response should be json");
+
+        assert!(response["error"].is_object(), "response: {response}");
+        assert!(
+            app.terminal_runtimes.len() == 0,
+            "an unknown pane id must not respawn another pane"
         );
     }
 

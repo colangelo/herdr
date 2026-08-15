@@ -117,6 +117,10 @@ impl App {
         self.dispatch_runtime_mutation(id, Method::PaneClose(PaneTarget { pane_id }))
     }
 
+    pub(crate) fn runtime_pane_respawn(&mut self, id: &'static str, pane_id: String) -> String {
+        self.dispatch_runtime_mutation(id, Method::PaneRespawn(PaneTarget { pane_id }))
+    }
+
     pub(crate) fn runtime_pane_rename(
         &mut self,
         id: &'static str,

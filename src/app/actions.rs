@@ -2207,7 +2207,41 @@ impl AppState {
             return false;
         }
         self.selected = ws_idx;
+        self.confirm_respawn_pane = None;
         self.confirm_close_pane = Some(pane_id);
+        self.mode = Mode::ConfirmClose;
+        true
+    }
+
+    /// Ask before replacing a pane's process when that would destroy live work.
+    /// Returns true when the respawn was deferred to the confirmation modal.
+    ///
+    /// Same token semantics as `confirm_pane_close_with_todos`: a pending
+    /// confirmation for this pane *is* the user's answer, so it is consumed
+    /// here and the retry the modal issues goes straight through. That is why
+    /// the respawn request needs no `force` parameter on the wire.
+    ///
+    /// `has_live_child` comes from the runtime rather than state, because
+    /// AppState has no view of PTYs. "Live work" is a running child process or
+    /// outstanding todos; a pane whose process already exited and which holds
+    /// no todos is the common recovery case, where a prompt would be pure
+    /// friction.
+    pub(crate) fn confirm_pane_respawn(
+        &mut self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        has_live_child: bool,
+    ) -> bool {
+        if self.confirm_respawn_pane == Some(pane_id) {
+            self.confirm_respawn_pane = None;
+            return false;
+        }
+        if !has_live_child && !self.pane_has_outstanding_todos(pane_id) {
+            return false;
+        }
+        self.selected = ws_idx;
+        self.confirm_close_pane = None;
+        self.confirm_respawn_pane = Some(pane_id);
         self.mode = Mode::ConfirmClose;
         true
     }
@@ -6417,5 +6451,99 @@ mod tests {
             !state.close_pane(),
             "answering yes consumes the token and the close proceeds"
         );
+    }
+
+    fn state_with_one_pane() -> (AppState, PaneId, crate::terminal::TerminalId) {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("respawn")];
+        state.active = Some(0);
+        state.selected = 0;
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        (state, pane_id, terminal_id)
+    }
+
+    fn add_outstanding_todo(state: &mut AppState, terminal_id: &crate::terminal::TerminalId) {
+        state
+            .terminals
+            .get_mut(terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "unfinished",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+    }
+
+    #[test]
+    fn respawn_prompts_while_a_child_process_is_alive() {
+        let (mut state, pane_id, _) = state_with_one_pane();
+
+        assert!(
+            state.confirm_pane_respawn(0, pane_id, true),
+            "a live child defers the respawn to confirmation"
+        );
+        assert_eq!(state.mode, Mode::ConfirmClose);
+        assert_eq!(state.confirm_respawn_pane, Some(pane_id));
+
+        assert!(
+            !state.confirm_pane_respawn(0, pane_id, true),
+            "answering yes consumes the token and the respawn proceeds"
+        );
+        assert_eq!(state.confirm_respawn_pane, None);
+    }
+
+    #[test]
+    fn respawn_does_not_prompt_when_the_process_exited_and_no_todos_remain() {
+        let (mut state, pane_id, _) = state_with_one_pane();
+
+        assert!(!state.confirm_pane_respawn(0, pane_id, false));
+        assert_eq!(state.confirm_respawn_pane, None);
+        assert_ne!(state.mode, Mode::ConfirmClose);
+    }
+
+    #[test]
+    fn respawn_prompts_for_outstanding_todos_even_after_the_process_exited() {
+        let (mut state, pane_id, terminal_id) = state_with_one_pane();
+        add_outstanding_todo(&mut state, &terminal_id);
+
+        assert!(state.confirm_pane_respawn(0, pane_id, false));
+        assert_eq!(state.confirm_respawn_pane, Some(pane_id));
+    }
+
+    #[test]
+    fn respawn_and_close_confirmation_tokens_are_mutually_exclusive() {
+        let (mut state, pane_id, terminal_id) = state_with_one_pane();
+        add_outstanding_todo(&mut state, &terminal_id);
+
+        assert!(state.confirm_pane_respawn(0, pane_id, true));
+        assert_eq!(state.confirm_respawn_pane, Some(pane_id));
+        assert_eq!(state.confirm_close_pane, None);
+
+        assert!(state.confirm_pane_close_with_todos(0, pane_id));
+        assert_eq!(state.confirm_close_pane, Some(pane_id));
+        assert_eq!(
+            state.confirm_respawn_pane, None,
+            "a close prompt must never be answerable into a respawn"
+        );
+
+        assert!(state.confirm_pane_respawn(0, pane_id, true));
+        assert_eq!(state.confirm_respawn_pane, Some(pane_id));
+        assert_eq!(state.confirm_close_pane, None);
+    }
+
+    #[test]
+    fn forgetting_a_pane_clears_its_pending_respawn_confirmation() {
+        let (mut state, pane_id, _) = state_with_one_pane();
+
+        assert!(state.confirm_pane_respawn(0, pane_id, true));
+        state.forget_pane_todo_ui(pane_id);
+
+        assert_eq!(state.confirm_respawn_pane, None);
     }
 }

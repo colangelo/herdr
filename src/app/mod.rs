@@ -158,6 +158,12 @@ pub struct App {
     pub(crate) render_dirty: Arc<crate::render_signal::RenderSignal>,
     pub(crate) full_redraw_pending: bool,
     pub(crate) overlay_panes: HashMap<crate::layout::PaneId, OverlayPaneState>,
+    /// Panes whose live runtime was deliberately replaced by a respawn. The
+    /// replaced process still reports its exit, and that `PaneDied` names only
+    /// the pane, so without this the exit-action path would close a pane that
+    /// is already running its replacement. Each entry absorbs exactly one
+    /// event, because a runtime reports its death exactly once.
+    pub(crate) respawn_replaced_runtimes: std::collections::HashSet<crate::layout::PaneId>,
     pub(crate) local_terminal_notifications: bool,
     /// Whether this process applies `AppEvent::PrefixInputSource` to the host input source.
     /// The headless server sets this to false: the switch belongs to the foreground client,
@@ -640,6 +646,7 @@ impl App {
             pending_workspace_create_cwd: None,
             rename_pane_target: None,
             confirm_close_pane: None,
+            confirm_respawn_pane: None,
             worktree_create: None,
             worktree_open: None,
             pane_move_target_picker: None,
@@ -961,6 +968,7 @@ impl App {
             render_dirty,
             full_redraw_pending: false,
             overlay_panes: HashMap::new(),
+            respawn_replaced_runtimes: std::collections::HashSet::new(),
             local_terminal_notifications: true,
             local_input_source_switch: true,
             config_reloaded_from_disk: false,

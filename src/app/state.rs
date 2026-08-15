@@ -1838,6 +1838,11 @@ pub struct AppState {
     /// has outstanding todos. Doubles as the "the user said yes" token: the
     /// close path consumes it.
     pub confirm_close_pane: Option<PaneId>,
+    /// Pane whose respawn is waiting on the confirmation modal because it would
+    /// kill live work. Same token semantics as `confirm_close_pane`, and
+    /// mutually exclusive with it so answering one prompt can never perform the
+    /// other action.
+    pub confirm_respawn_pane: Option<PaneId>,
     pub worktree_create: Option<WorktreeCreateState>,
     pub worktree_open: Option<WorktreeOpenState>,
     pub pane_move_target_picker: Option<PaneMoveTargetPickerState>,
@@ -2195,6 +2200,9 @@ impl AppState {
         }
         if self.confirm_close_pane == Some(pane_id) {
             self.confirm_close_pane = None;
+        }
+        if self.confirm_respawn_pane == Some(pane_id) {
+            self.confirm_respawn_pane = None;
         }
     }
 
@@ -2709,6 +2717,7 @@ impl AppState {
             pending_workspace_create_cwd: None,
             rename_pane_target: None,
             confirm_close_pane: None,
+            confirm_respawn_pane: None,
             worktree_create: None,
             worktree_open: None,
             pane_move_target_picker: None,
