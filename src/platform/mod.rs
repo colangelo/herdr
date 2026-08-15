@@ -253,6 +253,31 @@ pub(crate) fn available_pane_shell_from_job(child_pid: u32, job: ForegroundJob) 
         .filter(|name| is_pane_shell_process_name(name))
 }
 
+/// Pick the child that owns a nested PTY and resolve its foreground job.
+///
+/// This is the shared half of `nested_foreground_job`: "the foreground job of
+/// the PTY this process owns". A process that replaces the pane's shell and
+/// re-runs it inside a PTY of its own hides that shell's job from the pane's
+/// own foreground scan, and this reaches across that boundary.
+///
+/// `children` yields each child of the process paired with the device id of its
+/// controlling terminal, and `foreground_job` is the platform's ordinary
+/// foreground-job lookup. Only a child holding a controlling terminal of its
+/// own, different from the parent's, is followed: a child sharing the parent's
+/// terminal is an ordinary child rather than a nested PTY, and following it
+/// would make this a one-level process-tree walk instead.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn nested_foreground_job_from_children(
+    parent_terminal: u64,
+    children: impl IntoIterator<Item = (u32, Option<u64>)>,
+    mut foreground_job: impl FnMut(u32) -> Option<ForegroundJob>,
+) -> Option<ForegroundJob> {
+    children
+        .into_iter()
+        .filter(|(_, terminal)| terminal.is_some_and(|terminal| terminal != parent_terminal))
+        .find_map(|(pid, _)| foreground_job(pid))
+}
+
 fn normalized_process_name(name: &str) -> String {
     name.rsplit(['/', '\\'])
         .next()
@@ -506,6 +531,71 @@ mod tests {
         assert_eq!(
             interactive_shell_command(&argv, "pwsh").as_deref(),
             Some("pi '' 'two words' 'a''b' '$HOME' 'semi;colon' '@options'")
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn test_job(process_group_id: u32) -> ForegroundJob {
+        ForegroundJob {
+            process_group_id,
+            processes: vec![ForegroundProcess {
+                pid: process_group_id,
+                name: "claude".into(),
+                argv0: None,
+                argv: None,
+                cmdline: None,
+            }],
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn nested_lookup_follows_a_child_on_its_own_controlling_terminal() {
+        assert_eq!(
+            nested_foreground_job_from_children(5, [(200, Some(6))], |pid| Some(test_job(pid))),
+            Some(test_job(200))
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn nested_lookup_ignores_a_child_sharing_the_parent_controlling_terminal() {
+        assert_eq!(
+            nested_foreground_job_from_children(5, [(200, Some(5))], |pid| Some(test_job(pid))),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn nested_lookup_ignores_a_child_with_no_controlling_terminal() {
+        assert_eq!(
+            nested_foreground_job_from_children(5, [(200, None)], |pid| Some(test_job(pid))),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn nested_lookup_without_children_yields_nothing() {
+        assert_eq!(
+            nested_foreground_job_from_children(5, [], |pid| Some(test_job(pid))),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn nested_lookup_skips_ordinary_children_to_reach_the_nested_pty() {
+        // Order matters: the ordinary child comes first and must not shadow the
+        // nested one behind it.
+        assert_eq!(
+            nested_foreground_job_from_children(
+                5,
+                [(200, Some(5)), (300, None), (400, Some(6))],
+                |pid| Some(test_job(pid))
+            ),
+            Some(test_job(400))
         );
     }
 

@@ -146,6 +146,34 @@ pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
     foreground_job_for_group(child_pid, child_groups_foreground_process_group(child_pid)?)
 }
 
+/// The foreground job of the PTY this process owns, or `None` when it owns no
+/// PTY of its own.
+pub fn nested_foreground_job(pid: u32) -> Option<ForegroundJob> {
+    if pid == 0 {
+        return None;
+    }
+
+    let parent_terminal = controlling_terminal(pid)?;
+    let children = process_task_ids(pid)
+        .into_iter()
+        .flat_map(|tid| process_task_children(pid, tid))
+        .map(|child| (child, controlling_terminal(child)));
+    super::nested_foreground_job_from_children(parent_terminal, children, foreground_job)
+}
+
+/// Device id of a process's controlling terminal, or `None` when it has none.
+fn controlling_terminal(pid: u32) -> Option<u64> {
+    controlling_terminal_from_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+fn controlling_terminal_from_stat(stat: &str) -> Option<u64> {
+    // After (comm): state(0) ppid(1) pgrp(2) session(3) tty_nr(4). The kernel
+    // reports "no controlling terminal" as 0.
+    let rest = stat.get(stat.rfind(')')? + 2..)?;
+    let tty_nr: i32 = rest.split_whitespace().nth(4)?.parse().ok()?;
+    (tty_nr != 0).then_some(u64::from(tty_nr as u32))
+}
+
 fn foreground_job_for_group(child_pid: u32, process_group_id: u32) -> Option<ForegroundJob> {
     let members = foreground_process_group_members(child_pid, process_group_id)?;
     let processes = members

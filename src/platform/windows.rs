@@ -826,6 +826,17 @@ pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
     select_pane_foreground_job_from_snapshot(child_pid, &snapshot)
 }
 
+/// The foreground job of the PTY this process owns, or `None` when it owns no
+/// PTY of its own.
+///
+/// Always `None` here. ConPTY wrappers do not present this shape — there is no
+/// controlling terminal to differ from the parent's, and process detection
+/// already walks the pane's descendants — so a stub keeps the contract total
+/// rather than pretending to support a nested lookup.
+pub fn nested_foreground_job(_pid: u32) -> Option<ForegroundJob> {
+    None
+}
+
 pub(crate) fn available_pane_shell(child_pid: u32) -> Option<String> {
     available_pane_shell_from_snapshot(child_pid, &snapshot_processes())
 }
