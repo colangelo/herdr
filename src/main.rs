@@ -231,7 +231,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # copy_mode_line_up = "prefix+ctrl+k"       # enter copy mode + one line up; with a non-ctrl+b prefix
 #                                           # "prefix+ctrl+b" is also free (the default prefix shadows it via send-prefix)
 #                                           # On a fullscreen (alt-screen) app like vim, the scroll gestures
-#                                           # scroll the app itself instead: ctrl+u/d page, g/G top/bottom, esc exits
+#                                           # scroll the app itself instead: ctrl+u/d page, ctrl+k/j line,
+#                                           # g/G top/bottom, esc exits
 # focus_pane_left = "prefix+h"
 # focus_pane_down = "prefix+j"
 # focus_pane_up = "prefix+k"

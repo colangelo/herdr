@@ -397,19 +397,19 @@ impl App {
             NavigateAction::CopyModePageUp => {
                 self.state
                     .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Page);
-                self.dispatch_pending_app_scroll_keys();
+                self.dispatch_pending_app_scroll_sends();
             }
             NavigateAction::CopyModeHalfPageUp => {
                 self.state.enter_copy_mode_scrolled(
                     &self.terminal_runtimes,
                     CopyModeEntryScroll::HalfPage,
                 );
-                self.dispatch_pending_app_scroll_keys();
+                self.dispatch_pending_app_scroll_sends();
             }
             NavigateAction::CopyModeLineUp => {
                 self.state
                     .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Line);
-                self.dispatch_pending_app_scroll_keys();
+                self.dispatch_pending_app_scroll_sends();
             }
             NavigateAction::Zoom => {
                 self.zoom_focused_pane_via_api();

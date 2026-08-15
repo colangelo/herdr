@@ -2347,7 +2347,7 @@ impl AppState {
         }
     }
 
-    fn pane_mouse_position(
+    pub(super) fn pane_mouse_position(
         &self,
         runtime: &crate::terminal::TerminalRuntime,
         inner: Rect,

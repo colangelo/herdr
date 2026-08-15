@@ -1098,6 +1098,17 @@ pub(crate) struct AppScrollState {
     pub pane_id: PaneId,
 }
 
+/// One send the passthrough mode queued toward its application: a whole key,
+/// or a line-granular wheel tick. Line scrolling cannot forward a key — arrow
+/// keys mean prompt history in shell-like TUIs — so it synthesizes a wheel
+/// event instead, encoded per the pane's own mouse protocol at drain time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AppScrollSend {
+    Key(crate::input::TerminalKey),
+    WheelUp,
+    WheelDown,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CopyModeSelection {
     Character,
@@ -1815,10 +1826,10 @@ pub struct AppState {
     /// Set when UI interaction requested a clipboard write that must be
     /// handled by the outer App/event loop instead of directly from AppState.
     pub request_clipboard_write: Option<Vec<u8>>,
-    /// Keys queued by the alt-screen scroll passthrough mode; the App layer
+    /// Sends queued by the alt-screen scroll passthrough mode; the App layer
     /// encodes them against the pinned pane's terminal state and sends them,
     /// keeping the PTY effect out of AppState.
-    pub pending_app_scroll_keys: Vec<crate::input::TerminalKey>,
+    pub pending_app_scroll_sends: Vec<AppScrollSend>,
     pub creating_new_tab: bool,
     pub requested_new_tab_name: Option<String>,
     pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
@@ -2692,7 +2703,7 @@ impl AppState {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
-            pending_app_scroll_keys: Vec::new(),
+            pending_app_scroll_sends: Vec::new(),
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
