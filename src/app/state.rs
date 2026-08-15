@@ -806,6 +806,7 @@ pub enum Mode {
     Navigate,
     Prefix,
     Copy,
+    AppScroll,
     Terminal,
     RenameWorkspace,
     RenameTab,
@@ -979,6 +980,14 @@ pub(crate) struct CopyModeState {
     pub entry_offset_from_bottom: usize,
     pub selection: Option<CopyModeSelection>,
     pub search: CopyModeSearchState,
+}
+
+/// Alt-screen scroll passthrough: scroll keys are translated and forwarded to
+/// the pinned pane's application instead of moving Herdr's own viewport, which
+/// an alternate-screen application keeps empty of scrollback by definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AppScrollState {
+    pub pane_id: PaneId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1694,6 +1703,10 @@ pub struct AppState {
     /// Set when UI interaction requested a clipboard write that must be
     /// handled by the outer App/event loop instead of directly from AppState.
     pub request_clipboard_write: Option<Vec<u8>>,
+    /// Keys queued by the alt-screen scroll passthrough mode; the App layer
+    /// encodes them against the pinned pane's terminal state and sends them,
+    /// keeping the PTY effect out of AppState.
+    pub pending_app_scroll_keys: Vec<crate::input::TerminalKey>,
     pub creating_new_tab: bool,
     pub requested_new_tab_name: Option<String>,
     pub pending_workspace_create_cwd: Option<std::path::PathBuf>,
@@ -1716,6 +1729,7 @@ pub struct AppState {
     pub keybind_help: KeybindHelpState,
     pub navigator: NavigatorState,
     pub copy_mode: Option<CopyModeState>,
+    pub app_scroll: Option<AppScrollState>,
     pub workspace_scroll: usize,
     pub agent_panel_scroll: usize,
     /// Last workspace/agent identity the sidebar follow saw; a change
@@ -2543,6 +2557,7 @@ impl AppState {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
+            pending_app_scroll_keys: Vec::new(),
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
@@ -2562,6 +2577,7 @@ impl AppState {
             keybind_help: KeybindHelpState::default(),
             navigator: NavigatorState::default(),
             copy_mode: None,
+            app_scroll: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,
             sidebar_followed_workspace: None,

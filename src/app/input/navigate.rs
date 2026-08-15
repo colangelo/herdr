@@ -407,15 +407,23 @@ impl App {
             }
             NavigateAction::EditScrollback => {}
             NavigateAction::CopyMode => self.state.enter_copy_mode(&self.terminal_runtimes),
-            NavigateAction::CopyModePageUp => self
-                .state
-                .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Page),
-            NavigateAction::CopyModeHalfPageUp => self
-                .state
-                .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::HalfPage),
-            NavigateAction::CopyModeLineUp => self
-                .state
-                .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Line),
+            NavigateAction::CopyModePageUp => {
+                self.state
+                    .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Page);
+                self.dispatch_pending_app_scroll_keys();
+            }
+            NavigateAction::CopyModeHalfPageUp => {
+                self.state.enter_copy_mode_scrolled(
+                    &self.terminal_runtimes,
+                    CopyModeEntryScroll::HalfPage,
+                );
+                self.dispatch_pending_app_scroll_keys();
+            }
+            NavigateAction::CopyModeLineUp => {
+                self.state
+                    .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Line);
+                self.dispatch_pending_app_scroll_keys();
+            }
             NavigateAction::Zoom => {
                 self.zoom_focused_pane_via_api();
                 leave_navigate_mode(&mut self.state);

@@ -607,6 +607,7 @@ impl App {
             request_reload_config: false,
             request_client_config_reload: false,
             request_clipboard_write: None,
+            pending_app_scroll_keys: Vec::new(),
             creating_new_tab: false,
             requested_new_tab_name: None,
             pending_workspace_create_cwd: None,
@@ -635,6 +636,7 @@ impl App {
             keybind_help: state::KeybindHelpState::default(),
             navigator: state::NavigatorState::default(),
             copy_mode: None,
+            app_scroll: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,
             sidebar_followed_workspace: None,
@@ -2101,6 +2103,9 @@ impl App {
             }
             Mode::Copy => {
                 self.handle_copy_mode_key(key);
+            }
+            Mode::AppScroll => {
+                self.handle_app_scroll_key(key);
             }
             Mode::RenameWorkspace | Mode::RenameTab | Mode::RenamePane => {
                 self.handle_rename_key_via_api(key_event);

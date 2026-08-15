@@ -35,8 +35,9 @@ use self::dialogs::{
 };
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
-    render_context_menu, render_copy_mode_overlay, render_global_launcher_menu,
-    render_navigate_overlay, render_prefix_overlay, render_resize_overlay,
+    render_app_scroll_overlay, render_context_menu, render_copy_mode_overlay,
+    render_global_launcher_menu, render_navigate_overlay, render_prefix_overlay,
+    render_resize_overlay,
 };
 use self::mobile::{
     compute_mobile_header_hit_areas, is_mobile_width, mobile_switcher_max_scroll_for_height,
@@ -550,6 +551,7 @@ pub fn render_with_runtime_registry(
         Mode::Navigate => render_navigate_overlay(app, frame, mode_bar_area),
         Mode::Prefix => render_prefix_overlay(app, frame, mode_bar_area),
         Mode::Copy => render_copy_mode_overlay(app, frame, mode_bar_area),
+        Mode::AppScroll => render_app_scroll_overlay(app, frame, mode_bar_area),
         Mode::Resize => render_resize_overlay(app, frame, mode_bar_area),
         Mode::ConfirmClose => {
             render_confirm_close_overlay(app, terminal_runtimes, frame, terminal_area)
