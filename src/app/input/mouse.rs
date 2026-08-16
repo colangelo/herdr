@@ -7,7 +7,7 @@ use crate::{
     app::state::{
         AgentPanelSort, AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget,
         ListCursor, Mode, PaneTodoPanelButton, RightClickPassthroughGesture, TabPressState,
-        ViewLayout, WorkspacePressState,
+        TodoBoardButton, ViewLayout, WorkspacePressState,
     },
     layout::{PaneInfo, SplitBorder},
     selection::Selection,
@@ -20,7 +20,7 @@ use super::{
     modal::{
         apply_global_menu_action, confirm_close_cancel, global_menu_actions, leave_modal,
         modal_action_from_buttons, open_global_menu, open_new_tab_dialog, ModalAction,
-        PaneTodoAction,
+        PaneTodoAction, TodoBoardAction,
     },
     settings::SettingsAction,
     ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
@@ -48,6 +48,7 @@ pub(super) enum MouseAction {
     },
     ClearNotifications,
     PaneTodo(PaneTodoAction),
+    TodoBoard(TodoBoardAction),
     MoveWorkspace {
         source_ws_idx: usize,
         insert_idx: usize,
@@ -275,6 +276,77 @@ impl AppState {
                         None => {}
                     }
                     self.close_notification_center();
+                    leave_modal(self);
+                }
+                _ => {}
+            }
+            return None;
+        }
+        if self.mode == Mode::TodoBoard {
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    let over_button = self
+                        .todo_board_buttons()
+                        .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
+                    // Hover follows the pointer onto todos only: a heading is
+                    // drawn in the same list but is never a destination.
+                    let hovered_row = self.todo_board_row_at(mouse.column, mouse.row);
+                    if let Some(board) = self.todo_board_mut() {
+                        if let Some(idx) = hovered_row {
+                            board.select_todo(idx);
+                        }
+                        board.hovered_button = over_button;
+                    }
+                }
+                MouseEventKind::ScrollUp => self.move_todo_board_selection_by(-1),
+                MouseEventKind::ScrollDown => self.move_todo_board_selection_by(1),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(idx) = self.todo_board_row_at(mouse.column, mouse.row) {
+                        let on_chip = self.todo_board_link_chip_at(mouse.column, mouse.row);
+                        let selected = self
+                            .todo_board_mut()
+                            .is_some_and(|board| board.select_todo(idx));
+                        // A click on a heading selects nothing and does
+                        // nothing, rather than acting on whatever was selected
+                        // before.
+                        if !selected {
+                            return None;
+                        }
+                        // The row's own meaning here is its owner, so a click
+                        // travels there; the chip keeps meaning the link.
+                        return Some(MouseAction::TodoBoard(if on_chip {
+                            TodoBoardAction::FollowLink
+                        } else {
+                            TodoBoardAction::OpenOwner
+                        }));
+                    }
+                    use crate::ui::overlay::ButtonRowHit;
+                    match self
+                        .todo_board_buttons()
+                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
+                    {
+                        Some(ButtonRowHit::Button(TodoBoardButton::Open)) => {
+                            return Some(MouseAction::TodoBoard(TodoBoardAction::OpenOwner));
+                        }
+                        Some(ButtonRowHit::Button(TodoBoardButton::Toggle)) => {
+                            return Some(MouseAction::TodoBoard(TodoBoardAction::ToggleDone));
+                        }
+                        Some(ButtonRowHit::Button(TodoBoardButton::Go)) => {
+                            return Some(MouseAction::TodoBoard(TodoBoardAction::FollowLink));
+                        }
+                        Some(ButtonRowHit::Button(TodoBoardButton::ClearDone)) => {
+                            return Some(MouseAction::TodoBoard(TodoBoardAction::ClearDone));
+                        }
+                        Some(ButtonRowHit::Button(TodoBoardButton::Close)) => {
+                            self.close_todo_board();
+                            leave_modal(self);
+                            return None;
+                        }
+                        // A near-miss elsewhere on the buttons' row is inert.
+                        Some(ButtonRowHit::NearMiss) => return None,
+                        None => {}
+                    }
+                    self.close_todo_board();
                     leave_modal(self);
                 }
                 _ => {}
@@ -1803,6 +1875,82 @@ impl AppState {
         crate::ui::pane_todo_link_chip(
             Rect::new(list.x, row, list.width, 1),
             public_id.as_deref(),
+            &link.label,
+        )
+        .is_some_and(|(chip, _)| rect_contains(chip, col, row))
+    }
+
+    /// The board's geometry, or `None` unless it is open — so render and
+    /// hit-test go quiet together.
+    fn todo_board_geometry(&self) -> Option<crate::ui::TodoBoardGeometry> {
+        let board = self.todo_board()?;
+        crate::ui::todo_board_geometry(self.screen_rect(), board.items.len())
+    }
+
+    /// The footer button row. `go` is offered only while the selected todo's
+    /// link still resolves, exactly as on the pane panel: a dead link is inert,
+    /// and a button that does nothing is worse than no button.
+    pub(crate) fn todo_board_buttons(
+        &self,
+    ) -> Option<crate::ui::overlay::ButtonRow<crate::app::state::TodoBoardButton>> {
+        let board = self.todo_board()?;
+        let has_todos = board
+            .items
+            .iter()
+            .any(|item| matches!(item, crate::app::state::TodoBoardItem::Todo { .. }));
+        let has_live_link = self
+            .selected_todo_board_todo()
+            .is_some_and(|todo| self.pane_todo_link_target(&todo).is_some());
+        crate::ui::overlay::ButtonRow::layout(
+            self.todo_board_geometry()?.footer_row,
+            &crate::ui::todo_board_button_specs(has_todos, has_live_link),
+        )
+    }
+
+    /// List rows the open board can show, for revealing the selection.
+    pub(crate) fn todo_board_visible_rows(&self) -> usize {
+        self.todo_board_geometry()
+            .map(|geometry| geometry.list.height as usize)
+            .unwrap_or(0)
+    }
+
+    /// The board's list rect and the first visible index, shared by render and
+    /// hit-testing so they agree on which row is where.
+    pub(crate) fn todo_board_list_window(&self) -> Option<(Rect, usize)> {
+        let board = self.todo_board()?;
+        let list = self.todo_board_geometry()?.list;
+        let (start, _) = board.list.window(list, board.items.len());
+        Some((list, start))
+    }
+
+    fn todo_board_row_at(&self, col: u16, row: u16) -> Option<usize> {
+        let board = self.todo_board()?;
+        let list = self.todo_board_geometry()?.list;
+        board.list.row_at(list, col, row, board.items.len())
+    }
+
+    /// Whether the cell is on a row's link chip, through the same chip geometry
+    /// the renderer draws with.
+    fn todo_board_link_chip_at(&self, col: u16, row: u16) -> bool {
+        let Some(idx) = self.todo_board_row_at(col, row) else {
+            return false;
+        };
+        let Some((list, _)) = self.todo_board_list_window() else {
+            return false;
+        };
+        let Some(todo) = self
+            .todo_board()
+            .and_then(|board| board.todo_at(idx))
+            .and_then(|(pane_id, todo_id)| self.pane_todo_by_id(pane_id, todo_id))
+        else {
+            return false;
+        };
+        let Some(link) = todo.link.as_ref() else {
+            return false;
+        };
+        crate::ui::pane_todo_link_chip(
+            Rect::new(list.x, row, list.width, 1),
+            self.pane_todo_link_public_id(&todo).as_deref(),
             &link.label,
         )
         .is_some_and(|(chip, _)| rect_contains(chip, col, row))
@@ -5815,6 +5963,124 @@ mod tests {
             .expect("test terminal should exist")
             .add_todo(text, crate::terminal::todo::TodoPriority::Normal, None, 100)
             .expect("todo should be added");
+    }
+
+    // -----------------------------------------------------------------------
+    // The todo board
+    // -----------------------------------------------------------------------
+
+    /// Two panes carrying todos, laid out, with the board open — so its list
+    /// rect is real and a click can be aimed at a specific drawn row.
+    fn app_for_todo_board() -> (crate::app::App, crate::layout::PaneId) {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("todos")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.workspaces[0].test_split(Direction::Vertical);
+        app.state.ensure_test_terminals();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let mut infos = app.state.view.pane_infos.clone();
+        infos.sort_by_key(|info| info.rect.y);
+        let owner = infos[0].id;
+        add_pane_todo(&mut app, owner, "rerun the deploy");
+        app.state.open_todo_board();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        (app, owner)
+    }
+
+    /// The row's own meaning on the board is its owner, so a click travels
+    /// there rather than opening the editor the way the panel's row click does.
+    #[test]
+    fn clicking_a_board_row_activates_its_owning_pane() {
+        let (mut app, _) = app_for_todo_board();
+        let (list, _) = app
+            .state
+            .todo_board_list_window()
+            .expect("the board is open");
+
+        // Row 0 is the pane heading; row 1 is its todo.
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                list.x + 4,
+                list.y + 1,
+            ),
+        );
+
+        assert!(
+            matches!(
+                action,
+                Some(MouseAction::TodoBoard(TodoBoardAction::OpenOwner))
+            ),
+            "a board row click must activate its owner"
+        );
+    }
+
+    /// A heading is drawn in the same list but is never a destination: clicking
+    /// one selects nothing and acts on nothing, rather than acting on whatever
+    /// was selected before.
+    #[test]
+    fn clicking_a_board_heading_is_inert() {
+        let (mut app, _) = app_for_todo_board();
+        let (list, _) = app
+            .state
+            .todo_board_list_window()
+            .expect("the board is open");
+        let before = app
+            .state
+            .todo_board()
+            .expect("the board is open")
+            .list
+            .selected;
+
+        let action = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, list.y),
+        );
+
+        assert!(action.is_none(), "a heading click must do nothing");
+        assert_eq!(
+            app.state
+                .todo_board()
+                .expect("the board stays open")
+                .list
+                .selected,
+            before,
+            "a heading click must not move the selection"
+        );
+    }
+
+    #[test]
+    fn clicking_outside_the_board_dismisses_it() {
+        let (mut app, _) = app_for_todo_board();
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), 0, 0),
+        );
+
+        assert!(app.state.todo_board().is_none());
+        assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn clicking_the_boards_close_button_dismisses_it() {
+        let (mut app, _) = app_for_todo_board();
+        let close = app
+            .state
+            .todo_board_buttons()
+            .expect("the footer lays out")
+            .rect(crate::app::state::TodoBoardButton::Close)
+            .expect("close never drops");
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), close.x, close.y),
+        );
+
+        assert!(app.state.todo_board().is_none());
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     /// Two stacked panes laid out by `compute_view`, both carrying todos. The

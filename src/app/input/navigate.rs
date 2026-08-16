@@ -509,6 +509,7 @@ impl App {
             }
             NavigateAction::OpenPaneTodos => self.open_focused_pane_todos(),
             NavigateAction::AddPaneTodo => self.open_new_pane_todo_for_focused_pane(),
+            NavigateAction::OpenTodoBoard => self.state.open_todo_board(),
             NavigateAction::Detach => {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
@@ -2034,6 +2035,7 @@ pub(crate) enum NavigateAction {
     OpenNotificationCenter,
     OpenPaneTodos,
     AddPaneTodo,
+    OpenTodoBoard,
     Detach,
     OpenNavigator,
 }
@@ -2214,6 +2216,7 @@ fn non_indexed_action_for_key(
         ),
         (&kb.open_pane_todos, NavigateAction::OpenPaneTodos),
         (&kb.add_pane_todo, NavigateAction::AddPaneTodo),
+        (&kb.open_todo_board, NavigateAction::OpenTodoBoard),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
     ] {
@@ -2607,6 +2610,7 @@ pub(super) fn execute_navigate_action_in_context(
             super::modal::request_detach(state);
             leave_navigate_mode(state);
         }
+        NavigateAction::OpenTodoBoard => state.open_todo_board(),
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
     }
 

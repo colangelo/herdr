@@ -933,6 +933,7 @@ pub enum Mode {
     NotificationCenter,
     PaneTodos,
     PaneTodoEdit,
+    TodoBoard,
 }
 
 impl Mode {
@@ -1698,6 +1699,112 @@ pub struct PaneTodoEditState {
     pub suspended_panel: Option<PaneTodoPanelState>,
 }
 
+/// Footer buttons of the todo board, in render order. `open` leads because
+/// focusing a todo's pane is the board's reason to exist over `herdr todo
+/// list --all`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TodoBoardButton {
+    Open,
+    Toggle,
+    Go,
+    ClearDone,
+    Close,
+}
+
+/// One row of the board. Pane headings are rendered but never selectable, so
+/// render and selection read the same list instead of deriving headings twice
+/// — the shape [`PaneMoveTargetPickerState`] already uses for its space
+/// headings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TodoBoardItem {
+    PaneHeading {
+        /// The owning pane's addressable identifier. `None` only for a pane
+        /// whose public number cannot be resolved, which leaves the heading
+        /// its label alone.
+        public_id: Option<String>,
+        label: String,
+    },
+    Todo {
+        pane_id: PaneId,
+        todo_id: u64,
+    },
+}
+
+/// TUI-only state for the session todo board. The todos are server-owned on
+/// `TerminalState`; the board holds a projection of them plus a cursor, and
+/// neither is persisted or exposed over the API.
+///
+/// The projection is built when the board opens and rebuilt after every
+/// mutation rather than per frame, so a session with many panes pays for it
+/// once per action instead of once per render.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoBoardState {
+    pub items: Vec<TodoBoardItem>,
+    pub list: ListCursor,
+    pub hovered_button: Option<TodoBoardButton>,
+}
+
+impl TodoBoardState {
+    /// Builds a board selecting the first todo, stepping over the heading that
+    /// always precedes it.
+    pub fn new(items: Vec<TodoBoardItem>) -> Self {
+        let selected = items
+            .iter()
+            .position(|item| matches!(item, TodoBoardItem::Todo { .. }))
+            .unwrap_or(0);
+        Self {
+            items,
+            list: ListCursor::new(selected),
+            hovered_button: None,
+        }
+    }
+
+    pub fn todo_at(&self, idx: usize) -> Option<(PaneId, u64)> {
+        match self.items.get(idx) {
+            Some(TodoBoardItem::Todo { pane_id, todo_id }) => Some((*pane_id, *todo_id)),
+            _ => None,
+        }
+    }
+
+    pub fn selected_todo(&self) -> Option<(PaneId, u64)> {
+        self.todo_at(self.list.selected)
+    }
+
+    /// Points the selection at `idx` only when it holds a todo, so a click or
+    /// a hover cannot park the selection on a heading.
+    pub fn select_todo(&mut self, idx: usize) -> bool {
+        if self.todo_at(idx).is_none() {
+            return false;
+        }
+        self.list.select(idx);
+        true
+    }
+
+    /// The nearest todo at or past `target`, searching in the direction of
+    /// travel first and falling back the other way at either end — so no
+    /// movement can park on a heading, and a jump to the first or last item
+    /// lands on a todo rather than on the heading above it.
+    pub fn nearest_todo(&self, target: usize, forward: bool) -> Option<usize> {
+        let ahead: Option<usize> = if forward {
+            (target..self.items.len()).find(|idx| self.todo_at(*idx).is_some())
+        } else {
+            (0..=target.min(self.items.len().saturating_sub(1)))
+                .rev()
+                .find(|idx| self.todo_at(*idx).is_some())
+        };
+        ahead.or_else(|| {
+            if forward {
+                (0..target.min(self.items.len()))
+                    .rev()
+                    .find(|idx| self.todo_at(*idx).is_some())
+            } else {
+                (target.saturating_add(1)..self.items.len())
+                    .find(|idx| self.todo_at(*idx).is_some())
+            }
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingAgentNotification {
     pub pane_id: PaneId,
@@ -1920,6 +2027,8 @@ overlays! {
         worktree_remove / worktree_remove_mut / take_worktree_remove;
     PaneMoveTargetPicker(PaneMoveTargetPickerState) => mode PaneMoveTargetPicker, ascii true,
         pane_move_target_picker / pane_move_target_picker_mut / take_pane_move_target_picker;
+    TodoBoard(TodoBoardState) => mode TodoBoard, ascii true,
+        todo_board / todo_board_mut / take_todo_board;
 }
 
 impl AppState {
@@ -2612,6 +2721,20 @@ impl AppState {
         self.close_overlay(crate::app::state::OverlayKind::PaneTodos);
     }
 
+    /// Open the session todo board. The projection is taken here, once, and
+    /// the selection starts on the first todo rather than on the heading above
+    /// it.
+    pub(crate) fn open_todo_board(&mut self) {
+        let items = self.todo_board_items();
+        self.open_overlay(crate::app::state::Overlay::TodoBoard(TodoBoardState::new(
+            items,
+        )));
+    }
+
+    pub(crate) fn close_todo_board(&mut self) {
+        self.close_overlay(crate::app::state::OverlayKind::TodoBoard);
+    }
+
     /// The todo panel, whether it is the open overlay or suspended behind the
     /// edit modal that was opened over it.
     pub(crate) fn open_pane_todo_panel(&self) -> Option<&PaneTodoPanelState> {
@@ -2647,6 +2770,26 @@ impl AppState {
         panel.list.reveal(visible, len);
     }
 
+    /// Move (or, with `0`, re-clamp) the board selection, landing on a todo
+    /// rather than on a heading — a heading is rendered in the same list but
+    /// is never a destination.
+    pub(crate) fn move_todo_board_selection_by(&mut self, delta: isize) {
+        let visible = self.todo_board_visible_rows();
+        let Some(board) = self.todo_board_mut() else {
+            return;
+        };
+        let len = board.items.len();
+        let target = board
+            .list
+            .selected
+            .saturating_add_signed(delta)
+            .min(len.saturating_sub(1));
+        if let Some(idx) = board.nearest_todo(target, delta >= 0) {
+            board.list.select(idx);
+        }
+        board.list.reveal(visible, len);
+    }
+
     /// The selected todo, cloned so callers can mutate through the API without
     /// holding a borrow of the store.
     pub(crate) fn selected_pane_todo(&self) -> Option<crate::terminal::todo::PaneTodo> {
@@ -2654,6 +2797,38 @@ impl AppState {
         self.pane_todos_in_display_order(panel.pane_id)
             .get(panel.list.selected)
             .map(|todo| (*todo).clone())
+    }
+
+    /// One todo by id, cloned so callers can mutate through the API without
+    /// holding a borrow of the store. The board addresses todos this way
+    /// rather than by list position, so its projection cannot point at the
+    /// wrong todo after the store moves underneath it.
+    pub(crate) fn pane_todo_by_id(
+        &self,
+        pane_id: PaneId,
+        todo_id: u64,
+    ) -> Option<crate::terminal::todo::PaneTodo> {
+        self.pane_todo_ref(pane_id, todo_id).cloned()
+    }
+
+    /// The borrowing form, for the board's render loop: resolving a row must
+    /// not build and sort the owning pane's whole presentation order once per
+    /// drawn row.
+    pub(crate) fn pane_todo_ref(
+        &self,
+        pane_id: PaneId,
+        todo_id: u64,
+    ) -> Option<&crate::terminal::todo::PaneTodo> {
+        self.pane_terminal(pane_id)?
+            .todos()
+            .iter()
+            .find(|todo| todo.id == todo_id)
+    }
+
+    /// The todo the board's selection is on.
+    pub(crate) fn selected_todo_board_todo(&self) -> Option<crate::terminal::todo::PaneTodo> {
+        let (pane_id, todo_id) = self.todo_board()?.selected_todo()?;
+        self.pane_todo_by_id(pane_id, todo_id)
     }
 
     /// Resolve a todo's link. `None` is a dead link: either the stored target
@@ -4410,6 +4585,16 @@ mod tests {
             OverlayKind::PaneMoveTargetPicker => Overlay::PaneMoveTargetPicker(
                 PaneMoveTargetPickerState::new("p1".into(), Vec::new()),
             ),
+            OverlayKind::TodoBoard => Overlay::TodoBoard(TodoBoardState::new(vec![
+                TodoBoardItem::PaneHeading {
+                    public_id: Some("w1:pA".into()),
+                    label: "shell".into(),
+                },
+                TodoBoardItem::Todo {
+                    pane_id,
+                    todo_id: 1,
+                },
+            ])),
         }
     }
 
