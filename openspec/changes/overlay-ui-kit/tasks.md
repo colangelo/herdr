@@ -56,6 +56,6 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 7. Close out
 
-- [ ] 7.1 No changelog entry unless something user-visible moved. If the uniform list chords are user-visible — they are a superset, so an overlay may now accept a chord it did not — say so in one line under Unreleased
-- [ ] 7.2 Record in `AGENTS.md` that new overlays are built on the kit, replacing the "remember to add a help entry" rule with the enforced one
-- [ ] 7.3 Note the fork-surface effect in the change: groups 1–5 reduce fork lines, group 6 adds conflict-prone edits to `Mode` and `AppState`; flag group 6 in `herdr-sync-upstream` as a known conflict site
+- [x] 7.1 No changelog entry unless something user-visible moved. If the uniform list chords are user-visible — they are a superset, so an overlay may now accept a chord it did not — say so in one line under Unreleased
+- [x] 7.2 Record in `AGENTS.md` that new overlays are built on the kit, replacing the "remember to add a help entry" rule with the enforced one
+- [x] 7.3 Note the fork-surface effect in the change: groups 1–5 reduce fork lines, group 6 adds conflict-prone edits to `Mode` and `AppState`; flag group 6 in `herdr-sync-upstream` as a known conflict site
