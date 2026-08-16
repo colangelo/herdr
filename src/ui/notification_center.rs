@@ -13,34 +13,45 @@ use crate::app::state::{NotificationCenterButton, ToastKind};
 use crate::app::AppState;
 
 /// The footer row, in the settings-panel language: the shortcut hint inside
-/// the filled box, in render order. `mark read` is the one box narrow rows can
-/// do without.
+/// the filled box, in render order.
+///
+/// The panel sizes itself to fit all three (see
+/// [`notification_center_footer_width`]), so `mark read` is dropped only when
+/// the screen itself is too narrow for the row.
+fn notification_center_button_specs() -> [ButtonSpec<NotificationCenterButton>; 3] {
+    [
+        ButtonSpec {
+            button: NotificationCenterButton::MarkRead,
+            hint: Some("r"),
+            label: "mark read",
+            drop_rank: Some(0),
+        },
+        ButtonSpec {
+            button: NotificationCenterButton::Clear,
+            hint: Some("c"),
+            label: "clear all",
+            drop_rank: None,
+        },
+        ButtonSpec {
+            button: NotificationCenterButton::Close,
+            hint: Some("esc"),
+            label: "close",
+            drop_rank: None,
+        },
+    ]
+}
+
+/// Inner columns the whole footer wants. The panel measures this alongside its
+/// rows, because a notification centre that cannot show "mark read" hides its
+/// primary action *and* the `r` key that is the only other way to reach it.
+pub(crate) fn notification_center_footer_width() -> u16 {
+    ButtonRow::natural_width(&notification_center_button_specs())
+}
+
 pub(crate) fn notification_center_button_rects(
     footer_row: Rect,
 ) -> Option<ButtonRow<NotificationCenterButton>> {
-    ButtonRow::layout(
-        footer_row,
-        &[
-            ButtonSpec {
-                button: NotificationCenterButton::MarkRead,
-                hint: Some("r"),
-                label: "mark read",
-                drop_rank: Some(0),
-            },
-            ButtonSpec {
-                button: NotificationCenterButton::Clear,
-                hint: Some("c"),
-                label: "clear all",
-                drop_rank: None,
-            },
-            ButtonSpec {
-                button: NotificationCenterButton::Close,
-                hint: Some("esc"),
-                label: "close",
-                drop_rank: None,
-            },
-        ],
-    )
+    ButtonRow::layout(footer_row, &notification_center_button_specs())
 }
 
 /// Hit area for the floating indicator used when
@@ -293,14 +304,14 @@ mod tests {
             &opened(position, &["build finished", "tests failed"]),
         )
         .assert(
-            Rect::new(50, 18, 30, 6),
+            Rect::new(37, 18, 43, 6),
             &[
-                "┌────────────────────────────┐",
-                "│ ● tests failed         now │",
-                "│ ● build finished       now │",
-                "│                            │",
-                "│  c clear all    esc close  │",
-                "└────────────────────────────┘",
+                "┌─────────────────────────────────────────┐",
+                "│ ● tests failed                      now │",
+                "│ ● build finished                    now │",
+                "│                                         │",
+                "│ r mark read    c clear all    esc close │",
+                "└─────────────────────────────────────────┘",
             ],
         );
     }
@@ -332,14 +343,14 @@ mod tests {
             &opened(position, &["build finished", "tests failed"]),
         )
         .assert(
-            Rect::new(50, 1, 30, 6),
+            Rect::new(37, 1, 43, 6),
             &[
-                "┌────────────────────────────┐",
-                "│ ● tests failed         now │",
-                "│ ● build finished       now │",
-                "│                            │",
-                "│  c clear all    esc close  │",
-                "└────────────────────────────┘",
+                "┌─────────────────────────────────────────┐",
+                "│ ● tests failed                      now │",
+                "│ ● build finished                    now │",
+                "│                                         │",
+                "│ r mark read    c clear all    esc close │",
+                "└─────────────────────────────────────────┘",
             ],
         );
     }

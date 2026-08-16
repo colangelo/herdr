@@ -1567,21 +1567,31 @@ impl AppState {
             })
             .max()
             .unwrap_or(16);
+        // The footer block is reserved only when there are entries to act on;
+        // an empty panel is just the box.
+        let footer_rows = if self.notification_log.is_empty() {
+            0
+        } else {
+            crate::ui::FOOTER_ROWS
+        };
+        // borders + kind dot block + right-aligned age column
+        let rows_width = (content_width + 2 + 3 + 5) as u16;
+        // A panel narrower than its own footer hides "mark read" — and with it
+        // the `r` hint that is the only other way to reach the action — so the
+        // footer is measured alongside the rows rather than left to degrade.
+        let wanted_width = if footer_rows > 0 {
+            rows_width.max(crate::ui::notification_center_footer_width() + 2)
+        } else {
+            rows_width
+        };
         crate::ui::overlay::AnchoredPanelSpec {
             anchor,
             screen,
-            // borders + kind dot block + right-aligned age column
-            content_width: (content_width + 2 + 3 + 5) as u16,
+            content_width: wanted_width,
             width_bounds: (30, 60),
             rows: self.notification_log.len() as u16,
             max_rows: NOTIFICATION_PANEL_MAX_ROWS,
-            // The footer block is reserved only when there are entries to act
-            // on; an empty panel is just the box.
-            footer_rows: if self.notification_log.is_empty() {
-                0
-            } else {
-                crate::ui::FOOTER_ROWS
-            },
+            footer_rows,
             vertical: match self.notification_center_position {
                 crate::config::NotificationCenterPositionConfig::TopRight => {
                     crate::ui::overlay::VerticalAnchor::Below

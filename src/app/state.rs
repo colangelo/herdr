@@ -4053,6 +4053,47 @@ mod tests {
         );
     }
 
+    /// The regression this fixes: at the panel's old 30-column minimum the
+    /// footer wanted 41, so `mark read` was dropped and the `r` hint went with
+    /// it — the action was reachable only by a key nothing advertised.
+    #[test]
+    fn the_notification_panel_is_never_narrower_than_its_own_footer() {
+        let mut state = AppState::test_new();
+        state.view.terminal_area = Rect::new(0, 1, 80, 24);
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        // One short title: nothing about the entries wants a wide panel.
+        state.post_notification(test_toast(ToastKind::Finished, "ok", None));
+        state.open_notification_center();
+
+        let rect = state.notification_center_rect().expect("panel rect");
+        assert!(
+            rect.width >= crate::ui::notification_center_footer_width() + 2,
+            "panel {} is narrower than its footer",
+            rect.width
+        );
+
+        let buttons = state
+            .notification_center_buttons()
+            .expect("footer buttons present with entries");
+        assert!(
+            buttons.rect(NotificationCenterButton::MarkRead).is_some(),
+            "mark read must survive at the panel's own width"
+        );
+    }
+
+    /// An empty log has no footer to fit, so it stays the narrow box it was.
+    #[test]
+    fn an_empty_notification_panel_does_not_widen_for_a_footer_it_has_not_got() {
+        let mut state = AppState::test_new();
+        state.view.terminal_area = Rect::new(0, 1, 80, 24);
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        state.open_notification_center();
+
+        let rect = state.notification_center_rect().expect("panel rect");
+        assert_eq!(rect.width, 30);
+        assert!(state.notification_center_buttons().is_none());
+    }
+
     #[test]
     fn notification_center_rect_honors_bottom_right_position() {
         let mut state = AppState::test_new();

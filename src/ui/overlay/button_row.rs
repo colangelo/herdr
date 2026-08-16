@@ -95,6 +95,12 @@ impl<B: Copy> ButtonRow<B> {
         Some(Self { row, placed })
     }
 
+    /// The width this row wants with nothing dropped — what a panel must be
+    /// at least as wide as if it means to show all of its own controls.
+    pub(crate) fn natural_width(buttons: &[ButtonSpec<B>]) -> u16 {
+        row_width(&buttons.iter().collect::<Vec<_>>())
+    }
+
     /// The boxes that fit, in render order.
     pub(crate) fn placed(&self) -> &[PlacedButton<B>] {
         &self.placed
