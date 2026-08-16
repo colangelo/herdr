@@ -75,10 +75,18 @@ a pane, so anchoring it to one would misrepresent what it shows. Built from the
 existing modal shell, header and footer-button row, and reserving the footer
 block (`FOOTER_ROWS`) so the buttons keep the blank row above them.
 
-`overlay-ui-kit` will later fold this geometry into the shared panel kit. Express
-the board through `src/ui/widgets.rs` helpers so that folding is a move rather
-than a rewrite, and do not add a third bespoke `*_rect` / `*_button_rects` /
-`*_list_window` triple beyond what the kit will absorb.
+`overlay-ui-kit` landed first (archived 2026-08-16), so the folding this section
+anticipated is not deferred work — the kit is what the board is built on from the
+start. Concretely the board takes its footer row from `ButtonRow` / `ButtonSpec`,
+its selection and scroll from `ListCursor`, its movement chords from
+`list_chord`, and its help entries from the `overlay_help` match, and it is a
+variant in the `overlays!` list rather than another `Option<XState>` field.
+
+The kit's `AnchoredPanelSpec` resolver is deliberately *not* used: it places a
+panel against an anchor rect, and the board is centred precisely because it has
+no pane to anchor to. Centred geometry stays on the existing modal path
+(`centered_popup_rect` / `render_modal_shell` / `footer_split`), which is what
+the pane-move picker uses and is not a bespoke triple.
 
 ## Alternatives considered
 
