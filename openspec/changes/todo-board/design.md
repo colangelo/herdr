@@ -88,6 +88,31 @@ no pane to anchor to. Centred geometry stays on the existing modal path
 (`centered_popup_rect` / `render_modal_shell` / `footer_split`), which is what
 the pane-move picker uses and is not a bespoke triple.
 
+## What the plan left open
+
+Three things the tasks and the spec do not both answer, decided here before any
+code moved.
+
+**Edit cannot keep the panel's key.** Task 3.1 asks every panel action to keep
+its key and task 3.2 gives `Enter` to focusing the owning pane — and on the
+panel `Enter` *is* edit. The spec settles it: activating a row focusing the
+owner is a requirement with a scenario, "same key where the action exists" is a
+principle. So edit is `e` on the board, and `Enter` is the row's own meaning.
+Nothing else moves: `space`, `g`, `d`, `c`, `esc`/`q` are the panel's.
+
+**`clear done` clears one pane, not the session.** At session scope the label
+could mean either. It clears the done todos of the *selected todo's owning
+pane*, because that is what the key already means one surface over — a
+session-wide sweep would be a different and far more destructive action wearing
+the same letter. The selection is always visibly inside a pane's group, so what
+`c` will clear is on screen.
+
+**A row click activates.** On the panel a row click opens the edit view,
+because that is the row's own meaning there; on the board the row's own meaning
+is its owner, so a click focuses the owning pane and a click on the link chip
+follows the link — the same rule (the row does what the row means), not the
+same outcome.
+
 ## Alternatives considered
 
 **A sidebar section instead of an overlay.** The sidebar is already the session's
