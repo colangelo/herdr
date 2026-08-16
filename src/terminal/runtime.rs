@@ -560,11 +560,6 @@ impl TerminalRuntime {
         self.0.cwd()
     }
 
-    /// See `PaneRuntime::interactive_cwd`: keypress-time only, never per render.
-    pub fn interactive_cwd(&self) -> Option<std::path::PathBuf> {
-        self.0.interactive_cwd()
-    }
-
     pub fn follow_cwd(&self) -> Option<std::path::PathBuf> {
         self.0.follow_cwd()
     }
