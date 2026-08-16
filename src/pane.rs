@@ -308,12 +308,10 @@ struct AgentDetectionPresence {
     consecutive_misses: u8,
 }
 
-#[cfg(unix)]
 fn absolute_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
     crate::platform::process_cwd(pid).filter(|cwd| cwd.is_absolute())
 }
 
-#[cfg(unix)]
 fn usable_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
     absolute_process_cwd(pid).filter(|cwd| cwd.is_dir())
 }
@@ -359,14 +357,66 @@ fn resolved_pane_cwd(
         .or_else(|| cwd_of(child_pid))
 }
 
-/// `resolved_pane_cwd` against the real process table.
-#[cfg(unix)]
+/// `resolved_pane_cwd` against the real process table. `nested_foreground_job`
+/// is a no-op where no wrapper can present a nested PTY, so this degrades to the
+/// direct child's directory rather than needing a platform branch here.
 fn resolved_pane_cwd_now(child_pid: u32) -> Option<std::path::PathBuf> {
     resolved_pane_cwd(
         child_pid,
         crate::platform::nested_foreground_job,
         usable_process_cwd,
     )
+}
+
+/// How often a pane re-resolves its working directory.
+///
+/// Deliberately its own cadence rather than the agent probe's: `cd` is a shell
+/// builtin, so it changes no process group and would never trigger a probe. A
+/// pane that is `cd`-ed and then left alone still has to report where it is.
+const RESOLVED_CWD_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Re-resolve the pane's directory when the interval has elapsed, so `cwd` can
+/// stay a lock-and-clone on the render path.
+///
+/// `resolve` runs before the lock is taken: the process walk must never be held
+/// across it. A resolution that comes back empty leaves the last known
+/// directory in place rather than blanking a pane mid-command.
+fn refresh_resolved_cwd(
+    resolve: impl FnOnce() -> Option<std::path::PathBuf>,
+    resolved_cwd: &Arc<Mutex<Option<std::path::PathBuf>>>,
+    last_refresh: &mut Option<std::time::Instant>,
+    now: std::time::Instant,
+) {
+    if last_refresh
+        .is_some_and(|last| now.saturating_duration_since(last) < RESOLVED_CWD_REFRESH_INTERVAL)
+    {
+        return;
+    }
+    *last_refresh = Some(now);
+
+    let Some(resolved) = resolve() else {
+        return;
+    };
+    if let Ok(mut current) = resolved_cwd.lock() {
+        if current.as_ref() != Some(&resolved) {
+            *current = Some(resolved);
+        }
+    }
+}
+
+/// `refresh_resolved_cwd` against the real process table.
+fn refresh_resolved_cwd_now(
+    child_pid: u32,
+    resolved_cwd: &Arc<Mutex<Option<std::path::PathBuf>>>,
+    last_refresh: &mut Option<std::time::Instant>,
+    now: std::time::Instant,
+) {
+    refresh_resolved_cwd(
+        || resolved_pane_cwd_now(child_pid),
+        resolved_cwd,
+        last_refresh,
+        now,
+    );
 }
 
 /// The job's directory: its leader's, falling back to any member that can
@@ -778,6 +828,7 @@ fn spawn_basic_detection_task(
     pane_id: PaneId,
     child_pid: Arc<AtomicU32>,
     nested_agent_process_group_id: Arc<AtomicU32>,
+    resolved_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
     terminal: Arc<PaneTerminal>,
     detection_content_seq: Arc<AtomicU64>,
     full_lifecycle_authority_active: Arc<AtomicBool>,
@@ -817,6 +868,7 @@ fn spawn_basic_detection_task(
         let mut last_screen_scan_detection_content_seq = None;
         let mut agent_startup_grace_until = None;
         let mut pending_idle = PendingIdleConfirmation::default();
+        let mut last_resolved_cwd_refresh = None;
 
         loop {
             let sleep_duration = if pending_idle.active() {
@@ -858,6 +910,7 @@ fn spawn_basic_detection_task(
             }
             release_was_active = suppressed_agent.is_some();
             let pid = child_pid.load(Ordering::Acquire);
+            refresh_resolved_cwd_now(pid, &resolved_cwd, &mut last_resolved_cwd_refresh, now);
             let mut agent_changed = false;
             let mut agent = agent_presence.current_agent();
             let lifecycle_authority_active =
@@ -1162,6 +1215,11 @@ pub struct PaneRuntime {
     #[cfg(unix)]
     nested_agent_process_group_id: Arc<AtomicU32>,
     reported_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
+    /// Directory of the shell the user is interacting with, published by the
+    /// per-pane detection task. Keeps `cwd` a lock-and-clone: resolving it walks
+    /// the pane's children to cross a wrapper's nested PTY, which has no place
+    /// on a path the sidebar runs per pane per render.
+    resolved_cwd: Arc<Mutex<Option<std::path::PathBuf>>>,
     child_wait_completed: Option<Arc<AtomicBool>>,
     kitty_keyboard_flags: Arc<AtomicU16>,
     detection_content_seq: Arc<AtomicU64>,
@@ -2047,6 +2105,7 @@ impl PaneRuntime {
         let child_pid = Arc::new(AtomicU32::new(child_pid));
         let nested_agent_process_group_id = Arc::new(AtomicU32::new(0));
         let reported_cwd = Arc::new(Mutex::new(None));
+        let resolved_cwd: Arc<Mutex<Option<std::path::PathBuf>>> = Arc::new(Mutex::new(None));
         let kitty_keyboard_flags = Arc::new(AtomicU16::new(keyboard_protocol_flags));
         let detection_content_seq = Arc::new(AtomicU64::new(0));
 
@@ -2115,6 +2174,7 @@ impl PaneRuntime {
             pane_id,
             child_pid.clone(),
             nested_agent_process_group_id.clone(),
+            resolved_cwd.clone(),
             terminal.clone(),
             detection_content_seq.clone(),
             full_lifecycle_authority_active.clone(),
@@ -2130,6 +2190,7 @@ impl PaneRuntime {
             child_pid,
             nested_agent_process_group_id,
             reported_cwd,
+            resolved_cwd,
             child_wait_completed: None,
             kitty_keyboard_flags,
             detection_content_seq,
@@ -2188,6 +2249,7 @@ impl PaneRuntime {
         #[cfg(unix)]
         let nested_agent_process_group_id = Arc::new(AtomicU32::new(0));
         let reported_cwd = Arc::new(Mutex::new(None));
+        let resolved_cwd: Arc<Mutex<Option<std::path::PathBuf>>> = Arc::new(Mutex::new(None));
         let child_wait_completed = Arc::new(AtomicBool::new(false));
         let detection_content_seq = Arc::new(AtomicU64::new(0));
         let full_lifecycle_authority_active = Arc::new(AtomicBool::new(false));
@@ -2300,6 +2362,7 @@ impl PaneRuntime {
             let detect_reset = detect_reset_notify.clone();
             let pending_release = Arc::new(Mutex::new(None));
             let pending_release_for_task = pending_release.clone();
+            let resolved_cwd_for_task = resolved_cwd.clone();
 
             let handle = tokio::spawn(async move {
                 let mut agent_presence =
@@ -2322,6 +2385,7 @@ impl PaneRuntime {
                 let mut last_screen_scan_detection_content_seq = None;
                 let mut agent_startup_grace_until = None;
                 let mut pending_idle = PendingIdleConfirmation::default();
+                let mut last_resolved_cwd_refresh = None;
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -2372,6 +2436,12 @@ impl PaneRuntime {
                     }
                     release_was_active = suppressed_agent.is_some();
                     let pid = child_pid.load(Ordering::Acquire);
+                    refresh_resolved_cwd_now(
+                        pid,
+                        &resolved_cwd_for_task,
+                        &mut last_resolved_cwd_refresh,
+                        now,
+                    );
                     let mut agent = agent_presence.current_agent();
                     let lifecycle_authority_active =
                         full_lifecycle_authority_active_for_task.load(Ordering::Acquire);
@@ -2659,6 +2729,7 @@ impl PaneRuntime {
             #[cfg(unix)]
             nested_agent_process_group_id,
             reported_cwd,
+            resolved_cwd,
             child_wait_completed: Some(child_wait_completed),
             kitty_keyboard_flags,
             detection_content_seq,
@@ -3063,34 +3134,19 @@ impl PaneRuntime {
             return Some(cwd);
         }
 
-        let pid = self.child_pid.load(Ordering::Relaxed);
-        crate::platform::process_cwd(pid)
-    }
-
-    /// The pane's working directory as a user would name it, resolved at
-    /// keypress time rather than per render.
-    ///
-    /// `cwd` answers from the pane's direct child, which stays frozen in the
-    /// launch directory whenever a wrapper - `atuin`, a container shim, an
-    /// agent runner - re-runs the real shell inside a PTY of its own. This
-    /// reaches across that boundary, at the cost of a process-tree lookup that
-    /// has no business in a render-scaled loop. Deliberately not folded into
-    /// `cwd`, which the sidebar calls per pane per render.
-    pub fn interactive_cwd(&self) -> Option<std::path::PathBuf> {
+        // What the detection task last resolved, which sees the shell a wrapper
+        // runs one PTY below. A lock and a clone: the walk that produced it
+        // happened on the pane's own cadence, not here.
         if let Some(cwd) = self
-            .reported_cwd
+            .resolved_cwd
             .lock()
             .ok()
-            .and_then(|reported_cwd| reported_cwd.clone())
+            .and_then(|resolved_cwd| resolved_cwd.clone())
         {
             return Some(cwd);
         }
 
-        let pid = self.child_pid.load(Ordering::Acquire);
-        #[cfg(unix)]
-        if let Some(cwd) = resolved_pane_cwd_now(pid) {
-            return Some(cwd);
-        }
+        let pid = self.child_pid.load(Ordering::Relaxed);
         crate::platform::process_cwd(pid)
     }
 
@@ -3216,6 +3272,7 @@ impl PaneRuntime {
                 #[cfg(unix)]
                 nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
                 reported_cwd: Arc::new(Mutex::new(None)),
+                resolved_cwd: Arc::new(Mutex::new(None)),
                 child_wait_completed: None,
                 kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
                 detection_content_seq: Arc::new(AtomicU64::new(0)),
@@ -3307,6 +3364,57 @@ mod tests {
     #[test]
     fn resolved_pane_cwd_is_none_when_nothing_can_answer() {
         assert_eq!(resolved_pane_cwd(7, |_| None, |_| None), None);
+    }
+
+    #[test]
+    fn resolved_cwd_refresh_holds_off_until_the_interval_elapses() {
+        let cell = Arc::new(Mutex::new(None));
+        let mut last = None;
+        let start = std::time::Instant::now();
+
+        refresh_resolved_cwd(
+            || Some(std::path::PathBuf::from("/first")),
+            &cell,
+            &mut last,
+            start,
+        );
+        assert_eq!(
+            cell.lock().unwrap().clone(),
+            Some(std::path::PathBuf::from("/first"))
+        );
+
+        refresh_resolved_cwd(
+            || panic!("a second refresh inside the interval must not resolve"),
+            &cell,
+            &mut last,
+            start + RESOLVED_CWD_REFRESH_INTERVAL / 2,
+        );
+
+        refresh_resolved_cwd(
+            || Some(std::path::PathBuf::from("/second")),
+            &cell,
+            &mut last,
+            start + RESOLVED_CWD_REFRESH_INTERVAL,
+        );
+        assert_eq!(
+            cell.lock().unwrap().clone(),
+            Some(std::path::PathBuf::from("/second")),
+            "the refresh runs on its own clock, not on a foreground group change"
+        );
+    }
+
+    #[test]
+    fn resolved_cwd_refresh_keeps_the_last_directory_when_resolution_fails() {
+        let cell = Arc::new(Mutex::new(Some(std::path::PathBuf::from("/known"))));
+        let mut last = None;
+
+        refresh_resolved_cwd(|| None, &cell, &mut last, std::time::Instant::now());
+
+        assert_eq!(
+            cell.lock().unwrap().clone(),
+            Some(std::path::PathBuf::from("/known")),
+            "a failed resolution must not blank a pane that has a known directory"
+        );
     }
 
     #[test]
@@ -3929,6 +4037,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cwd_prefers_the_shell_s_own_report_then_the_resolved_directory() {
+        let (tx, _rx) = mpsc::channel(4);
+        let (resize_tx, _resize_rx) = watch::channel((80, 24, 0, 0));
+        let terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        let runtime = PaneRuntime {
+            pane_id: PaneId::from_raw(0),
+            terminal: Arc::new(PaneTerminal::new(
+                GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap(),
+            )),
+            io: PaneRuntimeIo::TestChannel {
+                sender: tx,
+                resize_tx,
+            },
+            current_size: Cell::new((80, 24, 0, 0)),
+            // No child process, so the direct-child fallback cannot answer and
+            // the precedence being asserted is the only thing in play.
+            child_pid: Arc::new(AtomicU32::new(0)),
+            #[cfg(unix)]
+            nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
+            reported_cwd: Arc::new(Mutex::new(None)),
+            resolved_cwd: Arc::new(Mutex::new(None)),
+            child_wait_completed: None,
+            kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
+            detection_content_seq: Arc::new(AtomicU64::new(0)),
+            full_lifecycle_authority_active: Arc::new(AtomicBool::new(false)),
+            detect_reset_notify: Arc::new(Notify::new()),
+            pending_release: Arc::new(Mutex::new(None)),
+            preserve_processes_on_drop: true,
+            detect_handle: Some(tokio::spawn(async {}).abort_handle()),
+        };
+
+        assert_eq!(runtime.cwd(), None);
+
+        *runtime.resolved_cwd.lock().unwrap() = Some(std::path::PathBuf::from("/resolved"));
+        assert_eq!(
+            runtime.cwd(),
+            Some(std::path::PathBuf::from("/resolved")),
+            "the resolved directory answers when the shell has reported nothing"
+        );
+
+        *runtime.reported_cwd.lock().unwrap() = Some(std::path::PathBuf::from("/reported"));
+        assert_eq!(
+            runtime.cwd(),
+            Some(std::path::PathBuf::from("/reported")),
+            "the shell's own claim outranks anything inferred from the process table"
+        );
+    }
+
+    #[tokio::test]
     async fn focus_events_are_forwarded_when_enabled() {
         let (tx, mut rx) = mpsc::channel(4);
         let (resize_tx, _resize_rx) = watch::channel((80, 24, 0, 0));
@@ -3950,6 +4107,7 @@ mod tests {
             #[cfg(unix)]
             nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
+            resolved_cwd: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             detection_content_seq: Arc::new(AtomicU64::new(0)),
@@ -3983,6 +4141,7 @@ mod tests {
             #[cfg(unix)]
             nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
             reported_cwd: Arc::new(Mutex::new(None)),
+            resolved_cwd: Arc::new(Mutex::new(None)),
             child_wait_completed: None,
             kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
             detection_content_seq: Arc::new(AtomicU64::new(0)),

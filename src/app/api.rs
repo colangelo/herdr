@@ -594,15 +594,12 @@ impl App {
 
         // The pane's *current* directory, not the one it was launched in. A
         // respawn restarts where the pane actually is, and `terminal.cwd` only
-        // tracks that when the shell reports it (OSC 7), so a pane that has
-        // been `cd`-ed in an unintegrated shell would otherwise come back in
-        // the wrong directory. `interactive_cwd` also sees through a wrapper
-        // that runs the real shell in a nested PTY, which `cwd` cannot; it is
-        // affordable here because a respawn is a keypress, not a render.
+        // tracks that when the shell reports it (OSC 7). Falls back to the
+        // recorded cwd when the runtime cannot answer.
         let cwd = self
             .terminal_runtimes
             .get(&terminal_id)
-            .and_then(|runtime| runtime.interactive_cwd())
+            .and_then(|runtime| runtime.cwd())
             .unwrap_or_else(|| terminal.cwd.clone());
         // `None` for a plain shell pane, which is exactly the fallback
         // condition - no extra bookkeeping needed to tell the two apart.
