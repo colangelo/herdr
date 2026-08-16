@@ -97,6 +97,10 @@ Where an overlay has a focused text input, the chords that are not plain
 characters SHALL keep working while that input is focused, and the plain
 character chords SHALL be text. No list SHALL require the arrow keys.
 
+Half-page movement is the exception: `ctrl+u` and `ctrl+d` are the shared text
+field's kill-to-start and delete-forward, so while a text input has focus they
+belong to the field and the list keeps the rest.
+
 #### Scenario: The same chords work in every list
 
 - **WHEN** the move-down chord is pressed in any list-bearing overlay
@@ -109,6 +113,8 @@ character chords SHALL be text. No list SHALL require the arrow keys.
 - **THEN** the selection moves and the search text is unchanged
 - **WHEN** a plain character chord is pressed instead
 - **THEN** it is inserted into the search text
+- **WHEN** the half-page chord is pressed instead
+- **THEN** the text field takes it, because it is that field's kill
 
 ### Requirement: Text inputs share one field
 
