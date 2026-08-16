@@ -27,6 +27,6 @@ replaces.
 - [x] 3.1 Delete `PaneRuntime::interactive_cwd` and its `TerminalRuntime`
       wrapper; point `respawn_pane_runtime` at `cwd`
 - [x] 3.2 Keep the respawn cwd test passing against `cwd`
-- [ ] 3.3 `just check` green; dogfood on `-ac-beta`: the `inbox-management`
+- [x] 3.3 `just check` green; dogfood on `-ac-beta`: the `inbox-management`
       space shows its branch, and a split of a wrapped pane starts in the
       shell's directory
