@@ -55,6 +55,16 @@ class BetaBuildIdTests(unittest.TestCase):
     def test_version_string_combines_base_channel_and_build_id(self) -> None:
         self.assertIn("version=${BASE}-ac-beta.${BUILD_ID}", self.text)
 
+    def test_codename_can_be_pinned_and_is_validated(self) -> None:
+        # Pinning keeps a run of builds reading the same while the run number
+        # still increments, so Homebrew ordering is untouched. An unchecked pin
+        # would let a typo mint a version token nothing else in the channel
+        # shares, so the workflow must reject a name outside the pool.
+        self.assertIn("CODENAME: ${{ inputs.codename }}", self.text)
+        self.assertIn('if [ -n "${CODENAME}" ]; then', self.text)
+        self.assertIn('*" ${CODENAME} "*) NAME="${CODENAME}" ;;', self.text)
+        self.assertIn("is not in the pool", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

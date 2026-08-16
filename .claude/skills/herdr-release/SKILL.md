@@ -25,8 +25,9 @@ before cutting the stable `X.Y.Z-ac`.
 Trigger (dispatches `.github/workflows/beta.yml`; default ref `master`):
 
 ```bash
-just beta            # build + publish beta from master
-just beta my-branch  # or from another branch/commit
+just beta                  # build + publish beta from master
+just beta my-branch        # or from another branch/commit
+just beta my-branch pirlo  # pin the codename instead of deriving it
 gh run watch --repo colangelo/herdr
 ```
 
@@ -43,6 +44,11 @@ binary's `herdr --version` and the formula `version` are both exactly
 keeps `brew upgrade` monotonic — Homebrew compares the leading number first, so
 the codename is purely cosmetic. **Do not revert this to a timestamp**; the
 surname scheme is intentional. Rotate the pool by editing `NAMES` in `beta.yml`.
+
+The `codename` dispatch input pins the suffix so a run of builds reads the same
+(`0.8.0-ac-beta.66-pirlo`, `…67-pirlo`); the run number still increments, so
+`brew upgrade` ordering is untouched. It must be a name already in `NAMES` —
+the workflow fails on anything else rather than minting a one-off token.
 
 Install / upgrade / verify:
 

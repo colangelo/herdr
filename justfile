@@ -293,8 +293,10 @@ latest-json-check tag="":
 # Runs .github/workflows/beta.yml: builds macOS binaries, replaces the rolling
 # `beta` prerelease, and updates the colangelo/homebrew-tap herdr-beta formula.
 # Install/upgrade the result with `brew install colangelo/tap/herdr-beta`.
-beta ref="master":
-    command gh workflow run beta.yml --repo colangelo/herdr --ref {{ref}} -f ref={{ref}}
+# Pass a codename to pin the build's suffix, e.g. `just beta master pirlo`;
+# it must be one of the names in beta.yml's pool. Empty derives it from the run.
+beta ref="master" codename="":
+    command gh workflow run beta.yml --repo colangelo/herdr --ref {{ref}} -f ref={{ref}} -f codename={{codename}}
     @echo "beta build dispatched from {{ref}} — watch: gh run watch --repo colangelo/herdr"
 
 # Upgrade a Homebrew-installed herdr and live-hand-off the running server onto the

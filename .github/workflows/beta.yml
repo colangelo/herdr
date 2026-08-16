@@ -13,6 +13,11 @@ on:
         required: false
         default: "master"
         type: string
+      codename:
+        description: "Pin the build codename (default: derived from the run number)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +46,7 @@ jobs:
         id: compute
         env:
           RUN_NUMBER: ${{ github.run_number }}
+          CODENAME: ${{ inputs.codename }}
         run: |
           BASE=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           # Beta build id = a monotonic run number (keeps `brew upgrade` ordering
@@ -50,6 +56,19 @@ jobs:
           # "0.7.5-ac-beta.7-pirlo" instead of an opaque timestamp.
           NAMES=(pirlo vidal pogba marchisio tevez llorente chiellini bonucci barzagli lichtsteiner asamoah giovinco vucinic buffon evra dybala higuain mandzukic khedira pjanic cuadrado benatia rugani sturaro alves douglascosta bernardeschi matuidi szczesny ronaldo ramsey rabiot deligt demiral danilo alexsandro kulusevski mckennie morata chiesa bentancur arthur vlahovic locatelli kean zakaria gatti bremer paredes kostic milik fagioli miretti perin thuram koopmeiners cambiaso yildiz weah conceicao kalulu kelly digregorio douglasluiz mbangula)
           NAME=${NAMES[$(( RUN_NUMBER % ${#NAMES[@]} ))]}
+          # A pinned codename keeps a run of builds reading the same while the
+          # run number still increments, so `brew upgrade` ordering is untouched.
+          # Checked against the pool: a typo would otherwise mint a version token
+          # nothing else in the channel shares.
+          if [ -n "${CODENAME}" ]; then
+            case " ${NAMES[*]} " in
+              *" ${CODENAME} "*) NAME="${CODENAME}" ;;
+              *)
+                echo "codename '${CODENAME}' is not in the pool" >&2
+                exit 1
+                ;;
+            esac
+          fi
           BUILD_ID="${RUN_NUMBER}-${NAME}"
           echo "build_id=${BUILD_ID}" >> "$GITHUB_OUTPUT"
           echo "version=${BASE}-ac-beta.${BUILD_ID}" >> "$GITHUB_OUTPUT"
