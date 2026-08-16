@@ -386,6 +386,9 @@ pub struct Keybinds {
     pub copy_mode_page_up: ActionKeybinds,
     pub copy_mode_half_page_up: ActionKeybinds,
     pub copy_mode_line_up: ActionKeybinds,
+    pub copy_mode_page_down: ActionKeybinds,
+    pub copy_mode_half_page_down: ActionKeybinds,
+    pub copy_mode_line_down: ActionKeybinds,
     pub focus_pane_left: ActionKeybinds,
     pub focus_pane_down: ActionKeybinds,
     pub focus_pane_up: ActionKeybinds,
@@ -568,6 +571,9 @@ impl Config {
             copy_mode_page_up: empty_action!(),
             copy_mode_half_page_up: empty_action!(),
             copy_mode_line_up: empty_action!(),
+            copy_mode_page_down: empty_action!(),
+            copy_mode_half_page_down: empty_action!(),
+            copy_mode_line_down: empty_action!(),
             focus_pane_left: empty_action!(),
             focus_pane_down: empty_action!(),
             focus_pane_up: empty_action!(),
@@ -737,6 +743,13 @@ impl Config {
                 source
             );
             apply_action!(keybinds.copy_mode_line_up, copy_mode_line_up, source);
+            apply_action!(keybinds.copy_mode_page_down, copy_mode_page_down, source);
+            apply_action!(
+                keybinds.copy_mode_half_page_down,
+                copy_mode_half_page_down,
+                source
+            );
+            apply_action!(keybinds.copy_mode_line_down, copy_mode_line_down, source);
             apply_action!(keybinds.focus_pane_left, focus_pane_left, source);
             apply_action!(keybinds.focus_pane_down, focus_pane_down, source);
             apply_action!(keybinds.focus_pane_up, focus_pane_up, source);

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Direction;
 
-use super::copy_mode::CopyModeEntryScroll;
+use super::copy_mode::{CopyModeEntryDirection, CopyModeEntryScroll};
 
 use crate::{
     app::{
@@ -413,20 +413,51 @@ impl App {
             NavigateAction::EditScrollback => {}
             NavigateAction::CopyMode => self.state.enter_copy_mode(&self.terminal_runtimes),
             NavigateAction::CopyModePageUp => {
-                self.state
-                    .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Page);
+                self.state.enter_copy_mode_scrolled(
+                    &self.terminal_runtimes,
+                    CopyModeEntryScroll::Page,
+                    CopyModeEntryDirection::Up,
+                );
                 self.dispatch_pending_app_scroll_sends();
             }
             NavigateAction::CopyModeHalfPageUp => {
                 self.state.enter_copy_mode_scrolled(
                     &self.terminal_runtimes,
                     CopyModeEntryScroll::HalfPage,
+                    CopyModeEntryDirection::Up,
                 );
                 self.dispatch_pending_app_scroll_sends();
             }
             NavigateAction::CopyModeLineUp => {
-                self.state
-                    .enter_copy_mode_scrolled(&self.terminal_runtimes, CopyModeEntryScroll::Line);
+                self.state.enter_copy_mode_scrolled(
+                    &self.terminal_runtimes,
+                    CopyModeEntryScroll::Line,
+                    CopyModeEntryDirection::Up,
+                );
+                self.dispatch_pending_app_scroll_sends();
+            }
+            NavigateAction::CopyModePageDown => {
+                self.state.enter_copy_mode_scrolled(
+                    &self.terminal_runtimes,
+                    CopyModeEntryScroll::Page,
+                    CopyModeEntryDirection::Down,
+                );
+                self.dispatch_pending_app_scroll_sends();
+            }
+            NavigateAction::CopyModeHalfPageDown => {
+                self.state.enter_copy_mode_scrolled(
+                    &self.terminal_runtimes,
+                    CopyModeEntryScroll::HalfPage,
+                    CopyModeEntryDirection::Down,
+                );
+                self.dispatch_pending_app_scroll_sends();
+            }
+            NavigateAction::CopyModeLineDown => {
+                self.state.enter_copy_mode_scrolled(
+                    &self.terminal_runtimes,
+                    CopyModeEntryScroll::Line,
+                    CopyModeEntryDirection::Down,
+                );
                 self.dispatch_pending_app_scroll_sends();
             }
             NavigateAction::Zoom => {
@@ -1946,6 +1977,9 @@ pub(crate) enum NavigateAction {
     CopyModePageUp,
     CopyModeHalfPageUp,
     CopyModeLineUp,
+    CopyModePageDown,
+    CopyModeHalfPageDown,
+    CopyModeLineDown,
     Zoom,
     EnterResizeMode,
     ResizePaneLeft,
@@ -1992,6 +2026,9 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
             | NavigateAction::CopyModePageUp
             | NavigateAction::CopyModeHalfPageUp
             | NavigateAction::CopyModeLineUp
+            | NavigateAction::CopyModePageDown
+            | NavigateAction::CopyModeHalfPageDown
+            | NavigateAction::CopyModeLineDown
     )
 }
 
@@ -2101,6 +2138,12 @@ fn non_indexed_action_for_key(
             NavigateAction::CopyModeHalfPageUp,
         ),
         (&kb.copy_mode_line_up, NavigateAction::CopyModeLineUp),
+        (&kb.copy_mode_page_down, NavigateAction::CopyModePageDown),
+        (
+            &kb.copy_mode_half_page_down,
+            NavigateAction::CopyModeHalfPageDown,
+        ),
+        (&kb.copy_mode_line_down, NavigateAction::CopyModeLineDown),
         (&kb.focus_pane_left, NavigateAction::FocusPaneLeft),
         (&kb.focus_pane_down, NavigateAction::FocusPaneDown),
         (&kb.focus_pane_up, NavigateAction::FocusPaneUp),
@@ -2403,15 +2446,36 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::RespawnPane => leave_navigate_mode(state),
         NavigateAction::EditScrollback => {}
         NavigateAction::CopyMode => state.enter_copy_mode(terminal_runtimes),
-        NavigateAction::CopyModePageUp => {
-            state.enter_copy_mode_scrolled(terminal_runtimes, CopyModeEntryScroll::Page)
-        }
-        NavigateAction::CopyModeHalfPageUp => {
-            state.enter_copy_mode_scrolled(terminal_runtimes, CopyModeEntryScroll::HalfPage)
-        }
-        NavigateAction::CopyModeLineUp => {
-            state.enter_copy_mode_scrolled(terminal_runtimes, CopyModeEntryScroll::Line)
-        }
+        NavigateAction::CopyModePageUp => state.enter_copy_mode_scrolled(
+            terminal_runtimes,
+            CopyModeEntryScroll::Page,
+            CopyModeEntryDirection::Up,
+        ),
+        NavigateAction::CopyModeHalfPageUp => state.enter_copy_mode_scrolled(
+            terminal_runtimes,
+            CopyModeEntryScroll::HalfPage,
+            CopyModeEntryDirection::Up,
+        ),
+        NavigateAction::CopyModeLineUp => state.enter_copy_mode_scrolled(
+            terminal_runtimes,
+            CopyModeEntryScroll::Line,
+            CopyModeEntryDirection::Up,
+        ),
+        NavigateAction::CopyModePageDown => state.enter_copy_mode_scrolled(
+            terminal_runtimes,
+            CopyModeEntryScroll::Page,
+            CopyModeEntryDirection::Down,
+        ),
+        NavigateAction::CopyModeHalfPageDown => state.enter_copy_mode_scrolled(
+            terminal_runtimes,
+            CopyModeEntryScroll::HalfPage,
+            CopyModeEntryDirection::Down,
+        ),
+        NavigateAction::CopyModeLineDown => state.enter_copy_mode_scrolled(
+            terminal_runtimes,
+            CopyModeEntryScroll::Line,
+            CopyModeEntryDirection::Down,
+        ),
         NavigateAction::Zoom => {
             state.toggle_zoom();
             leave_navigate_mode(state);
@@ -4813,6 +4877,59 @@ navigate_pane_down = "ctrl+j"
         assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.mode, Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn the_downward_scroll_gestures_are_bound_by_default() {
+        let state = AppState::test_new();
+        let resolve = |code, mods| {
+            non_indexed_action_for_key(
+                &state,
+                &TerminalKey::new(code, mods),
+                BindingDispatch::Prefix,
+            )
+        };
+
+        assert_eq!(
+            resolve(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            Some(NavigateAction::CopyModeHalfPageDown)
+        );
+        assert_eq!(
+            resolve(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            Some(NavigateAction::CopyModeLineDown)
+        );
+        assert_eq!(
+            resolve(KeyCode::PageDown, KeyModifiers::empty()),
+            Some(NavigateAction::CopyModePageDown)
+        );
+
+        // The mirrors they pair with must be untouched.
+        assert_eq!(
+            resolve(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            Some(NavigateAction::CopyModeHalfPageUp)
+        );
+        assert_eq!(
+            resolve(KeyCode::Char('k'), KeyModifiers::CONTROL),
+            Some(NavigateAction::CopyModeLineUp)
+        );
+        assert_eq!(
+            resolve(KeyCode::PageUp, KeyModifiers::empty()),
+            Some(NavigateAction::CopyModePageUp)
+        );
+    }
+
+    #[test]
+    fn the_downward_scroll_gestures_do_not_cancel_copy_mode() {
+        for action in [
+            NavigateAction::CopyModePageDown,
+            NavigateAction::CopyModeHalfPageDown,
+            NavigateAction::CopyModeLineDown,
+        ] {
+            assert!(
+                copy_mode_survives_prefix_action(action),
+                "{action:?} must scroll copy mode rather than cancel it"
+            );
+        }
     }
 
     #[test]

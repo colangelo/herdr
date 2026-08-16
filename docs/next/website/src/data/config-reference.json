@@ -482,6 +482,24 @@
           "description": "Enter copy mode and scroll the viewport up one line."
         },
         {
+          "key": "keys.copy_mode_page_down",
+          "type": "keybinding",
+          "default": "\"prefix+pagedown\"",
+          "description": "Scroll the focused pane down a page."
+        },
+        {
+          "key": "keys.copy_mode_half_page_down",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+d\"",
+          "description": "Scroll the focused pane down half a page."
+        },
+        {
+          "key": "keys.copy_mode_line_down",
+          "type": "keybinding",
+          "default": "\"prefix+ctrl+j\"",
+          "description": "Scroll the focused pane down one line."
+        },
+        {
           "key": "keys.focus_pane_left",
           "type": "keybinding",
           "default": "\"prefix+h\"",
