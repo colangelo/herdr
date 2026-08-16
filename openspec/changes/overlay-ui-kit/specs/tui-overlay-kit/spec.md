@@ -149,8 +149,12 @@ whether it honours held-key repeats, and which entries it contributes to the
 keybinding help panel — SHALL be derived from that value rather than restated as
 a separate list per behaviour.
 
-Every overlay SHALL contribute at least one keybinding help entry, and this
-SHALL be enforced by a test rather than by convention.
+Every overlay SHALL declare what it contributes to the keybinding help panel:
+either its entries, or — for a surface reached only by the mouse or by the app
+itself — the reason it has no keybinding to document. The declaration SHALL be
+exhaustive over the overlays, so an overlay that declares nothing does not
+build, and a test SHALL check that what an overlay claims is what the panel
+shows.
 
 #### Scenario: Mode and state cannot disagree
 
@@ -163,9 +167,14 @@ SHALL be enforced by a test rather than by convention.
 - **THEN** its input-source and key-repeat behaviour come from its own definition
   rather than from a separately maintained list
 
-#### Scenario: An overlay without help entries fails the build
+#### Scenario: An overlay that says nothing about the help panel fails the build
 
-- **WHEN** an overlay contributes no keybinding help entry
+- **WHEN** an overlay does not declare what it contributes to the panel
+- **THEN** the build fails
+
+#### Scenario: An overlay whose entry is missing from the panel fails the tests
+
+- **WHEN** an overlay declares an entry that the panel does not show
 - **THEN** the test suite fails
 
 ### Requirement: Overlays are covered by rendered-layout tests
