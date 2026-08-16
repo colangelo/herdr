@@ -1565,6 +1565,37 @@ pub enum PaneTodoEditLink {
     Set(PaneId),
 }
 
+/// The surface an edit modal was opened over, carried by the modal for the
+/// duration.
+///
+/// One value rather than a field per surface: an edit is opened over exactly
+/// one of them, and modelling it that way keeps "which one do we go back to"
+/// a match rather than a pair of `Option`s whose combinations mean nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuspendedTodoSurface {
+    Panel(PaneTodoPanelState),
+    Board(TodoBoardState),
+}
+
+impl SuspendedTodoSurface {
+    /// The overlay to reopen when the modal closes.
+    fn into_overlay(self) -> Overlay {
+        match self {
+            Self::Panel(panel) => Overlay::PaneTodos(panel),
+            Self::Board(board) => Overlay::TodoBoard(board),
+        }
+    }
+
+    /// The panel, when it is a panel — the board has no single pane to answer
+    /// for.
+    fn panel(&self) -> Option<&PaneTodoPanelState> {
+        match self {
+            Self::Panel(panel) => Some(panel),
+            Self::Board(_) => None,
+        }
+    }
+}
+
 /// TUI-only state for the pane todo edit modal: the in-progress buffer until
 /// save. Deliberately its own `text` rather than the shared `name_input`, so a
 /// cancelled rename can never leak into a todo save.
@@ -1582,11 +1613,11 @@ pub struct PaneTodoEditState {
     /// Only meaningful while editing an existing todo; a todo being composed
     /// is never already done, and `todo.add` has no `done` to carry it.
     pub done: bool,
-    /// The todo panel this edit was opened from, suspended here for the
+    /// The todo surface this edit was opened from, suspended here for the
     /// duration and handed back when the modal closes. `None` when the modal
     /// was opened straight from a keybinding, which is what "return to the
     /// terminal instead" is read from.
-    pub suspended_panel: Option<PaneTodoPanelState>,
+    pub suspended: Option<SuspendedTodoSurface>,
 }
 
 /// Footer buttons of the todo board, in render order. `open` leads because
@@ -2584,14 +2615,17 @@ impl AppState {
                 self.mode = Mode::Terminal;
             }
         }
-        // A panel suspended behind an edit modal points at the pane too.
+        // A panel suspended behind an edit modal points at the pane too. A
+        // suspended *board* does not: it is the session's, and it rebuilds
+        // from the live store when it comes back.
         if self.pane_todo_edit().is_some_and(|edit| {
-            edit.suspended_panel
+            edit.suspended
                 .as_ref()
+                .and_then(SuspendedTodoSurface::panel)
                 .is_some_and(|panel| panel.pane_id == pane_id)
         }) {
             if let Some(edit) = self.pane_todo_edit_mut() {
-                edit.suspended_panel = None;
+                edit.suspended = None;
             }
         }
         if self.confirm_close_pane == Some(pane_id) {
@@ -2625,7 +2659,8 @@ impl AppState {
     pub(crate) fn open_pane_todo_panel(&self) -> Option<&PaneTodoPanelState> {
         self.pane_todos().or_else(|| {
             self.editing_pane_todo()
-                .and_then(|edit| edit.suspended_panel.as_ref())
+                .and_then(|edit| edit.suspended.as_ref())
+                .and_then(SuspendedTodoSurface::panel)
         })
     }
 
@@ -2767,9 +2802,10 @@ impl AppState {
         else {
             return;
         };
-        // The panel the modal opened over is suspended onto it, so closing the
-        // modal hands it back rather than the panel outliving its own mode.
-        let suspended_panel = self.take_pane_todos();
+        // The surface the modal opened over is suspended onto it, so closing
+        // the modal hands it back rather than that surface outliving its own
+        // mode.
+        let suspended = self.take_suspended_todo_surface();
         self.open_overlay(crate::app::state::Overlay::PaneTodoEdit(
             PaneTodoEditState {
                 pane_id,
@@ -2781,14 +2817,14 @@ impl AppState {
                 priority: todo.priority,
                 link: PaneTodoEditLink::Keep,
                 done: todo.done,
-                suspended_panel,
+                suspended,
             },
         ));
     }
 
     /// Open the edit modal on a brand-new todo for a pane.
     pub(crate) fn open_new_pane_todo(&mut self, pane_id: PaneId) {
-        let suspended_panel = self.take_pane_todos();
+        let suspended = self.take_suspended_todo_surface();
         self.open_overlay(crate::app::state::Overlay::PaneTodoEdit(
             PaneTodoEditState {
                 pane_id,
@@ -2799,18 +2835,30 @@ impl AppState {
                 priority: crate::terminal::todo::TodoPriority::default(),
                 link: PaneTodoEditLink::Keep,
                 done: false,
-                suspended_panel,
+                suspended,
             },
         ));
     }
 
-    /// Close the edit modal, reopening the panel it was suspended over.
-    pub(crate) fn close_pane_todo_edit(&mut self) {
-        if let Some(edit) = self.take_pane_todo_edit() {
-            if let Some(panel) = edit.suspended_panel {
-                self.open_overlay(crate::app::state::Overlay::PaneTodos(panel));
-            }
-        }
+    /// Close the edit modal, reopening the surface it was suspended over.
+    /// Answers whether one came back, since the caller's way out depends on it.
+    pub(crate) fn close_pane_todo_edit(&mut self) -> bool {
+        let Some(edit) = self.take_pane_todo_edit() else {
+            return false;
+        };
+        let Some(surface) = edit.suspended else {
+            return false;
+        };
+        self.open_overlay(surface.into_overlay());
+        true
+    }
+
+    /// Take whichever todo surface is open, to be carried by the edit modal
+    /// about to replace it.
+    fn take_suspended_todo_surface(&mut self) -> Option<SuspendedTodoSurface> {
+        self.take_pane_todos()
+            .map(SuspendedTodoSurface::Panel)
+            .or_else(|| self.take_todo_board().map(SuspendedTodoSurface::Board))
     }
 
     /// How a staged link target is named in the edit modal. Deliberately the
@@ -4406,7 +4454,7 @@ mod tests {
                 priority: crate::terminal::todo::TodoPriority::default(),
                 link: PaneTodoEditLink::Keep,
                 done: false,
-                suspended_panel: None,
+                suspended: None,
             }),
             OverlayKind::ReleaseNotes => Overlay::ReleaseNotes(ReleaseNotesState {
                 version: "0.0.0".into(),
