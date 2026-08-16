@@ -1,7 +1,14 @@
 # handoff-agent-state-resurface Specification
 
 ## Purpose
-TBD - created by archiving change resurface-working-panes-after-handoff. Update Purpose after archive.
+Define how live handoff (`herdr update --handoff`) brings working agents back
+without user interaction: the runtime manifest carries each pane's live agent
+detection state, restore seeds imported panes from it instead of hardcoded
+Idle, and a post-commit background sweep re-verifies every imported agent pane
+— repaint nudge plus a throttle-bypassing detection rescan, staggered per pane,
+with no client attached — replacing the one-shot nudge that used to be deferred
+to first client attach. Covers the older-manifest fallback and which panes are
+still seeded Idle.
 ## Requirements
 ### Requirement: Handoff manifest carries live agent state
 The handoff runtime manifest SHALL include each pane's live agent detection state (Working, Blocked, or Idle) as an optional per-pane field. When the field is absent (manifest produced by an older server), the receiving server SHALL behave as if the state were Idle.

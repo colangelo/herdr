@@ -1,7 +1,11 @@
 # sidebar-number-prefix Specification
 
 ## Purpose
-TBD - created by archiving change sidebar-number-prefix. Update Purpose after archive.
+Define `ui.workspace_number_prefix` and `ui.agent_number_prefix`: optional
+leader glyphs rendered immediately before the right-aligned jump number, in the
+number's color, to hint the jump chord. They apply only under
+`ui.sidebar_style = "editorial"`, an empty prefix renders the bare number
+exactly as before, and both apply on config live-reload.
 ## Requirements
 ### Requirement: Optional jump-number prefix labels
 The system SHALL provide `ui.workspace_number_prefix` and `ui.agent_number_prefix` string options (default `""`). When `ui.sidebar_style` is `editorial` and a prefix is non-empty, the corresponding list SHALL render the prefix immediately before the right-aligned jump number, in the number's color, as one right-aligned label. Empty prefixes SHALL render the bare number exactly as before. The options SHALL apply on config live-reload.

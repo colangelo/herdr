@@ -1,7 +1,12 @@
 # pane-clear-scrollback Specification
 
 ## Purpose
-TBD - created by archiving change clear-pane-scrollback. Update Purpose after archive.
+Define on-demand purging of a pane's saved scrollback with tmux
+`clear-history` semantics: the visible screen, terminal modes, and the running
+process are untouched, and the purge is delivered by injecting `CSI 3J` through
+the existing pane write path rather than a full terminal reset. Covers the
+keybinding, the socket API method, and the CLI that reach it, and the rule that
+a Herdr-originated clear is not dropped by passthrough filtering.
 ## Requirements
 ### Requirement: Clear a pane's saved scrollback
 

@@ -1,7 +1,14 @@
 # remote-binary-discovery Specification
 
 ## Purpose
-TBD - created by archiving change remote-binary-name-discovery. Update Purpose after archive.
+Define how a `--remote` client finds, installs, and reuses the herdr binary on
+a remote host when several channels are installed side by side: discovery
+searches under the name the client was itself invoked as before the canonical
+`herdr`, across both the remote `PATH` and every known install path; a managed
+install goes to `~/.local/bin/<invoked name>` so channels cannot overwrite one
+another; names interpolated into remote commands must be shell-safe or fall
+back to `herdr`; and a remote server already matching the client's version and
+protocol is attached to rather than reinstalled or stopped.
 ## Requirements
 ### Requirement: Discovery follows the invoked binary name
 When preparing a remote host, the client SHALL search for a remote herdr binary under the name it was itself invoked as, and SHALL also search under the canonical name `herdr`, most specific first. The search SHALL apply both names to the remote `PATH` lookup and to every known install path probed on the remote.

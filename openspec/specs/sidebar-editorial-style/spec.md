@@ -1,7 +1,13 @@
 # sidebar-editorial-style Specification
 
 ## Purpose
-TBD - created by archiving change sidebar-editorial-style. Update Purpose after archive.
+Define the opt-in `ui.sidebar_style = "editorial"` sidebar preset — jump
+numbers right-aligned on the entry's name row, thin uppercase section headers,
+dimmed meta lines on non-active entries — with `"default"` leaving rendering
+unchanged, plus the `[ui.state_colors]` per-state overrides for the state
+glyphs and state text across the expanded sidebar, collapsed sidebar, mobile
+switcher, and navigator. Both apply on config live-reload, and the state colors
+are independent of the style preset.
 ## Requirements
 ### Requirement: Editorial sidebar preset
 The system SHALL provide `ui.sidebar_style` with values `default` and `editorial` (default `default`). With `default`, sidebar rendering SHALL be unchanged from pre-change behavior. With `editorial`, in both the spaces list and the agents panel: jump numbers SHALL render right-aligned on the entry's first (name) row instead of leading the second row; section headers SHALL render as thin uppercase (no bold, dimmed); and the meta line of non-active entries SHALL render dimmed while the active entry keeps its accent styling.
