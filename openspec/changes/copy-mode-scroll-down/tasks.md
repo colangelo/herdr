@@ -28,6 +28,6 @@ path a direction, group 2 binds the gestures to it.
 - [x] 2.3 Tests: each default chord resolves to its action; the actions do not
       cancel copy mode; the help panel lists them
 - [x] 2.4 Docs: keyboard page and the unreleased changelog
-- [ ] 2.5 `just check` green; dogfood on `-ac-beta` against the reported flow —
+- [x] 2.5 `just check` green; dogfood on `-ac-beta` against the reported flow —
       scroll up in an alt-screen agent pane, switch space, come back, press
       `prefix+ctrl+d` and go down
