@@ -3263,13 +3263,21 @@ impl PaneRuntime {
         self.io.foreground_process_group_id()
     }
 
+    /// The directory a pane created from this one should start in: the running
+    /// foreground command's, or the pane's own when nothing is running.
     pub fn follow_cwd(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]
         {
-            let leader_cwd = self
-                .reported_foreground_process_group_id()
-                .and_then(usable_process_cwd);
-            leader_cwd.or_else(|| self.cwd())
+            let child_pid = self.child_pid.load(Ordering::Acquire);
+            let leader = self.reported_foreground_process_group_id();
+            // A leader that *is* the pane's own child is not a command to
+            // follow - it is the shell at its prompt, or a wrapper whose
+            // directory is frozen at launch. Either way `cwd` has the better
+            // answer, because it sees the shell a wrapper runs one PTY below.
+            if leader.is_none_or(|leader| leader == child_pid) {
+                return self.cwd();
+            }
+            leader.and_then(usable_process_cwd).or_else(|| self.cwd())
         }
 
         #[cfg(not(unix))]
@@ -4192,6 +4200,46 @@ mod tests {
             runtime.cwd(),
             Some(std::path::PathBuf::from("/reported")),
             "the shell's own claim outranks anything inferred from the process table"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn follow_cwd_uses_the_pane_directory_when_its_own_child_holds_the_foreground() {
+        let (tx, _rx) = mpsc::channel(4);
+        let (resize_tx, _resize_rx) = watch::channel((80, 24, 0, 0));
+        let terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        let runtime = PaneRuntime {
+            pane_id: PaneId::from_raw(0),
+            terminal: Arc::new(PaneTerminal::new(
+                GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap(),
+            )),
+            io: PaneRuntimeIo::TestChannel {
+                sender: tx,
+                resize_tx,
+            },
+            current_size: Cell::new((80, 24, 0, 0)),
+            child_pid: Arc::new(AtomicU32::new(0)),
+            nested_agent_process_group_id: Arc::new(AtomicU32::new(0)),
+            reported_cwd: Arc::new(Mutex::new(None)),
+            resolved_cwd: Arc::new(Mutex::new(Some(std::path::PathBuf::from("/resolved")))),
+            child_wait_completed: None,
+            kitty_keyboard_flags: Arc::new(AtomicU16::new(0)),
+            detection_content_seq: Arc::new(AtomicU64::new(0)),
+            full_lifecycle_authority_active: Arc::new(AtomicBool::new(false)),
+            detect_reset_notify: Arc::new(Notify::new()),
+            pending_release: Arc::new(Mutex::new(None)),
+            preserve_processes_on_drop: true,
+            detect_handle: Some(tokio::spawn(async {}).abort_handle()),
+        };
+
+        // A test runtime has no PTY, so no foreground group is reported: the
+        // "nothing is running in front" case, where a wrapper's own frozen
+        // directory must not outrank the resolved one.
+        assert_eq!(
+            runtime.follow_cwd(),
+            Some(std::path::PathBuf::from("/resolved")),
+            "a pane with nothing running seeds new panes from its own directory"
         );
     }
 
