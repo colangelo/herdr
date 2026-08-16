@@ -142,6 +142,71 @@ fn todo_glyph(todo: &PaneTodo) -> &'static str {
     }
 }
 
+/// Draw one todo on one row: the state glyph, the todo's first line, and its
+/// link chip.
+///
+/// Shared with the todo board, which is the whole reason it is a function: the
+/// board is "the panel widened", so a todo that looked different there would
+/// read as a second feature rather than a second view of the same one.
+pub(crate) fn render_pane_todo_row(
+    frame: &mut Frame,
+    app: &AppState,
+    row_rect: Rect,
+    todo: &PaneTodo,
+    is_selected: bool,
+) {
+    let p = &app.palette;
+    let public_id = app.pane_todo_link_public_id(todo);
+    let chip = todo
+        .link
+        .as_ref()
+        .and_then(|link| pane_todo_link_chip(row_rect, public_id.as_deref(), &link.label));
+    let chip_width = chip.as_ref().map(|(rect, _)| rect.width).unwrap_or(0) as usize;
+
+    let (glyph_style, text_style, row_style) = if is_selected {
+        // The band alone marks selection; the glyph keeps signalling priority
+        // and done state so a selected row stays legible.
+        let base = Style::default().fg(panel_contrast_fg(p)).bg(p.accent);
+        (base, base, base)
+    } else if todo.done {
+        (
+            Style::default().fg(p.overlay0),
+            Style::default()
+                .fg(p.overlay0)
+                .add_modifier(Modifier::CROSSED_OUT),
+            Style::default(),
+        )
+    } else {
+        (
+            Style::default().fg(app.pane_todo_indicator_color(Some(todo.priority))),
+            Style::default().fg(p.text),
+            Style::default(),
+        )
+    };
+
+    let text_budget = (row_rect.width as usize).saturating_sub(3 + chip_width);
+    let text = pane_todo_row_text(&todo.text, text_budget);
+    let pad = text_budget.saturating_sub(display_width(&text));
+    let line = Line::from(vec![
+        Span::styled(todo_glyph(todo), glyph_style),
+        Span::styled(text, text_style),
+        Span::styled(" ".repeat(pad), row_style),
+    ]);
+    frame.render_widget(Paragraph::new(line).style(row_style), row_rect);
+
+    if let Some((chip_rect, chip_text)) = chip {
+        // A dead link keeps its captured label but reads as inert.
+        let chip_style = if is_selected {
+            Style::default().fg(panel_contrast_fg(p)).bg(p.accent)
+        } else if app.pane_todo_link_target(todo).is_some() {
+            Style::default().fg(p.blue)
+        } else {
+            Style::default().fg(p.overlay0).add_modifier(Modifier::DIM)
+        };
+        frame.render_widget(Paragraph::new(chip_text).style(chip_style), chip_rect);
+    }
+}
+
 pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
     let Some(rect) = app.pane_todo_panel_rect() else {
         return;
@@ -175,58 +240,14 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
             .take(list.height as usize)
             .enumerate()
         {
-            let idx = start + row;
             let row_rect = Rect::new(list.x, list.y + row as u16, list.width, 1);
-            let is_selected = idx == panel.list.selected;
-            let public_id = app.pane_todo_link_public_id(todo);
-            let chip = todo
-                .link
-                .as_ref()
-                .and_then(|link| pane_todo_link_chip(row_rect, public_id.as_deref(), &link.label));
-            let chip_width = chip.as_ref().map(|(rect, _)| rect.width).unwrap_or(0) as usize;
-
-            let (glyph_style, text_style, row_style) = if is_selected {
-                // The band alone marks selection; the glyph keeps signalling
-                // priority and done state so a selected row stays legible.
-                let base = Style::default().fg(panel_contrast_fg(p)).bg(p.accent);
-                (base, base, base)
-            } else if todo.done {
-                (
-                    Style::default().fg(p.overlay0),
-                    Style::default()
-                        .fg(p.overlay0)
-                        .add_modifier(Modifier::CROSSED_OUT),
-                    Style::default(),
-                )
-            } else {
-                (
-                    Style::default().fg(app.pane_todo_indicator_color(Some(todo.priority))),
-                    Style::default().fg(p.text),
-                    Style::default(),
-                )
-            };
-
-            let text_budget = (list.width as usize).saturating_sub(3 + chip_width);
-            let text = pane_todo_row_text(&todo.text, text_budget);
-            let pad = text_budget.saturating_sub(display_width(&text));
-            let line = Line::from(vec![
-                Span::styled(todo_glyph(todo), glyph_style),
-                Span::styled(text, text_style),
-                Span::styled(" ".repeat(pad), row_style),
-            ]);
-            frame.render_widget(Paragraph::new(line).style(row_style), row_rect);
-
-            if let Some((chip_rect, chip_text)) = chip {
-                // A dead link keeps its captured label but reads as inert.
-                let chip_style = if is_selected {
-                    Style::default().fg(panel_contrast_fg(p)).bg(p.accent)
-                } else if app.pane_todo_link_target(todo).is_some() {
-                    Style::default().fg(p.blue)
-                } else {
-                    Style::default().fg(p.overlay0).add_modifier(Modifier::DIM)
-                };
-                frame.render_widget(Paragraph::new(chip_text).style(chip_style), chip_rect);
-            }
+            render_pane_todo_row(
+                frame,
+                app,
+                row_rect,
+                todo,
+                start + row == panel.list.selected,
+            );
         }
     }
 
