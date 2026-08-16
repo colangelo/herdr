@@ -7,9 +7,9 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 1. Snapshot harness (the safety net, before anything moves)
 
-- [ ] 1.1 Promote `row_text(buffer, rect)` from `src/ui/todo_panel.rs`'s tests into a shared test utility that renders an `AppState` into a `TestBackend` at a fixed size and returns the rows of a rect
-- [ ] 1.2 Write a rendered-layout test for each overlay against **current** behaviour: notification center (both positions, empty and populated), todo panel (empty, populated, narrow), navigator, keybind help, settings, context menu, global menu, release notes, onboarding
-- [ ] 1.3 Land group 1 green before touching any geometry. A later group whose snapshot changes has found a real difference; do not update the expected rows to make it pass without saying why in the commit
+- [x] 1.1 Promote `row_text(buffer, rect)` from `src/ui/todo_panel.rs`'s tests into a shared test utility that renders an `AppState` into a `TestBackend` at a fixed size and returns the rows of a rect
+- [x] 1.2 Write a rendered-layout test for each overlay against **current** behaviour: notification center (both positions, empty and populated), todo panel (empty, populated, narrow), navigator, keybind help, settings, context menu, global menu, release notes, onboarding
+- [x] 1.3 Land group 1 green before touching any geometry. A later group whose snapshot changes has found a real difference; do not update the expected rows to make it pass without saying why in the commit
 
 ## 2. Anchored panel geometry
 
