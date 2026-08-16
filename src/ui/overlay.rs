@@ -9,6 +9,8 @@
 //! Nothing here holds mutable widget state: `compute_view` mutates, `render`
 //! does not, and the kit is data and geometry rather than a widget tree.
 
+mod button_row;
 mod geometry;
 
+pub(crate) use button_row::{ButtonRow, ButtonRowHit, ButtonSpec};
 pub(crate) use geometry::{AnchoredPanelSpec, PanelGeometry, VerticalAnchor};

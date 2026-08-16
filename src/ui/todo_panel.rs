@@ -6,132 +6,65 @@ use ratatui::{
     Frame,
 };
 
+use super::overlay::{ButtonRow, ButtonSpec};
 use super::text::{display_width, display_width_u16, truncate_end};
-use super::widgets::{
-    action_button_row_rects, action_button_width, panel_contrast_fg, render_action_button,
-    render_panel_shell, ActionButtonSpec,
-};
+use super::widgets::{panel_contrast_fg, render_action_button, render_panel_shell};
 use crate::app::state::{AppState, PaneTodoPanelButton};
 use crate::terminal::todo::{PaneTodo, TodoPriority};
 
-/// Footer buttons in the notification center's language: the shortcut hint
+/// The footer row, in the notification center's language: the shortcut hint
 /// inside the filled box, in render order.
-const ADD_BUTTON: (&str, &str) = ("a", "add");
-const TOGGLE_BUTTON: (&str, &str) = ("spc", "toggle");
-const GO_BUTTON: (&str, &str) = ("g", "go");
-const CLEAR_DONE_BUTTON: (&str, &str) = ("c", "clear done");
-const CLOSE_BUTTON: (&str, &str) = ("esc", "close");
-
-fn button_spec(button: (&'static str, &'static str)) -> ActionButtonSpec<'static> {
-    ActionButtonSpec {
-        hint: Some(button.0),
-        label: button.1,
-    }
-}
-
-/// Footer button rects; the mouse layer and the render agree on this geometry.
-/// `toggle` and `clear_done` are absent on a pane with no todos — there is
+///
+/// `toggle` and `clear done` are absent on a pane with no todos — there is
 /// nothing to toggle or clear — and `go` is absent unless the selected todo's
-/// link resolves, since there is nowhere to go otherwise. `add` and `close`
+/// link resolves, since there is nowhere to go otherwise. When the row is too
+/// narrow they drop in that order, `go` last: following a link is the one
+/// action whose key nothing else on screen advertises. `add` and `close`
 /// always survive: an empty panel that could not add is the dead end this
 /// footer exists to prevent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PaneTodoPanelButtonRects {
-    pub add: Rect,
-    pub toggle: Option<Rect>,
-    pub go: Option<Rect>,
-    pub clear_done: Option<Rect>,
-    pub close: Rect,
-}
-
-impl PaneTodoPanelButtonRects {
-    pub(crate) fn hit(&self, col: u16, row: u16) -> Option<PaneTodoPanelButton> {
-        let contains = |rect: Rect| col >= rect.x && col < rect.x + rect.width && row == rect.y;
-        if contains(self.add) {
-            return Some(PaneTodoPanelButton::Add);
-        }
-        if self.toggle.is_some_and(contains) {
-            return Some(PaneTodoPanelButton::Toggle);
-        }
-        if self.go.is_some_and(contains) {
-            return Some(PaneTodoPanelButton::Go);
-        }
-        if self.clear_done.is_some_and(contains) {
-            return Some(PaneTodoPanelButton::ClearDone);
-        }
-        if contains(self.close) {
-            return Some(PaneTodoPanelButton::Close);
-        }
-        None
-    }
-}
-
 pub(crate) fn pane_todo_panel_button_rects(
-    inner: Rect,
+    footer_row: Rect,
     has_todos: bool,
     has_live_link: bool,
-) -> Option<PaneTodoPanelButtonRects> {
-    // Needs room for the whole footer block, blank row included, or the
-    // buttons would sit flush against the last todo.
-    if inner.width == 0 || inner.height < super::widgets::FOOTER_ROWS {
-        return None;
-    }
-    let gap = 2u16;
-    let row_offset = inner.height - 1;
-
-    // Widest layout first, each step dropping the least essential box still
-    // standing. `go` is the last of the three to go: following a link is the
-    // one action whose key nothing else on screen advertises. The final pair is
-    // returned whether or not it fits, matching how the row behaved before
-    // `add` joined it.
-    for (want_toggle, want_clear, want_go) in [
-        (true, true, true),
-        (false, true, true),
-        (false, false, true),
-        (false, false, false),
-    ] {
-        let with_toggle = want_toggle && has_todos;
-        let with_clear = want_clear && has_todos;
-        let with_go = want_go && has_live_link;
-
-        let mut specs = Vec::with_capacity(5);
-        specs.push(button_spec(ADD_BUTTON));
-        if with_toggle {
-            specs.push(button_spec(TOGGLE_BUTTON));
-        }
-        if with_go {
-            specs.push(button_spec(GO_BUTTON));
-        }
-        if with_clear {
-            specs.push(button_spec(CLEAR_DONE_BUTTON));
-        }
-        specs.push(button_spec(CLOSE_BUTTON));
-
-        let width: u16 = specs
-            .iter()
-            .map(|spec| action_button_width(spec.hint, spec.label))
-            .sum::<u16>()
-            + gap * (specs.len() as u16 - 1);
-        let last = !want_toggle && !want_clear && !want_go;
-        if width > inner.width && !last {
-            continue;
-        }
-
-        let mut rects = action_button_row_rects(inner, &specs, gap, row_offset).into_iter();
-        let add = rects.next()?;
-        let toggle = with_toggle.then(|| rects.next()).flatten();
-        let go = with_go.then(|| rects.next()).flatten();
-        let clear_done = with_clear.then(|| rects.next()).flatten();
-        let close = rects.next()?;
-        return Some(PaneTodoPanelButtonRects {
-            add,
-            toggle,
-            go,
-            clear_done,
-            close,
+) -> Option<ButtonRow<PaneTodoPanelButton>> {
+    let mut specs = Vec::with_capacity(5);
+    specs.push(ButtonSpec {
+        button: PaneTodoPanelButton::Add,
+        hint: Some("a"),
+        label: "add",
+        drop_rank: None,
+    });
+    if has_todos {
+        specs.push(ButtonSpec {
+            button: PaneTodoPanelButton::Toggle,
+            hint: Some("spc"),
+            label: "toggle",
+            drop_rank: Some(0),
         });
     }
-    None
+    if has_live_link {
+        specs.push(ButtonSpec {
+            button: PaneTodoPanelButton::Go,
+            hint: Some("g"),
+            label: "go",
+            drop_rank: Some(2),
+        });
+    }
+    if has_todos {
+        specs.push(ButtonSpec {
+            button: PaneTodoPanelButton::ClearDone,
+            hint: Some("c"),
+            label: "clear done",
+            drop_rank: Some(1),
+        });
+    }
+    specs.push(ButtonSpec {
+        button: PaneTodoPanelButton::Close,
+        hint: Some("esc"),
+        label: "close",
+        drop_rank: None,
+    });
+    ButtonRow::layout(footer_row, &specs)
 }
 
 /// The link chip at a row's right edge, for a todo that carries a link. One
@@ -312,47 +245,15 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
                     .add_modifier(Modifier::BOLD)
             }
         };
-        render_action_button(
-            frame,
-            buttons.add,
-            Some(ADD_BUTTON.0),
-            ADD_BUTTON.1,
-            style_for(PaneTodoPanelButton::Add),
-        );
-        if let Some(toggle) = buttons.toggle {
+        for placed in buttons.placed() {
             render_action_button(
                 frame,
-                toggle,
-                Some(TOGGLE_BUTTON.0),
-                TOGGLE_BUTTON.1,
-                style_for(PaneTodoPanelButton::Toggle),
+                placed.rect,
+                placed.hint,
+                placed.label,
+                style_for(placed.button),
             );
         }
-        if let Some(go) = buttons.go {
-            render_action_button(
-                frame,
-                go,
-                Some(GO_BUTTON.0),
-                GO_BUTTON.1,
-                style_for(PaneTodoPanelButton::Go),
-            );
-        }
-        if let Some(clear_done) = buttons.clear_done {
-            render_action_button(
-                frame,
-                clear_done,
-                Some(CLEAR_DONE_BUTTON.0),
-                CLEAR_DONE_BUTTON.1,
-                style_for(PaneTodoPanelButton::ClearDone),
-            );
-        }
-        render_action_button(
-            frame,
-            buttons.close,
-            Some(CLOSE_BUTTON.0),
-            CLOSE_BUTTON.1,
-            style_for(PaneTodoPanelButton::Close),
-        );
     }
 }
 
@@ -779,11 +680,12 @@ mod tests {
             .pane_todo_panel_buttons()
             .expect("an empty panel still offers a footer");
         assert!(
-            buttons.toggle.is_none() && buttons.clear_done.is_none(),
+            buttons.rect(PaneTodoPanelButton::Toggle).is_none()
+                && buttons.rect(PaneTodoPanelButton::ClearDone).is_none(),
             "nothing to toggle or clear on a pane with no todos"
         );
 
-        let footer = row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1));
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
         assert!(footer.contains("a add"), "the way out of the empty state");
         assert!(footer.contains("esc close"));
     }
@@ -799,7 +701,7 @@ mod tests {
         assert!(
             app.pane_todo_panel_buttons()
                 .expect("footer buttons")
-                .go
+                .rect(PaneTodoPanelButton::Go)
                 .is_none(),
             "an unlinked todo has nowhere to go"
         );
@@ -829,16 +731,18 @@ mod tests {
 
         link(&mut app, Some(pane_id), 300);
         let buttons = app.pane_todo_panel_buttons().expect("footer buttons");
-        let go = buttons.go.expect("a live link offers the go button");
+        let go = buttons
+            .rect(PaneTodoPanelButton::Go)
+            .expect("a live link offers the go button");
         assert_eq!(
-            buttons.hit(go.x, go.y),
+            buttons.button_at(go.x, go.y),
             Some(PaneTodoPanelButton::Go),
             "the drawn box is the box the mouse hits"
         );
         let rect = app.pane_todo_panel_rect().expect("panel rect should exist");
         let buffer = draw(&app);
         assert!(
-            row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1)).contains("g go"),
+            row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1)).contains("g go"),
             "the footer advertises the key that was already there"
         );
 
@@ -847,7 +751,7 @@ mod tests {
         assert!(app
             .pane_todo_panel_buttons()
             .expect("footer buttons")
-            .go
+            .rect(PaneTodoPanelButton::Go)
             .is_none());
     }
 
@@ -866,10 +770,10 @@ mod tests {
         // convention, so nothing sits flush against the footer.
         assert_eq!(
             list.y + list.height + 1,
-            buttons.close.y,
+            buttons.row_y(),
             "one blank row between the list and the buttons"
         );
-        assert_eq!(buttons.close.y, rect.y + rect.height - 2);
+        assert_eq!(buttons.row_y(), rect.y + rect.height - 2);
 
         // A short todo pins the panel to its 30-cell minimum, and 28 inner
         // cells hold only two boxes: all four need 7 + 12 + 14 + 11 plus three
@@ -877,11 +781,11 @@ mod tests {
         // `close` are what is left. `add` outranks `clear done` here because
         // it is this panel's primary action and the one a mouse user has no
         // other route to — clearing done work keeps its `c` key.
-        assert!(buttons.toggle.is_none());
-        assert!(buttons.clear_done.is_none());
+        assert!(buttons.rect(PaneTodoPanelButton::Toggle).is_none());
+        assert!(buttons.rect(PaneTodoPanelButton::ClearDone).is_none());
 
         let buffer = draw(&app);
-        let footer = row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1));
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
         assert!(footer.contains("a add"));
         assert!(footer.contains("esc close"));
 
@@ -909,11 +813,11 @@ mod tests {
             .pane_todo_panel_buttons()
             .expect("footer buttons should exist");
 
-        assert!(buttons.toggle.is_some());
-        assert!(buttons.clear_done.is_some());
+        assert!(buttons.rect(PaneTodoPanelButton::Toggle).is_some());
+        assert!(buttons.rect(PaneTodoPanelButton::ClearDone).is_some());
 
         let buffer = draw(&app);
-        let footer = row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1));
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
         assert!(footer.contains("a add"));
         assert!(footer.contains("spc toggle"));
         assert!(footer.contains("c clear done"));

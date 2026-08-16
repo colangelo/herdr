@@ -234,7 +234,7 @@ impl AppState {
                 MouseEventKind::Moved => {
                     let over_button = self
                         .notification_center_buttons()
-                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row));
+                        .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         if let Some(center) = self.notification_center.as_mut() {
                             center.selected = idx;
@@ -250,27 +250,27 @@ impl AppState {
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         return Some(MouseAction::ActivateNotificationRow { index: idx });
                     }
+                    use crate::app::state::NotificationCenterButton as Button;
+                    use crate::ui::overlay::ButtonRowHit;
                     match self
                         .notification_center_buttons()
                         .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
                     {
-                        Some(crate::app::state::NotificationCenterButton::MarkRead) => {
+                        Some(ButtonRowHit::Button(Button::MarkRead)) => {
                             self.mark_all_notifications_read();
                             return None;
                         }
-                        Some(crate::app::state::NotificationCenterButton::Clear) => {
+                        Some(ButtonRowHit::Button(Button::Clear)) => {
                             return Some(MouseAction::ClearNotifications);
                         }
-                        Some(crate::app::state::NotificationCenterButton::Close) => {
+                        Some(ButtonRowHit::Button(Button::Close)) => {
                             self.close_notification_center();
                             leave_modal(self);
                             return None;
                         }
+                        // A near-miss elsewhere on the buttons' row is inert.
+                        Some(ButtonRowHit::NearMiss) => return None,
                         None => {}
-                    }
-                    // A near-miss elsewhere on the buttons' row is inert.
-                    if self.notification_center_footer_row_y() == Some(mouse.row) {
-                        return None;
                     }
                     self.close_notification_center();
                     leave_modal(self);
@@ -285,7 +285,7 @@ impl AppState {
                 MouseEventKind::Moved => {
                     let over_button = self
                         .pane_todo_panel_buttons()
-                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row));
+                        .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
                     if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
                         if let Some(panel) = self.pane_todos.as_mut() {
                             panel.selected = idx;
@@ -309,32 +309,31 @@ impl AppState {
                             PaneTodoAction::Edit
                         }));
                     }
+                    use crate::ui::overlay::ButtonRowHit;
                     match self
                         .pane_todo_panel_buttons()
                         .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
                     {
-                        Some(PaneTodoPanelButton::Add) => {
+                        Some(ButtonRowHit::Button(PaneTodoPanelButton::Add)) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::Add));
                         }
-                        Some(PaneTodoPanelButton::Toggle) => {
+                        Some(ButtonRowHit::Button(PaneTodoPanelButton::Toggle)) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::ToggleDone));
                         }
-                        Some(PaneTodoPanelButton::Go) => {
+                        Some(ButtonRowHit::Button(PaneTodoPanelButton::Go)) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::FollowLink));
                         }
-                        Some(PaneTodoPanelButton::ClearDone) => {
+                        Some(ButtonRowHit::Button(PaneTodoPanelButton::ClearDone)) => {
                             return Some(MouseAction::PaneTodo(PaneTodoAction::ClearDone));
                         }
-                        Some(PaneTodoPanelButton::Close) => {
+                        Some(ButtonRowHit::Button(PaneTodoPanelButton::Close)) => {
                             self.close_pane_todos();
                             leave_modal(self);
                             return None;
                         }
+                        // A near-miss elsewhere on the buttons' row is inert.
+                        Some(ButtonRowHit::NearMiss) => return None,
                         None => {}
-                    }
-                    // A near-miss elsewhere on the buttons' row is inert.
-                    if self.pane_todo_panel_footer_row_y() == Some(mouse.row) {
-                        return None;
                     }
                     self.close_pane_todos();
                     leave_modal(self);
@@ -1604,18 +1603,13 @@ impl AppState {
     /// for both a list row and the footer.
     pub(crate) fn notification_center_buttons(
         &self,
-    ) -> Option<crate::ui::NotificationCenterButtonRects> {
+    ) -> Option<crate::ui::overlay::ButtonRow<crate::app::state::NotificationCenterButton>> {
         if self.notification_log.is_empty() {
             return None;
         }
-        crate::ui::notification_center_button_rects(self.notification_center_geometry()?.inner)
-    }
-
-    /// Y of the footer row that holds the buttons. Clicks in this row but
-    /// outside a button are inert rather than closing the panel, so a
-    /// near-miss on a button does not dismiss the center.
-    fn notification_center_footer_row_y(&self) -> Option<u16> {
-        Some(self.notification_center_geometry()?.footer_row?.y)
+        crate::ui::notification_center_button_rects(
+            self.notification_center_geometry()?.footer_row?,
+        )
     }
 
     /// The panel's inner list rect (footer block excluded) and the first
@@ -1700,7 +1694,9 @@ impl AppState {
     /// The footer button row. Present even on a pane with no todos, where it
     /// narrows to add and close — the panel always offers a way to put
     /// something in it.
-    pub(crate) fn pane_todo_panel_buttons(&self) -> Option<crate::ui::PaneTodoPanelButtonRects> {
+    pub(crate) fn pane_todo_panel_buttons(
+        &self,
+    ) -> Option<crate::ui::overlay::ButtonRow<PaneTodoPanelButton>> {
         let panel = self.pane_todos.as_ref()?;
         let has_todos = !self.pane_todos_in_display_order(panel.pane_id).is_empty();
         // `go` follows the *selected* todo's link, so it is offered only while
@@ -1710,7 +1706,7 @@ impl AppState {
             .selected_pane_todo()
             .is_some_and(|todo| self.pane_todo_link_target(&todo).is_some());
         crate::ui::pane_todo_panel_button_rects(
-            self.pane_todo_panel_geometry()?.inner,
+            self.pane_todo_panel_geometry()?.footer_row?,
             has_todos,
             has_live_link,
         )
@@ -1736,12 +1732,6 @@ impl AppState {
         let column = crate::ui::pane_todo_edit_column_scroll(&edit.text, text_area.width)
             + col.saturating_sub(text_area.x) as usize;
         edit.text.place_cursor(line, column);
-    }
-
-    /// Y of the footer row. Clicks in this row but outside a button are inert
-    /// rather than closing, so a near-miss does not dismiss the panel.
-    fn pane_todo_panel_footer_row_y(&self) -> Option<u16> {
-        Some(self.pane_todo_panel_geometry()?.footer_row?.y)
     }
 
     /// The panel's list rect (footer block excluded) and the first visible
@@ -5723,8 +5713,11 @@ mod tests {
             &mut app.terminal_runtimes,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                buttons.add.x,
-                buttons.close.y,
+                buttons
+                    .rect(PaneTodoPanelButton::Add)
+                    .expect("add is never dropped")
+                    .x,
+                buttons.row_y(),
             ),
         );
 
@@ -6013,9 +6006,12 @@ mod tests {
         // the test would pass without ever reaching the inert path.
         // `add` is the one box present in every layout, and something always
         // follows it, so the cell just past it is reliably gap.
-        let gap_col = buttons.add.x + buttons.add.width;
+        let add = buttons
+            .rect(PaneTodoPanelButton::Add)
+            .expect("add is never dropped");
+        let gap_col = add.x + add.width;
         assert_eq!(
-            buttons.hit(gap_col, buttons.close.y),
+            buttons.button_at(gap_col, buttons.row_y()),
             None,
             "the near-miss column must really miss every button"
         );
@@ -6025,7 +6021,7 @@ mod tests {
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 gap_col,
-                buttons.close.y,
+                buttons.row_y(),
             ),
         );
 
