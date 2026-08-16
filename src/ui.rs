@@ -48,10 +48,12 @@ use self::mobile::{
     render_mobile_toast_banner,
 };
 use self::navigator::render_navigator_overlay;
-pub(crate) use self::notification_center::notification_center_button_rects;
 use self::notification_center::{
     floating_notification_indicator_rect, render_floating_notification_indicator,
     render_notification_center,
+};
+pub(crate) use self::notification_center::{
+    notification_center_button_rects, notification_center_footer_width,
 };
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
