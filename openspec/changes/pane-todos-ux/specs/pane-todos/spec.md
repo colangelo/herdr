@@ -61,6 +61,18 @@ SHALL NOT resolve to any other pane.
   launched command on record
 - **THEN** its captured label is the pane's own identifier
 
+#### Scenario: A live link is addressed before it is named
+
+- **WHEN** a todo carries a live link to a pane
+- **THEN** the link is presented with that pane's public identifier first and its
+  captured label after it
+
+#### Scenario: A moved target is addressed by where it is now
+
+- **WHEN** a linked pane's public identifier changes and the todo is presented
+  again
+- **THEN** the presented identifier is the target's current one
+
 #### Scenario: A link to a closed pane goes dead
 
 - **WHEN** a todo's link target no longer exists
@@ -121,11 +133,22 @@ left unbound by default.
 - **WHEN** the panel is opened on a pane with no todos
 - **THEN** the add action is offered
 
+#### Scenario: A multi-line todo occupies one panel row
+
+- **WHEN** the panel lists a todo whose text holds more than one line
+- **THEN** it occupies a single row showing the first line with a marker
+
 #### Scenario: Editing a todo
 
 - **WHEN** a todo is opened for editing, its text changed, and the change saved
 - **THEN** the todo's text and updated timestamp change while its id, done state,
   and creation timestamp are preserved
+
+#### Scenario: Commit and done-toggle stay clear of the editing set
+
+- **WHEN** a key belonging to the text field's editing set is pressed in the edit
+  modal
+- **THEN** it edits the text and neither commits the edit nor toggles done
 
 #### Scenario: Toggling done from the edit modal
 
@@ -143,6 +166,18 @@ left unbound by default.
   workspace
 - **WHEN** a pane row is chosen
 - **THEN** the edit returns with that pane staged as the link target
+
+#### Scenario: Pane rows carry the identifier they stage
+
+- **WHEN** the picker lists a pane row
+- **THEN** the row shows that pane's public identifier as well as its name
+
+#### Scenario: The picker moves without arrow keys while searching
+
+- **WHEN** the picker's search is focused and the move-down chord is pressed
+- **THEN** the selection moves down and the search text is unchanged
+- **WHEN** the same chord is pressed with the search not focused
+- **THEN** the selection moves down as well
 
 #### Scenario: Non-pane rows are not targets
 
