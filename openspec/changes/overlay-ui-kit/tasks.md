@@ -13,11 +13,11 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 2. Anchored panel geometry
 
-- [ ] 2.1 Add `AnchoredPanelSpec` / `PanelGeometry` to `src/ui/widgets.rs` (or a new `src/ui/overlay/geometry.rs` if `widgets.rs` is getting long)
-- [ ] 2.2 Express `notification_center_rect` (`src/app/input/mouse.rs:1471`) in it, keeping the accessor and its signature so callers do not move. Cover both `top-right` and `bottom-right`, including opening above the floating indicator
-- [ ] 2.3 Express `pane_todo_panel_rect` (`mouse.rs:1589`) in it, keeping its pane anchor and the `None`-when-the-pane-is-gone guard
-- [ ] 2.4 Delete the per-panel inner/list/footer derivations that the geometry now returns
-- [ ] 2.5 Tests: unit tests for the resolver (clamping, anchor edges, above/below placement, too-small screen); group 1's snapshots unchanged
+- [x] 2.1 Add `AnchoredPanelSpec` / `PanelGeometry` to `src/ui/widgets.rs` (or a new `src/ui/overlay/geometry.rs` if `widgets.rs` is getting long)
+- [x] 2.2 Express `notification_center_rect` (`src/app/input/mouse.rs:1471`) in it, keeping the accessor and its signature so callers do not move. Cover both `top-right` and `bottom-right`, including opening above the floating indicator
+- [x] 2.3 Express `pane_todo_panel_rect` (`mouse.rs:1589`) in it, keeping its pane anchor and the `None`-when-the-pane-is-gone guard
+- [x] 2.4 Delete the per-panel inner/list/footer derivations that the geometry now returns
+- [x] 2.5 Tests: unit tests for the resolver (clamping, anchor edges, above/below placement, too-small screen); group 1's snapshots unchanged
 
 ## 3. Button rows
 
