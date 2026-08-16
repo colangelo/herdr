@@ -1432,11 +1432,10 @@ impl App {
     /// Leave the modal back to the panel it was opened from, or to the
     /// terminal when it was opened straight from a keybinding.
     pub(super) fn close_pane_todo_edit_and_return(&mut self) {
-        // The panel comes back with the overlay it was suspended onto; with no
-        // panel to return to, the modal was opened from a keybinding and the
-        // way back is wherever the modal was entered from.
-        self.state.close_pane_todo_edit();
-        if self.state.pane_todos().is_none() {
+        // The suspended surface comes back with the overlay it was carried on,
+        // mode included; with nothing to return to, the modal was opened from
+        // a keybinding and the way back is wherever it was entered from.
+        if !self.state.close_pane_todo_edit() {
             leave_modal(&mut self.state);
         }
     }
@@ -3624,6 +3623,29 @@ mod tests {
             app.state.pane_todo_edit().map(|edit| edit.pane_id),
             Some(there),
             "the editor writes against the todo's owner, not the focused pane"
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// The panel suspends itself onto the edit modal it opens; so does the
+    /// board, so cancelling an edit started from the board lands back on the
+    /// board rather than dumping you into the terminal.
+    #[test]
+    fn cancelling_an_edit_opened_from_the_board_returns_to_the_board() {
+        let (mut app, _, _) = app_with_board_across_spaces(None);
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        assert!(app.state.todo_board().is_none(), "the board is suspended");
+
+        app.handle_pane_todo_edit_key_via_api(key(KeyCode::Esc));
+
+        assert_eq!(app.state.mode, Mode::TodoBoard);
+        assert!(
+            app.state
+                .todo_board()
+                .is_some_and(|board| board.selected_todo().is_some()),
+            "the board came back with its selection"
         );
         app.state.assert_invariants_for_test();
     }
