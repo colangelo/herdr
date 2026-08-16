@@ -827,7 +827,7 @@ impl App {
 
     pub(crate) fn activate_notification_row(&mut self, index: usize) {
         if let Some(center) = self.state.notification_center.as_mut() {
-            center.selected = index;
+            center.list.selected = index;
         }
         self.activate_notification_center_selection();
     }

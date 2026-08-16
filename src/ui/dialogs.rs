@@ -510,7 +510,10 @@ pub(crate) fn open_existing_worktree_visible_start(
         .iter()
         .position(|idx| *idx == selected)
         .unwrap_or(0);
-    selected_pos.saturating_sub(max_rows.saturating_sub(1))
+    // The kit's nearest-edge reveal, from a standing start: this picker keeps
+    // no scroll of its own, so its window is re-derived from the selection
+    // every frame rather than remembered.
+    crate::ui::overlay::reveal_scroll(0, selected_pos, max_rows, filtered.len())
 }
 
 pub(crate) fn open_existing_worktree_button_rects(inner: Rect) -> (Rect, Rect) {

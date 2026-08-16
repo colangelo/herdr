@@ -670,15 +670,18 @@ impl AppState {
             return;
         }
         let lines = navigator_display_lines(&self.navigator_rows_from(terminal_runtimes));
-        let max_scroll = lines.len().saturating_sub(viewport);
         let selected_line =
             navigator_display_index_of_row(&lines, self.navigator.selected).unwrap_or(0);
-        if selected_line < self.navigator.scroll {
-            self.navigator.scroll = selected_line;
-        } else if selected_line >= self.navigator.scroll.saturating_add(viewport) {
-            self.navigator.scroll = selected_line.saturating_add(1).saturating_sub(viewport);
-        }
-        self.navigator.scroll = self.navigator.scroll.min(max_scroll);
+        // The kit's nearest-edge reveal, called with a display-line index
+        // rather than a row index: the navigator scrolls in line space while
+        // its selection is a row, so it borrows the arithmetic without
+        // borrowing `ListCursor`, which would conflate the two spaces.
+        self.navigator.scroll = crate::ui::overlay::reveal_scroll(
+            self.navigator.scroll,
+            selected_line,
+            viewport,
+            lines.len(),
+        );
     }
 
     pub(crate) fn navigator_max_scroll_from(

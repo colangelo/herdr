@@ -6,7 +6,7 @@ use tracing::warn;
 use crate::{
     app::state::{
         AgentPanelSort, AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget,
-        MenuListState, Mode, PaneTodoPanelButton, RightClickPassthroughGesture, TabPressState,
+        ListCursor, Mode, PaneTodoPanelButton, RightClickPassthroughGesture, TabPressState,
         ViewLayout, WorkspacePressState,
     },
     layout::{PaneInfo, SplitBorder},
@@ -237,7 +237,7 @@ impl AppState {
                         .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
                         if let Some(center) = self.notification_center.as_mut() {
-                            center.selected = idx;
+                            center.list.selected = idx;
                         }
                     }
                     if let Some(center) = self.notification_center.as_mut() {
@@ -288,7 +288,7 @@ impl AppState {
                         .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
                     if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
                         if let Some(panel) = self.pane_todos.as_mut() {
-                            panel.selected = idx;
+                            panel.list.selected = idx;
                         }
                     }
                     if let Some(panel) = self.pane_todos.as_mut() {
@@ -301,7 +301,7 @@ impl AppState {
                     if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
                         let on_chip = self.pane_todo_link_chip_at(mouse.column, mouse.row);
                         if let Some(panel) = self.pane_todos.as_mut() {
-                            panel.selected = idx;
+                            panel.list.selected = idx;
                         }
                         return Some(MouseAction::PaneTodo(if on_chip {
                             PaneTodoAction::FollowLink
@@ -1374,7 +1374,7 @@ impl AppState {
                         kind,
                         x: mouse.column,
                         y: mouse.row,
-                        list: MenuListState::new(0),
+                        list: ListCursor::new(0),
                     });
                     self.mode = Mode::ContextMenu;
                 }
@@ -1391,7 +1391,7 @@ impl AppState {
                         kind: ContextMenuKind::Tab { ws_idx, tab_idx },
                         x: mouse.column,
                         y: mouse.row,
-                        list: MenuListState::new(0),
+                        list: ListCursor::new(0),
                     });
                     self.mode = Mode::ContextMenu;
                 }
@@ -1431,7 +1431,7 @@ impl AppState {
                         },
                         x: mouse.column,
                         y: mouse.row,
-                        list: MenuListState::new(0),
+                        list: ListCursor::new(0),
                     });
                     self.mode = Mode::ContextMenu;
                 }
@@ -1618,10 +1618,16 @@ impl AppState {
     /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
         let list = self.notification_center_geometry()?.list;
-        let selected = self.notification_center.as_ref()?.selected;
-        let visible = list.height as usize;
-        let start = selected.saturating_sub(visible.saturating_sub(1));
+        let cursor = self.notification_center.as_ref()?.list;
+        let (start, _) = cursor.window(list, self.notification_log.len());
         Some((list, start))
+    }
+
+    /// List rows the open panel can show, for revealing the selection.
+    pub(crate) fn notification_center_visible_rows(&self) -> usize {
+        self.notification_center_geometry()
+            .map(|geometry| geometry.list.height as usize)
+            .unwrap_or(0)
     }
 
     /// Where the pane todo panel sits: hanging off the pane's top border at
@@ -1739,22 +1745,25 @@ impl AppState {
     /// where, and it stops one row short of the buttons — see
     /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn pane_todo_panel_list_window(&self) -> Option<(Rect, usize)> {
+        let panel = self.pane_todos.as_ref()?;
         let list = self.pane_todo_panel_geometry()?.list;
-        let selected = self.pane_todos.as_ref()?.selected;
-        let visible = list.height as usize;
-        let start = selected.saturating_sub(visible.saturating_sub(1));
+        let len = self.pane_todos_in_display_order(panel.pane_id).len();
+        let (start, _) = panel.list.window(list, len);
         Some((list, start))
+    }
+
+    /// List rows the open panel can show, for revealing the selection.
+    pub(crate) fn pane_todo_panel_visible_rows(&self) -> usize {
+        self.pane_todo_panel_geometry()
+            .map(|geometry| geometry.list.height as usize)
+            .unwrap_or(0)
     }
 
     fn pane_todo_panel_row_at(&self, col: u16, row: u16) -> Option<usize> {
         let panel = self.pane_todos.as_ref()?;
-        let (list, start) = self.pane_todo_panel_list_window()?;
+        let list = self.pane_todo_panel_geometry()?.list;
         let len = self.pane_todos_in_display_order(panel.pane_id).len();
-        if len == 0 || !rect_contains(list, col, row) {
-            return None;
-        }
-        let idx = start + (row - list.y) as usize;
-        (idx < len).then_some(idx)
+        panel.list.row_at(list, col, row, len)
     }
 
     /// Whether the cell is on a row's link chip. Uses the same chip geometry
@@ -1786,16 +1795,9 @@ impl AppState {
     }
 
     fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
-        let (list, start) = self.notification_center_list_window()?;
-        if self.notification_log.is_empty() {
-            return None;
-        }
-        if col < list.x || col >= list.x + list.width || row < list.y || row >= list.y + list.height
-        {
-            return None;
-        }
-        let idx = start + (row - list.y) as usize;
-        (idx < self.notification_log.len()).then_some(idx)
+        let list = self.notification_center_geometry()?.list;
+        let cursor = self.notification_center.as_ref()?.list;
+        cursor.row_at(list, col, row, self.notification_log.len())
     }
 
     pub(crate) fn context_menu_rect(&self) -> Option<Rect> {
@@ -2564,7 +2566,7 @@ mod tests {
     use super::*;
     use crate::app::input::modal::handle_context_menu_key;
     use crate::{
-        app::state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
+        app::state::{ContextMenuKind, ContextMenuState, ListCursor, Mode, ViewLayout},
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
@@ -3637,7 +3639,7 @@ mod tests {
             .iter()
             .position(|item| *item == "Swap with focused pane")
             .expect("swap item");
-        menu.list.highlighted = swap_idx;
+        menu.list.selected = swap_idx;
 
         handle_context_menu_key(
             &mut app.state,
@@ -3845,14 +3847,14 @@ mod tests {
             kind: ContextMenuKind::Workspace { ws_idx: 0 },
             x: 2,
             y: 2,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         });
         app.state.mode = Mode::ContextMenu;
 
         let menu = app.state.context_menu_rect().unwrap();
         app.handle_mouse(mouse(MouseEventKind::Moved, menu.x + 2, menu.y + 2));
 
-        assert_eq!(app.state.context_menu.unwrap().list.highlighted, 1);
+        assert_eq!(app.state.context_menu.unwrap().list.selected, 1);
     }
 
     #[test]
@@ -4241,7 +4243,7 @@ mod tests {
             kind: ContextMenuKind::Workspace { ws_idx: 1 },
             x: 2,
             y: 2,
-            list: MenuListState::new(1),
+            list: ListCursor::new(1),
         });
         app.state.mode = Mode::ContextMenu;
         handle_context_menu_key(
@@ -4281,7 +4283,7 @@ mod tests {
             kind: ContextMenuKind::Workspace { ws_idx: 1 },
             x: 2,
             y: 2,
-            list: MenuListState::new(1),
+            list: ListCursor::new(1),
         });
         app.state.mode = Mode::ContextMenu;
 
@@ -4335,7 +4337,7 @@ mod tests {
             },
             x: 2,
             y: 2,
-            list: MenuListState::new(1),
+            list: ListCursor::new(1),
         });
         app.state.mode = Mode::ContextMenu;
 

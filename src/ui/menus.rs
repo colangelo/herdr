@@ -261,7 +261,7 @@ pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
         if y >= inner.y + inner.height {
             break;
         }
-        let selected = idx == app.global_menu.highlighted;
+        let selected = idx == app.global_menu.selected;
         let rect = Rect::new(inner.x, y, inner.width, 1);
 
         let selected_style = Style::default()
@@ -347,7 +347,7 @@ pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(" ");
-    let mut state = ListState::default().with_selected(Some(menu.list.highlighted));
+    let mut state = ListState::default().with_selected(Some(menu.list.selected));
     frame.render_stateful_widget(list, inner, &mut state);
 }
 
@@ -362,7 +362,7 @@ mod tests {
                 kind: crate::app::state::ContextMenuKind::Workspace { ws_idx: 0 },
                 x: 10,
                 y: 5,
-                list: crate::app::state::MenuListState::new(0),
+                list: crate::app::state::ListCursor::new(0),
             });
             app.mode = crate::app::state::Mode::ContextMenu;
         })
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn snapshot_global_menu() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
-            app.global_menu = crate::app::state::MenuListState::new(0);
+            app.global_menu = crate::app::state::ListCursor::new(0);
             app.mode = crate::app::state::Mode::GlobalMenu;
         })
         .assert(

@@ -567,7 +567,7 @@ mod tests {
         let menu = app.state.global_menu_rect();
         app.handle_mouse(mouse(MouseEventKind::Moved, menu.x + 2, menu.y + 2));
 
-        assert_eq!(app.state.global_menu.highlighted, 1);
+        assert_eq!(app.state.global_menu.selected, 1);
     }
 
     #[test]

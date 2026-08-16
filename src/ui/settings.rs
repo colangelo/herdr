@@ -433,7 +433,7 @@ mod tests {
     fn snapshot_settings() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
             app.settings.section = crate::app::state::SettingsSection::Theme;
-            app.settings.list = crate::app::state::SelectionListState::new(0);
+            app.settings.list = crate::app::state::ListCursor::new(0);
             app.mode = crate::app::state::Mode::Settings;
         })
         .assert(

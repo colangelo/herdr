@@ -112,7 +112,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
     let selected = app
         .notification_center
         .as_ref()
-        .map(|center| center.selected)
+        .map(|center| center.list.selected)
         .unwrap_or(0);
     let now_unix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
