@@ -3487,7 +3487,7 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::RenameWorkspace;
-        app.state.name_input = "new".into();
+        app.state.set_name_input("new");
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 24));
         let inner = app.state.rename_modal_inner().unwrap();
@@ -4867,7 +4867,7 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::RenameTab;
         app.state.creating_new_tab = true;
-        app.state.name_input = "new tab".into();
+        app.state.set_name_input("new tab");
 
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 44, 20));
         let switch = app.state.view.mobile_menu_hit_area;

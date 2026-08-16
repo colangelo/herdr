@@ -58,7 +58,7 @@ fn render_name_input_field(app: &AppState, frame: &mut Frame, input_rect: Rect) 
         ..input_rect
     };
     frame.render_widget(
-        Paragraph::new(format!(" {}", app.name_input)).style(
+        Paragraph::new(format!(" {}", app.name_input.text())).style(
             Style::default()
                 .fg(app.palette.text)
                 .bg(app.palette.surface0),
@@ -69,10 +69,12 @@ fn render_name_input_field(app: &AppState, frame: &mut Frame, input_rect: Rect) 
     if input_rect.width == 0 {
         return;
     }
+    // The caret follows the field's insertion point rather than the end of
+    // the text: the name field has a cursor now.
     let caret_x = input_rect
         .x
         .saturating_add(1)
-        .saturating_add(display_width_u16(&app.name_input))
+        .saturating_add(app.name_input.cursor_column().min(u16::MAX as usize) as u16)
         .min(input_rect.right().saturating_sub(1));
     frame.set_cursor_position((caret_x, input_rect.y));
 }
@@ -1407,7 +1409,7 @@ mod tests {
     #[test]
     fn new_worktree_error_renders_fatal_stderr_line() {
         let mut app = AppState::test_new();
-        app.name_input = "foo".into();
+        app.set_name_input("foo");
         app.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: "/repo/herdr".into(),
@@ -1477,7 +1479,7 @@ mod tests {
     fn rename_overlay_caret_in(mode: Mode, name: &str) -> (Position, Buffer) {
         let mut app = AppState::test_new();
         app.mode = mode;
-        app.name_input = name.into();
+        app.set_name_input(name);
 
         let mut terminal = Terminal::new(TestBackend::new(RENAME_AREA.width, RENAME_AREA.height))
             .expect("test terminal");
@@ -1494,7 +1496,7 @@ mod tests {
 
     fn worktree_overlay_caret(branch: &str) -> Position {
         let mut app = AppState::test_new();
-        app.name_input = branch.into();
+        app.set_name_input(branch);
         app.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: "/repo/herdr".into(),
@@ -1606,7 +1608,7 @@ mod tests {
         let input = rename_input_rect(RENAME_AREA);
         let mut app = AppState::test_new();
         app.mode = Mode::RenameWorkspace;
-        app.name_input = "ab".into();
+        app.set_name_input("ab");
 
         // The widget tests above stop at the ratatui frame. This one goes through
         // the server's cursor resolution, which is where the bug lived: the frame

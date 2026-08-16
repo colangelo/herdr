@@ -40,16 +40,6 @@ impl ListCursor {
         self.selected = self.selected.saturating_add_signed(delta).min(len - 1);
     }
 
-    pub(crate) fn move_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    pub(crate) fn move_next(&mut self, len: usize) {
-        if len > 0 {
-            self.selected = (self.selected + 1).min(len - 1);
-        }
-    }
-
     pub(crate) fn select(&mut self, idx: usize) {
         self.selected = idx;
     }

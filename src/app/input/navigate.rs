@@ -1453,18 +1453,29 @@ impl App {
                 self.state.pane_move_target_picker = None;
                 leave_navigate_mode(&mut self.state);
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if let Some(picker) = self.state.pane_move_target_picker.as_mut() {
-                    picker.select_prev();
-                }
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(picker) = self.state.pane_move_target_picker.as_mut() {
-                    picker.select_next();
-                }
-            }
             KeyCode::Enter => self.submit_pane_move_target_picker(),
-            _ => {}
+            // The shared list chords. The picker's rows include a
+            // non-selectable space heading, so a step is its own `select_prev`
+            // / `select_next` rather than a raw index move; a half page is
+            // that step repeated.
+            _ => {
+                use crate::app::input::list_keys::{list_chord, ListChord, PlainChars};
+                let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
+                    return;
+                };
+                let Some(picker) = self.state.pane_move_target_picker.as_mut() else {
+                    return;
+                };
+                let half = (picker.items.len() / 2).max(1);
+                match chord {
+                    ListChord::Prev => picker.select_prev(),
+                    ListChord::Next => picker.select_next(),
+                    ListChord::HalfPageUp => (0..half).for_each(|_| picker.select_prev()),
+                    ListChord::HalfPageDown => (0..half).for_each(|_| picker.select_next()),
+                    ListChord::First => (0..picker.items.len()).for_each(|_| picker.select_prev()),
+                    ListChord::Last => (0..picker.items.len()).for_each(|_| picker.select_next()),
+                }
+            }
         }
     }
 
@@ -3497,7 +3508,7 @@ command = "echo custom"
         );
 
         assert_eq!(state.mode, Mode::RenameWorkspace);
-        assert_eq!(state.name_input, "test");
+        assert_eq!(state.name_input.text(), "test");
     }
 
     #[test]
@@ -3521,7 +3532,7 @@ command = "echo custom"
         );
 
         assert_eq!(state.mode, Mode::RenameWorkspace);
-        assert_eq!(state.name_input, "__herdr_projects__");
+        assert_eq!(state.name_input.text(), "__herdr_projects__");
         assert_eq!(state.workspaces[0].display_name(), "__herdr_original__");
     }
 
@@ -3542,7 +3553,7 @@ command = "echo custom"
 
         assert_eq!(state.mode, Mode::RenameWorkspace);
         assert_eq!(state.selected, 1);
-        assert_eq!(state.name_input, "issue");
+        assert_eq!(state.name_input.text(), "issue");
     }
 
     #[test]
@@ -3603,7 +3614,7 @@ command = "echo custom"
         app.handle_navigate_key(TerminalKey::new(KeyCode::Char('g'), KeyModifiers::empty()));
 
         assert_eq!(app.state.mode, Mode::RenameWorkspace);
-        assert_eq!(app.state.name_input, suggested_name);
+        assert_eq!(app.state.name_input.text(), suggested_name);
         assert!(app.state.name_input_replace_on_type);
         assert_eq!(app.state.pending_workspace_create_cwd.as_ref(), Some(&cwd));
         assert_eq!(app.state.workspaces.len(), 1);
@@ -3632,7 +3643,7 @@ command = "echo custom"
         app.state.mode = Mode::Navigate;
 
         app.execute_tui_navigate_action(NavigateAction::NewWorkspace, ActionContext::Navigate);
-        app.state.name_input = "  logs  ".into();
+        app.state.set_name_input("  logs  ");
         app.handle_rename_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert_eq!(app.state.workspaces.len(), 2);
@@ -5325,7 +5336,7 @@ navigate_pane_down = "ctrl+j"
 
         assert_eq!(state.mode, Mode::RenameTab);
         assert!(state.creating_new_tab);
-        assert_eq!(state.name_input, "2");
+        assert_eq!(state.name_input.text(), "2");
         assert!(state.name_input_replace_on_type);
         assert!(!state.request_new_tab);
         assert_eq!(state.workspaces[0].tabs.len(), 1);

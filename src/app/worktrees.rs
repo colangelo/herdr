@@ -107,7 +107,7 @@ impl App {
             "opening worktree dialog"
         );
         self.state.selected = ws_idx;
-        self.state.name_input = branch.clone();
+        self.state.set_name_input(branch.clone());
         self.state.name_input_replace_on_type = true;
         self.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id,
@@ -247,19 +247,23 @@ impl App {
                 self.close_worktree_create_dialog();
             }
             KeyCode::Enter => self.submit_worktree_create_via_api(),
-            KeyCode::Backspace => {
-                if self.state.name_input_replace_on_type {
+            _ => {
+                // The shared editing set, so a branch name is composed the
+                // same way a workspace name is.
+                if self.state.name_input_replace_on_type
+                    && crate::app::input::edits_the_name_input(key)
+                {
                     self.state.name_input.clear();
                     self.state.name_input_replace_on_type = false;
-                } else {
-                    self.state.name_input.pop();
                 }
-                self.sync_worktree_branch_from_input();
+                if crate::app::input::text_keys::apply_text_key(
+                    &mut self.state.name_input,
+                    key,
+                    crate::app::input::text_keys::Shape::SingleLine,
+                ) {
+                    self.sync_worktree_branch_from_input();
+                }
             }
-            KeyCode::Char(c) => {
-                self.insert_worktree_create_text(&c.to_string());
-            }
-            _ => {}
         }
     }
 
@@ -268,7 +272,7 @@ impl App {
             self.state.name_input.clear();
             self.state.name_input_replace_on_type = false;
         }
-        self.state.name_input.push_str(text);
+        self.state.name_input.insert_str(text);
         self.sync_worktree_branch_from_input();
     }
 
@@ -491,7 +495,7 @@ impl App {
         let Some(create) = &mut self.state.worktree_create else {
             return;
         };
-        create.branch = self.state.name_input.clone();
+        create.branch = self.state.name_input.text().to_string();
         create.checkout_path = crate::worktree::default_checkout_path(
             &self.state.worktree_directory,
             &create.repo_name,
@@ -516,7 +520,11 @@ impl App {
         }
 
         create.branch = branch.clone();
-        self.state.name_input = branch.clone();
+        let name = crate::ui::text_field::TextField::from_text(
+            &branch,
+            crate::app::state::NAME_INPUT_MAX_CHARS,
+        );
+        self.state.name_input = name;
         create.checkout_path = crate::worktree::default_checkout_path(
             &self.state.worktree_directory,
             &create.repo_name,
@@ -578,7 +586,11 @@ impl App {
         }
 
         create.branch = branch.clone();
-        self.state.name_input = branch.clone();
+        let name = crate::ui::text_field::TextField::from_text(
+            &branch,
+            crate::app::state::NAME_INPUT_MAX_CHARS,
+        );
+        self.state.name_input = name;
         create.checkout_path = crate::worktree::default_checkout_path(
             &self.state.worktree_directory,
             &create.repo_name,
@@ -1135,7 +1147,7 @@ mod tests {
     #[test]
     fn worktree_create_replaces_prefilled_branch_on_paste_and_syncs_state() {
         let mut app = app_for_worktree_tests();
-        app.state.name_input = "generated-branch".into();
+        app.state.set_name_input("generated-branch");
         app.state.name_input_replace_on_type = true;
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
@@ -1152,7 +1164,7 @@ mod tests {
 
         app.insert_worktree_create_text("feature/linear-302");
 
-        assert_eq!(app.state.name_input, "feature/linear-302");
+        assert_eq!(app.state.name_input.text(), "feature/linear-302");
         assert!(!app.state.name_input_replace_on_type);
         assert_eq!(
             app.state
@@ -1524,7 +1536,7 @@ mod tests {
     fn sync_worktree_branch_updates_derived_path() {
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = std::path::PathBuf::from("/w");
-        app.state.name_input = "issue/137".into();
+        app.state.set_name_input("issue/137");
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: std::path::PathBuf::from("/repo/herdr"),
@@ -1569,7 +1581,7 @@ mod tests {
         app.pending_api_worktree_creates.insert(checkout_key, 1);
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
         app.state.mode = Mode::NewLinkedWorktree;
-        app.state.name_input = branch.into();
+        app.state.set_name_input(branch);
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id,
             source_checkout_path: "/repo/herdr".into(),
@@ -1893,7 +1905,7 @@ mod tests {
         let checkout = crate::worktree::default_checkout_path(&worktree_root, "herdr", branch);
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = worktree_root.clone();
-        app.state.name_input = branch.into();
+        app.state.set_name_input(branch);
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: repo.clone(),
@@ -1940,7 +1952,7 @@ mod tests {
         run_git(&repo, &["branch", branch]);
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = worktree_root.clone();
-        app.state.name_input = branch.into();
+        app.state.set_name_input(branch);
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: repo.clone(),
@@ -2017,7 +2029,7 @@ mod tests {
         let branch = "worktree/from-bare-source";
         let repo_name = create.repo_name.clone();
         let checkout = crate::worktree::default_checkout_path(&worktree_root, &repo_name, branch);
-        app.state.name_input = branch.into();
+        app.state.set_name_input(branch);
 
         app.start_worktree_add();
 
@@ -2065,7 +2077,7 @@ mod tests {
         let checkout = crate::worktree::default_checkout_path(&worktree_root, "herdr", branch);
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = worktree_root.clone();
-        app.state.name_input = branch.into();
+        app.state.set_name_input(branch);
         app.state.worktree_create = Some(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: source_checkout.clone(),

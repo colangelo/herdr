@@ -959,9 +959,9 @@ pub(crate) enum NavigatorStateFilter {
     Done,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct NavigatorState {
-    pub query: String,
+    pub query: crate::ui::text_field::TextField,
     pub selected: usize,
     pub scroll: usize,
     pub search_focused: bool,
@@ -970,6 +970,20 @@ pub(crate) struct NavigatorState {
     /// Consulted at activation only, never threaded through rendering of the
     /// rows themselves.
     pub purpose: NavigatorPurpose,
+}
+
+impl Default for NavigatorState {
+    fn default() -> Self {
+        Self {
+            query: search_query_field(),
+            selected: 0,
+            scroll: 0,
+            search_focused: false,
+            state_filter: None,
+            expanded_workspaces: std::collections::HashSet::new(),
+            purpose: NavigatorPurpose::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1082,6 +1096,15 @@ impl SettingsSection {
 
 /// All built-in theme names in display order.
 pub const THEME_NAMES: &[&str] = crate::config::THEME_NAMES;
+
+/// Characters an overlay search box accepts. A query is a filter, not a
+/// document; the cap only exists because a cursor-bearing field takes one.
+pub(crate) const SEARCH_QUERY_MAX_CHARS: usize = 256;
+
+/// Characters a name field accepts. Names — a workspace, a tab, a pane, a
+/// branch — are short; the cap only exists because a cursor-bearing field
+/// takes one, and it is far past anything a name should be.
+pub(crate) const NAME_INPUT_MAX_CHARS: usize = 512;
 
 /// The overlay kit's list cursor, re-exported so overlay state can name it
 /// without every module reaching into `crate::ui`.
@@ -1604,11 +1627,25 @@ pub struct ProductAnnouncementState {
     pub preview: bool,
 }
 
-#[derive(Default)]
 pub struct KeybindHelpState {
     pub scroll: u16,
-    pub query: String,
+    pub query: crate::ui::text_field::TextField,
     pub search_focused: bool,
+}
+
+impl Default for KeybindHelpState {
+    fn default() -> Self {
+        Self {
+            scroll: 0,
+            query: search_query_field(),
+            search_focused: false,
+        }
+    }
+}
+
+/// An empty overlay search box.
+pub(crate) fn search_query_field() -> crate::ui::text_field::TextField {
+    crate::ui::text_field::TextField::new(SEARCH_QUERY_MAX_CHARS)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1690,7 +1727,7 @@ pub struct AppState {
     pub worktree_directory: std::path::PathBuf,
     pub collapsed_space_keys: std::collections::HashSet<String>,
     pub request_complete_onboarding: bool,
-    pub name_input: String,
+    pub name_input: crate::ui::text_field::TextField,
     pub name_input_replace_on_type: bool,
     pub release_notes: Option<ReleaseNotesState>,
     pub product_announcement: Option<ProductAnnouncementState>,
@@ -1951,6 +1988,12 @@ impl AppState {
     /// Open the panel. Deliberately leaves read state alone: entries only
     /// quiet down when activated (or via mark-all-read), so the unread badge
     /// tracks what the user actually visited.
+    /// Replace the shared name field's contents, cursor at the end.
+    pub(crate) fn set_name_input(&mut self, text: impl AsRef<str>) {
+        self.name_input =
+            crate::ui::text_field::TextField::from_text(text.as_ref(), NAME_INPUT_MAX_CHARS);
+    }
+
     pub(crate) fn open_notification_center(&mut self) {
         self.notification_center = Some(NotificationCenterState {
             list: ListCursor::default(),
@@ -2538,7 +2581,9 @@ impl AppState {
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
             collapsed_space_keys: std::collections::HashSet::new(),
             request_complete_onboarding: false,
-            name_input: String::new(),
+            name_input: crate::ui::text_field::TextField::new(
+                crate::app::state::NAME_INPUT_MAX_CHARS,
+            ),
             name_input_replace_on_type: false,
             release_notes: None,
             product_announcement: None,

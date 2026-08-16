@@ -144,23 +144,38 @@ fn apply_settings(state: &mut AppState) -> Option<SettingsAction> {
     }
 }
 
+/// The shared list chords, applied to the settings list. Returns whether the
+/// key was one, so each section can fall through to its own bindings.
+///
+/// Movement clamps rather than wrapping, which is the kit's rule everywhere:
+/// the two-item sections used to flip on either arrow, so `k` on the first row
+/// no longer jumps to the second.
+fn settings_list_chord(state: &mut AppState, key: KeyEvent, len: usize) -> bool {
+    use crate::app::input::list_keys::{list_chord, PlainChars};
+    let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
+        return false;
+    };
+    chord.apply(&mut state.settings.list, len, len);
+    true
+}
+
+/// The theme list previews as it moves, so the section wraps the shared chords
+/// rather than using them bare.
+fn settings_theme_chord(state: &mut AppState, key: KeyEvent) -> bool {
+    let before = state.settings.list.selected;
+    if !settings_list_chord(state, key, THEME_NAMES.len()) {
+        return false;
+    }
+    if state.settings.list.selected != before {
+        preview_selected_theme(state);
+    }
+    true
+}
+
 pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Option<SettingsAction> {
     match state.settings.section {
         SettingsSection::Theme => match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                let previous = state.settings.list.selected;
-                state.settings.list.move_prev();
-                if state.settings.list.selected != previous {
-                    preview_selected_theme(state);
-                }
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let previous = state.settings.list.selected;
-                state.settings.list.move_next(THEME_NAMES.len());
-                if state.settings.list.selected != previous {
-                    preview_selected_theme(state);
-                }
-            }
+            _ if settings_theme_chord(state, key) => {}
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 state.settings.section = SettingsSection::Indicators;
                 state.settings.list.selected = status_indicator_index(state.status_indicators);
@@ -176,9 +191,7 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
             },
         },
         SettingsSection::Indicators => match key.code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-                state.settings.list.selected = 1 - state.settings.list.selected.min(1);
-            }
+            _ if settings_list_chord(state, key, 2) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let style = status_indicator_for_index(state.settings.list.selected);
                 return Some(SettingsAction::SaveStatusIndicators(style));
@@ -200,9 +213,7 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
             }
         },
         SettingsSection::Sound => match key.code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-                state.settings.list.selected = 1 - state.settings.list.selected.min(1);
-            }
+            _ if settings_list_chord(state, key, 2) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let enabled = state.settings.list.selected == 0;
                 return Some(SettingsAction::SaveSound(enabled));
@@ -224,8 +235,7 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
             }
         },
         SettingsSection::Toast => match key.code {
-            KeyCode::Up | KeyCode::Char('k') => state.settings.list.move_prev(),
-            KeyCode::Down | KeyCode::Char('j') => state.settings.list.move_next(4),
+            _ if settings_list_chord(state, key, 4) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let delivery = toast_delivery_for_index(state.settings.list.selected);
                 return Some(SettingsAction::SaveToastDelivery(delivery));
@@ -247,9 +257,7 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
             }
         },
         SettingsSection::PaneLabels => match key.code {
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-                state.settings.list.selected = 1 - state.settings.list.selected.min(1);
-            }
+            _ if settings_list_chord(state, key, 2) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
                 let enabled = state.settings.list.selected == 0;
                 return Some(SettingsAction::SaveAgentBorderLabels(enabled));
