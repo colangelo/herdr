@@ -2133,6 +2133,9 @@ impl App {
             Mode::PaneTodoEdit => {
                 self.handle_pane_todo_edit_key_via_api(key_event);
             }
+            Mode::TodoBoard => {
+                self.handle_todo_board_key_via_api(key_event);
+            }
             Mode::Resize => {
                 self.handle_resize_key_via_api(key);
             }

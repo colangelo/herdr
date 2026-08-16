@@ -133,6 +133,10 @@ pub(super) fn overlay_help(kind: OverlayKind, kb: &crate::config::Keybinds) -> O
             keybind_label(&kb.add_pane_todo),
             "add pane todo",
         )]),
+        OverlayKind::TodoBoard => Entries(vec![help_entry(
+            keybind_label(&kb.open_todo_board),
+            "session todo board",
+        )]),
         OverlayKind::GlobalMenu => {
             NoKeybinding("opened from the launcher glyph in the tab bar, by mouse only")
         }
@@ -254,6 +258,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
     ]);
     panes.extend(overlay_entries(OverlayKind::PaneTodos, kb));
     panes.extend(overlay_entries(OverlayKind::PaneTodoEdit, kb));
+    panes.extend(overlay_entries(OverlayKind::TodoBoard, kb));
     panes.extend([
         help_entry(keybind_label(&kb.copy_mode), "copy mode"),
         help_entry(keybind_label(&kb.copy_mode_page_up), "copy mode + page up"),

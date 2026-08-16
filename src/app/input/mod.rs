@@ -126,6 +126,7 @@ impl App {
                 Mode::NotificationCenter => self.handle_notification_center_key_via_api(key_event),
                 Mode::PaneTodos => self.handle_pane_todos_key_via_api(key_event),
                 Mode::PaneTodoEdit => self.handle_pane_todo_edit_key_via_api(key_event),
+                Mode::TodoBoard => self.handle_todo_board_key_via_api(key_event),
                 Mode::Terminal => unreachable!(),
             },
         }
@@ -453,6 +454,7 @@ impl App {
                     }
                     MouseAction::ClearNotifications => self.state.clear_notifications(),
                     MouseAction::PaneTodo(action) => self.apply_pane_todo_action(action),
+                    MouseAction::TodoBoard(action) => self.apply_todo_board_action(action),
                     MouseAction::PaneTodoEditModal(action) => {
                         self.apply_pane_todo_edit_action_via_api(action)
                     }

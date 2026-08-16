@@ -24,6 +24,7 @@ mod tab_surface;
 mod tabs;
 #[cfg(test)]
 pub(crate) mod test_support;
+mod todo_board;
 mod todo_panel;
 // pub(crate): the CLI reuses text helpers (e.g. relative_time_label).
 pub(crate) mod text;
@@ -81,6 +82,10 @@ pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
 };
 use self::tabs::render_tab_bar;
+use self::todo_board::render_todo_board;
+pub(crate) use self::todo_board::{
+    todo_board_button_specs, todo_board_geometry, TodoBoardGeometry,
+};
 pub(crate) use self::todo_panel::pane_todo_panel_button_rects;
 use self::todo_panel::render_pane_todo_panel;
 // The chip's cells have exactly one definition, so a click can never land on
@@ -580,6 +585,7 @@ pub fn render_with_runtime_registry(
         Mode::NotificationCenter => render_notification_center(app, frame),
         Mode::PaneTodos => render_pane_todo_panel(app, frame),
         Mode::PaneTodoEdit => render_pane_todo_edit_overlay(app, frame, frame.area()),
+        Mode::TodoBoard => render_todo_board(app, frame),
         Mode::Terminal => {}
     }
 }

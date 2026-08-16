@@ -41,6 +41,21 @@ pub(super) enum PaneTodoAction {
     FollowLink,
 }
 
+/// What a key or a click asks the todo board to do.
+///
+/// Not `PaneTodoAction`: the board has no `Add` (adding is pane-scoped and the
+/// board has no pane of its own), and it has an `OpenOwner` the panel has no
+/// need for, since the panel's pane is the one you are already looking at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TodoBoardAction {
+    OpenOwner,
+    Edit,
+    ToggleDone,
+    Remove,
+    ClearDone,
+    FollowLink,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ModalKeyBinding {
     Enter,
@@ -1139,6 +1154,145 @@ impl App {
                     self.state
                         .pane_todos_move_selection(chord.delta(selected, visible, len));
                 }
+            }
+        }
+    }
+
+    /// The board's keys are the panel's, with one deliberate exception.
+    ///
+    /// `Enter` focuses the todo's owning pane rather than opening it for
+    /// editing: the row's own meaning here is where it lives, which is the
+    /// board's whole justification over `herdr todo list --all`. Edit moves to
+    /// `e` rather than losing its place on the board entirely. Everything else
+    /// — `space`, `g`, `d`, `c`, `esc`/`q` — means what it means one surface
+    /// over, and the letters carry the panel's modifier guard so their `ctrl+`
+    /// forms fall through to the shared list chords.
+    pub(crate) fn handle_todo_board_key_via_api(&mut self, key: KeyEvent) {
+        let bare = key.modifiers.is_empty();
+        match key.code {
+            KeyCode::Enter => self.apply_todo_board_action(TodoBoardAction::OpenOwner),
+            KeyCode::Char('e') if bare => self.apply_todo_board_action(TodoBoardAction::Edit),
+            KeyCode::Char(' ') if bare => self.apply_todo_board_action(TodoBoardAction::ToggleDone),
+            KeyCode::Char('g') if bare => self.apply_todo_board_action(TodoBoardAction::FollowLink),
+            KeyCode::Char('d') if bare => self.apply_todo_board_action(TodoBoardAction::Remove),
+            KeyCode::Char('c') if bare => self.apply_todo_board_action(TodoBoardAction::ClearDone),
+            KeyCode::Esc => {
+                self.state.close_todo_board();
+                leave_modal(&mut self.state);
+            }
+            KeyCode::Char('q') if bare => {
+                self.state.close_todo_board();
+                leave_modal(&mut self.state);
+            }
+            _ => {
+                if let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) {
+                    self.move_todo_board_selection(chord);
+                }
+            }
+        }
+    }
+
+    /// Move the board's selection by a chord, landing on a todo rather than on
+    /// a heading — a heading is rendered in the same list but is never a
+    /// destination.
+    pub(super) fn move_todo_board_selection(&mut self, chord: ListChord) {
+        let visible = self.state.todo_board_visible_rows();
+        let (selected, len) = self
+            .state
+            .todo_board()
+            .map(|board| (board.list.selected, board.items.len()))
+            .unwrap_or((0, 0));
+        self.state
+            .move_todo_board_selection_by(chord.delta(selected, visible, len));
+    }
+
+    /// Apply a board action to the selected todo. Every mutation goes back
+    /// through the `todo.*` API against the todo's *owning* pane, which is not
+    /// necessarily the focused one and need not even be in the active space.
+    pub(super) fn apply_todo_board_action(&mut self, action: TodoBoardAction) {
+        let Some((pane_id, todo_id)) = self
+            .state
+            .todo_board()
+            .and_then(crate::app::state::TodoBoardState::selected_todo)
+        else {
+            return;
+        };
+        // Resolved from the pane's own workspace rather than the active one:
+        // public identifiers are workspace-scoped and the board reaches across
+        // spaces by design.
+        let Some(public_pane_id) = self.state.session_public_pane_id(pane_id) else {
+            return;
+        };
+        let Some(todo) = self.state.pane_todo_by_id(pane_id, todo_id) else {
+            return;
+        };
+
+        match action {
+            TodoBoardAction::OpenOwner => {
+                let Some(ws_idx) = self
+                    .state
+                    .workspaces
+                    .iter()
+                    .position(|workspace| workspace.pane_state(pane_id).is_some())
+                else {
+                    return;
+                };
+                // A board left open over the pane you just travelled to is in
+                // the way, and its selection is cheap to rebuild.
+                self.state.close_todo_board();
+                self.focus_pane_internal_via_api(ws_idx, pane_id);
+                self.state.mode = Mode::Terminal;
+            }
+            TodoBoardAction::Edit => {
+                self.state.open_pane_todo_edit(pane_id, todo.id);
+            }
+            TodoBoardAction::ToggleDone => {
+                self.runtime_todo_update(
+                    "tui.todo.update",
+                    crate::api::schema::TodoUpdateParams {
+                        pane_id: public_pane_id,
+                        id: todo.id,
+                        done: Some(!todo.done),
+                        ..Default::default()
+                    },
+                );
+                self.state.refresh_todo_board();
+            }
+            TodoBoardAction::Remove => {
+                self.runtime_todo_remove(
+                    "tui.todo.remove",
+                    crate::api::schema::TodoRemoveParams {
+                        pane_id: public_pane_id,
+                        id: todo.id,
+                    },
+                );
+                self.state.refresh_todo_board();
+            }
+            TodoBoardAction::ClearDone => {
+                // The selected todo's pane, not the session: `c` means the
+                // same thing here as on that pane's own panel, and a
+                // session-wide sweep would be a far more destructive action
+                // wearing the same letter.
+                self.runtime_todo_clear(
+                    "tui.todo.clear",
+                    crate::api::schema::TodoClearParams {
+                        pane_id: public_pane_id,
+                        done_only: true,
+                    },
+                );
+                self.state.refresh_todo_board();
+            }
+            TodoBoardAction::FollowLink => {
+                // A dead link is inert, exactly as on the panel — and it
+                // targets the *linked* pane, never the owner, so a linked
+                // todo's two destinations stay distinct.
+                let Some((target_ws_idx, target_pane_id)) = self.state.pane_todo_link_target(&todo)
+                else {
+                    return;
+                };
+                self.state.close_todo_board();
+                self.focus_pane_internal_via_api(target_ws_idx, target_pane_id);
+                self.state.mode = Mode::Terminal;
             }
         }
     }
@@ -3293,6 +3447,165 @@ mod tests {
             .into_iter()
             .map(|todo| todo.text.clone())
             .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // The todo board
+    // -----------------------------------------------------------------------
+
+    /// Two spaces. The todo lives on the second space's pane while the first
+    /// is active, which is the case the board exists for: you cannot see that
+    /// todo from where you are standing.
+    fn app_with_board_across_spaces(
+        link: Option<crate::terminal::todo::TodoLink>,
+    ) -> (App, crate::layout::PaneId, crate::layout::PaneId) {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let here = app.state.workspaces[0].tabs[0].root_pane;
+        let there = app.state.workspaces[1].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&there]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "rerun the deploy",
+                crate::terminal::todo::TodoPriority::Normal,
+                link,
+                100,
+            )
+            .expect("todo should be added");
+        app.state.active = Some(0);
+        app.state.open_todo_board();
+        (app, here, there)
+    }
+
+    #[test]
+    fn activating_a_board_row_focuses_the_owning_pane_across_a_space_boundary() {
+        let (mut app, _, there) = app_with_board_across_spaces(None);
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Enter));
+
+        assert_eq!(app.state.active, Some(1), "the owner's space is now active");
+        assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(there));
+        assert!(
+            app.state.todo_board().is_none(),
+            "a board left open over the pane you jumped to is in the way"
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
+        app.state.assert_invariants_for_test();
+    }
+
+    /// A linked todo has two destinations, and they stay distinct: `Enter` is
+    /// the owner, `g` is the link.
+    #[test]
+    fn following_a_link_from_the_board_targets_the_linked_pane_not_the_owner() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let here = app.state.workspaces[0].tabs[0].root_pane;
+        let there = app.state.workspaces[1].tabs[0].root_pane;
+        // The todo lives on space two and points back at space one.
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&there]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "check the 403",
+                crate::terminal::todo::TodoPriority::Normal,
+                Some(crate::terminal::todo::TodoLink {
+                    pane: Some(here),
+                    label: "api".into(),
+                }),
+                100,
+            )
+            .expect("todo should be added");
+        app.state.active = Some(1);
+        app.state.open_todo_board();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('g')));
+
+        assert_eq!(
+            app.state.active,
+            Some(0),
+            "the link's space, not the owner's"
+        );
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(here));
+        assert!(app.state.todo_board().is_none());
+        app.state.assert_invariants_for_test();
+    }
+
+    /// Both surfaces read the same store, so a change made on one is the same
+    /// change on the other.
+    #[test]
+    fn a_toggle_from_the_board_is_visible_in_that_panes_own_panel() {
+        let (mut app, _, there) = app_with_board_across_spaces(None);
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char(' ')));
+
+        let todo = app
+            .state
+            .pane_todos_in_display_order(there)
+            .first()
+            .map(|todo| (*todo).clone())
+            .expect("the pane still holds its todo");
+        assert!(todo.done, "the toggle was stored against the owning pane");
+
+        app.state.close_todo_board();
+        app.state.open_pane_todos(there);
+        assert!(
+            app.state
+                .pane_todos_in_display_order(there)
+                .first()
+                .is_some_and(|todo| todo.done),
+            "the pane's own panel shows the same state"
+        );
+    }
+
+    /// `Enter` is the owner here, so edit keeps its place on `e` rather than
+    /// being lost.
+    #[test]
+    fn editing_from_the_board_opens_the_editor_against_the_owning_pane() {
+        let (mut app, _, there) = app_with_board_across_spaces(None);
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
+
+        assert_eq!(app.state.mode, Mode::PaneTodoEdit);
+        assert_eq!(
+            app.state.pane_todo_edit().map(|edit| edit.pane_id),
+            Some(there),
+            "the editor writes against the todo's owner, not the focused pane"
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// The letters carry the panel's modifier guard, so `ctrl+d` is half a page
+    /// down rather than a second way to spell "remove".
+    #[test]
+    fn a_control_modified_letter_falls_through_to_the_shared_list_chords() {
+        let (mut app, _, there) = app_with_board_across_spaces(None);
+
+        app.handle_todo_board_key_via_api(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+
+        assert_eq!(
+            app.state.pane_todos_in_display_order(there).len(),
+            1,
+            "ctrl+d moved the selection instead of removing the todo"
+        );
+        assert!(app.state.todo_board().is_some(), "the board is still open");
+    }
+
+    #[test]
+    fn esc_and_q_close_the_board() {
+        for closing in [key(KeyCode::Esc), key(KeyCode::Char('q'))] {
+            let (mut app, _, _) = app_with_board_across_spaces(None);
+            app.handle_todo_board_key_via_api(closing);
+            assert!(app.state.todo_board().is_none());
+            assert_eq!(app.state.mode, Mode::Terminal);
+            app.state.assert_invariants_for_test();
+        }
     }
 
     #[test]
