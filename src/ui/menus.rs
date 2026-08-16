@@ -350,3 +350,49 @@ pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
     let mut state = ListState::default().with_selected(Some(menu.list.highlighted));
     frame.render_stateful_widget(list, inner, &mut state);
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn snapshot_context_menu() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            app.context_menu = Some(crate::app::state::ContextMenuState {
+                kind: crate::app::state::ContextMenuKind::Workspace { ws_idx: 0 },
+                x: 10,
+                y: 5,
+                list: crate::app::state::MenuListState::new(0),
+            });
+            app.mode = crate::app::state::Mode::ContextMenu;
+        })
+        .assert(
+            Rect::new(10, 5, 14, 4),
+            &[
+                "┌────────────┐",
+                "│ Rename     │",
+                "│ Close      │",
+                "└────────────┘",
+            ],
+        );
+    }
+
+    #[test]
+    fn snapshot_global_menu() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            app.global_menu = crate::app::state::MenuListState::new(0);
+            app.mode = crate::app::state::Mode::GlobalMenu;
+        })
+        .assert(
+            Rect::new(19, 6, 17, 6),
+            &[
+                "┌───────────────┐",
+                "│ settings      │",
+                "│ keybinds      │",
+                "│ reload config │",
+                "│ detach        │",
+                "└───────────────┘",
+            ],
+        );
+    }
+}

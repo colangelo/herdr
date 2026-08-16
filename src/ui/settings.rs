@@ -422,3 +422,46 @@ fn render_settings_toggle(
         1,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    /// Opened the way `open_settings_at` opens it: section plus the list index
+    /// that section starts on.
+    #[test]
+    fn snapshot_settings() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            app.settings.section = crate::app::state::SettingsSection::Theme;
+            app.settings.list = crate::app::state::SelectionListState::new(0);
+            app.mode = crate::app::state::Mode::Settings;
+        })
+        .assert(
+            Rect::new(2, 1, 76, 22),
+            &[
+                "┌──────────────────────────────────────────────────────────────────────────┐",
+                "│ settings                                                                 │",
+                "│ theme   indicators   sound   toasts   pane labels   integrations         │",
+                "│──────────────────────────────────────────────────────────────────────────│",
+                "│                                                                          │",
+                "│ ▸ catppuccin ✓                                                           │",
+                "│   catppuccin-latte                                                       │",
+                "│   terminal                                                               │",
+                "│   tokyo-night                                                            │",
+                "│   tokyo-night-day                                                        │",
+                "│   dracula                                                                │",
+                "│   nord                                                                   │",
+                "│   gruvbox                                                                │",
+                "│   gruvbox-light                                                          │",
+                "│   one-dark                                                               │",
+                "│   one-light                                                              │",
+                "│   solarized                                                              │",
+                "│   solarized-light                                                        │",
+                "│                                                                          │",
+                "│ ↑↓ select  tab section                                                   │",
+                "│                           ↵ apply    esc close                           │",
+                "└──────────────────────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
+}
