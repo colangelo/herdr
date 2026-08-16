@@ -29,11 +29,11 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 4. One list cursor
 
-- [ ] 4.1 Merge `MenuListState` and `SelectionListState` (`src/app/state.rs:1132`, `:1159`) into one `ListCursor`, with `window()` and `row_at()`
-- [ ] 4.2 Move the overlays keeping a bare `selected: usize` onto it: notification center, todo panel, and the pickers
-- [ ] 4.3 Replace the per-overlay "keep the selection visible" implementations (navigator, notification center, todo panel) with `window()`
-- [ ] 4.4 Leave `src/ui/list_motion.rs` alone — bubble motion is a display-order transform that composes with the cursor, not part of it
-- [ ] 4.5 Tests: nearest-edge reveal rather than recentering; clamping at both ends; `row_at` is the inverse of what rendered; group 1's snapshots unchanged
+- [x] 4.1 Merge `MenuListState` and `SelectionListState` (`src/app/state.rs:1132`, `:1159`) into one `ListCursor`, with `window()` and `row_at()`
+- [x] 4.2 Move the overlays keeping a bare `selected: usize` onto it: notification center, todo panel, and the pickers
+- [x] 4.3 Replace the per-overlay "keep the selection visible" implementations (navigator, notification center, todo panel) with `window()`
+- [x] 4.4 Leave `src/ui/list_motion.rs` alone — bubble motion is a display-order transform that composes with the cursor, not part of it
+- [x] 4.5 Tests: nearest-edge reveal rather than recentering; clamping at both ends; `row_at` is the inverse of what rendered; group 1's snapshots unchanged
 
 ## 5. One keymap, one text field
 
