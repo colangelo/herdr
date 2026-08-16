@@ -233,6 +233,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 #                                           # On a fullscreen (alt-screen) app like vim, the scroll gestures
 #                                           # scroll the app itself instead: ctrl+u/d page, ctrl+k/j line,
 #                                           # g/G top/bottom, esc exits
+# copy_mode_page_down = "prefix+pagedown"     # the mirrors: scroll back down a page,
+# copy_mode_half_page_down = "prefix+ctrl+d"  # half page, or one line. On a fullscreen app they
+# copy_mode_line_down = "prefix+ctrl+j"       # re-enter the scroll mode going down; on an ordinary
+#                                             # pane they do nothing unless copy mode is already open
 # focus_pane_left = "prefix+h"
 # focus_pane_down = "prefix+j"
 # focus_pane_up = "prefix+k"

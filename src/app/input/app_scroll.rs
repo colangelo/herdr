@@ -14,7 +14,7 @@ use crate::{
     terminal::TerminalRuntimeRegistry,
 };
 
-use super::copy_mode::CopyModeEntryScroll;
+use super::copy_mode::{CopyModeEntryDirection, CopyModeEntryScroll};
 
 /// The send forwarded to the application for a scroll intent, or `None` for
 /// keys the mode swallows. The vocabulary is the pager one; line granularity
@@ -65,6 +65,7 @@ impl AppState {
         &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
         entry: CopyModeEntryScroll,
+        direction: CopyModeEntryDirection,
     ) -> bool {
         let Some(ws_idx) = self.active else {
             return false;
@@ -86,21 +87,22 @@ impl AppState {
         self.app_scroll = Some(AppScrollState { pane_id });
         self.mode = Mode::AppScroll;
         // "Half page" has no distinct terminal key; alt-screen applications
-        // page at their own granularity, so both page gestures send PageUp.
-        // The line gesture forwards one wheel tick, which is dropped at drain
-        // time on panes with no wheel support.
-        match entry {
-            CopyModeEntryScroll::Page | CopyModeEntryScroll::HalfPage => {
-                self.pending_app_scroll_sends
-                    .push(AppScrollSend::Key(TerminalKey::new(
-                        KeyCode::PageUp,
-                        KeyModifiers::empty(),
-                    )));
-            }
-            CopyModeEntryScroll::Line => {
-                self.pending_app_scroll_sends.push(AppScrollSend::WheelUp);
-            }
-        }
+        // page at their own granularity, so both page gestures send one page
+        // key. The line gesture forwards one wheel tick, which is dropped at
+        // drain time on panes with no wheel support.
+        let send = match (entry, direction) {
+            (
+                CopyModeEntryScroll::Page | CopyModeEntryScroll::HalfPage,
+                CopyModeEntryDirection::Up,
+            ) => AppScrollSend::Key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::empty())),
+            (
+                CopyModeEntryScroll::Page | CopyModeEntryScroll::HalfPage,
+                CopyModeEntryDirection::Down,
+            ) => AppScrollSend::Key(TerminalKey::new(KeyCode::PageDown, KeyModifiers::empty())),
+            (CopyModeEntryScroll::Line, CopyModeEntryDirection::Up) => AppScrollSend::WheelUp,
+            (CopyModeEntryScroll::Line, CopyModeEntryDirection::Down) => AppScrollSend::WheelDown,
+        };
+        self.pending_app_scroll_sends.push(send);
         true
     }
 
@@ -528,6 +530,81 @@ mod tests {
         press(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL).await;
         assert_eq!(app.state.mode, Mode::AppScroll);
         assert_eq!(drain(&mut rx), encoded(&app, pane_id, KeyCode::PageUp));
+    }
+
+    #[tokio::test]
+    async fn prefix_ctrl_d_enters_passthrough_going_down() {
+        // The reported dead end: the mode ended (a prefix press, a space
+        // switch, esc) while the application stayed scrolled up, and every
+        // entry gesture scrolled further up.
+        let (mut app, pane_id, mut rx) = app_with_alt_screen_pane();
+
+        prefix_gesture(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL).await;
+
+        assert_eq!(app.state.mode, Mode::AppScroll);
+        assert!(app.state.copy_mode.is_none());
+        assert_eq!(app.state.app_scroll, Some(AppScrollState { pane_id }));
+        assert_eq!(drain(&mut rx), encoded(&app, pane_id, KeyCode::PageDown));
+    }
+
+    #[tokio::test]
+    async fn prefix_pagedown_enters_passthrough_going_down() {
+        let (mut app, pane_id, mut rx) = app_with_alt_screen_pane();
+
+        prefix_gesture(&mut app, KeyCode::PageDown, KeyModifiers::empty()).await;
+
+        assert_eq!(app.state.mode, Mode::AppScroll);
+        assert_eq!(drain(&mut rx), encoded(&app, pane_id, KeyCode::PageDown));
+    }
+
+    #[tokio::test]
+    async fn prefix_ctrl_j_enters_passthrough_with_a_wheel_down_tick() {
+        let (mut app, _pane_id, mut rx) = app_with_channel_pane(ALT_SCREEN_MOUSE_BYTES);
+
+        prefix_gesture(&mut app, KeyCode::Char('j'), KeyModifiers::CONTROL).await;
+
+        assert_eq!(app.state.mode, Mode::AppScroll);
+        let sent = drain(&mut rx);
+        assert!(
+            String::from_utf8_lossy(&sent).starts_with("\x1b[<65;"),
+            "expected an SGR wheel-down report, sent: {sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn leaving_and_re_entering_downward_needs_no_upward_gesture() {
+        let (mut app, pane_id, mut rx) = app_with_alt_screen_pane();
+        prefix_gesture(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL).await;
+        drain(&mut rx);
+
+        // How the mode ends in practice on the way to another space.
+        press(&mut app, KeyCode::Esc, KeyModifiers::empty()).await;
+        assert_eq!(app.state.mode, Mode::Terminal);
+
+        prefix_gesture(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL).await;
+
+        assert_eq!(app.state.mode, Mode::AppScroll);
+        assert_eq!(
+            drain(&mut rx),
+            encoded(&app, pane_id, KeyCode::PageDown),
+            "re-entry must scroll down, not up"
+        );
+    }
+
+    #[tokio::test]
+    async fn downward_gesture_on_a_primary_screen_pane_does_nothing() {
+        let (mut app, _pane_id, mut rx) =
+            app_with_channel_pane(b"line one\r\nline two\r\nline three");
+
+        prefix_gesture(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL).await;
+
+        assert!(
+            app.state.copy_mode.is_none(),
+            "a live viewport has nothing below it, so no mode is entered"
+        );
+        assert!(app.state.app_scroll.is_none());
+        assert_ne!(app.state.mode, Mode::AppScroll);
+        assert!(drain(&mut rx).is_empty());
     }
 
     #[tokio::test]

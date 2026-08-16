@@ -179,6 +179,12 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             "copy mode + half page up",
         ),
         help_entry(keybind_label(&kb.copy_mode_line_up), "copy mode + line up"),
+        help_entry(keybind_label(&kb.copy_mode_page_down), "scroll page down"),
+        help_entry(
+            keybind_label(&kb.copy_mode_half_page_down),
+            "scroll half page down",
+        ),
+        help_entry(keybind_label(&kb.copy_mode_line_down), "scroll line down"),
         help_entry(keybind_label(&kb.zoom), "zoom pane"),
         help_entry(keybind_label(&kb.resize_mode), "resize mode"),
         help_entry(keybind_label(&kb.resize_pane_left), "resize pane left"),
@@ -500,6 +506,29 @@ mod tests {
         assert_eq!(filtered[0].1[0].1, "close pane");
 
         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+    }
+
+    #[test]
+    fn the_downward_scroll_gestures_are_discoverable_in_the_help_panel() {
+        let state = crate::app::state::AppState::test_new();
+
+        let panes = keybind_help_groups(&state)
+            .into_iter()
+            .find(|(group, _)| *group == "panes")
+            .expect("the panes group should exist")
+            .1;
+
+        for (label, expected_key) in [
+            ("scroll page down", "prefix+pagedown"),
+            ("scroll half page down", "prefix+ctrl+d"),
+            ("scroll line down", "prefix+ctrl+j"),
+        ] {
+            let entry = panes
+                .iter()
+                .find(|(_, entry_label)| entry_label == label)
+                .unwrap_or_else(|| panic!("{label} should appear in the help panel"));
+            assert_eq!(entry.0, expected_key);
+        }
     }
 
     /// A shortcut that works but is absent from `prefix+?` is incomplete work.

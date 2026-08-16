@@ -34,6 +34,23 @@ pub(crate) enum CopyModeEntryScroll {
     Line,
 }
 
+/// Which way a one-gesture scroll goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CopyModeEntryDirection {
+    Up,
+    Down,
+}
+
+impl CopyModeEntryDirection {
+    /// The signed step the copy-mode scroll primitives take.
+    fn step(self) -> i16 {
+        match self {
+            Self::Up => -1,
+            Self::Down => 1,
+        }
+    }
+}
+
 impl AppState {
     pub(crate) fn enter_copy_mode(&mut self, terminal_runtimes: &TerminalRuntimeRegistry) {
         let Some(ws_idx) = self.active else {
@@ -84,22 +101,31 @@ impl AppState {
     }
 
     /// One-gesture scrollback entry (tmux `copy-mode -u`): enter copy mode on the focused pane,
-    /// then scroll up by the requested amount. If copy mode is already active on the focused pane,
+    /// then scroll by the requested amount. If copy mode is already active on the focused pane,
     /// only scroll — re-entering would clobber the entry scroll anchor (`entry_offset_from_bottom`)
     /// and the cursor. Stale copy mode on another pane is cancelled first (restoring that pane's
     /// scroll) before entering fresh on the focused pane. A pane whose application owns the
     /// alternate screen has no scrollback to enter, so fresh entry diverts to the app-scroll
     /// passthrough mode instead (see `try_enter_app_scroll_mode`).
+    ///
+    /// Fresh entry is upward-only. A live viewport has nothing below it, so a
+    /// downward gesture on a primary-screen pane that is not already in copy
+    /// mode does nothing rather than stranding the user in a mode they did not
+    /// ask for after a keypress that scrolled zero lines.
     pub(crate) fn enter_copy_mode_scrolled(
         &mut self,
         terminal_runtimes: &TerminalRuntimeRegistry,
         scroll: CopyModeEntryScroll,
+        direction: CopyModeEntryDirection,
     ) {
         if !(self.copy_mode.is_some() && self.copy_mode_pane_is_focused()) {
             if self.copy_mode.is_some() {
                 self.cancel_copy_mode(terminal_runtimes);
             }
-            if self.try_enter_app_scroll_mode(terminal_runtimes, scroll) {
+            if self.try_enter_app_scroll_mode(terminal_runtimes, scroll, direction) {
+                return;
+            }
+            if direction == CopyModeEntryDirection::Down {
                 return;
             }
             self.enter_copy_mode(terminal_runtimes);
@@ -108,12 +134,15 @@ impl AppState {
                 return;
             }
         }
+        let step = direction.step();
         match scroll {
-            CopyModeEntryScroll::Page => self.scroll_copy_mode_page(terminal_runtimes, -1, false),
+            CopyModeEntryScroll::Page => self.scroll_copy_mode_page(terminal_runtimes, step, false),
             CopyModeEntryScroll::HalfPage => {
-                self.scroll_copy_mode_page(terminal_runtimes, -1, true)
+                self.scroll_copy_mode_page(terminal_runtimes, step, true)
             }
-            CopyModeEntryScroll::Line => self.scroll_copy_mode_viewport_line(terminal_runtimes, -1),
+            CopyModeEntryScroll::Line => {
+                self.scroll_copy_mode_viewport_line(terminal_runtimes, step)
+            }
         }
         // The scroll-only path is reached from Prefix (or Navigate) mode; settle back into Copy.
         self.sync_copy_mode_with_focus();
@@ -1552,6 +1581,74 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::Copy);
         assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), 1);
+    }
+
+    #[tokio::test]
+    async fn prefix_ctrl_d_scrolls_an_open_copy_mode_back_down() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.prefix_code = KeyCode::Char('a');
+        app.state.prefix_mods = KeyModifiers::CONTROL;
+
+        for code in [KeyCode::Char('u'), KeyCode::Char('u')] {
+            app.handle_key(TerminalKey::new(
+                app.state.prefix_code,
+                app.state.prefix_mods,
+            ))
+            .await;
+            app.handle_key(TerminalKey::new(code, KeyModifiers::CONTROL))
+                .await;
+        }
+        let height = app
+            .state
+            .pane_info_by_id(pane_id)
+            .expect("pane info")
+            .inner_rect
+            .height;
+        let half = copy_mode_page_lines(height, true);
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), half * 2);
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+            .await;
+
+        assert_eq!(app.state.mode, Mode::Copy);
+        assert_eq!(copy_mode_offset_from_bottom(&app, pane_id), half);
+        assert_eq!(
+            app.state
+                .copy_mode
+                .as_ref()
+                .expect("copy mode")
+                .entry_offset_from_bottom,
+            0,
+            "scrolling down must not move the anchor exit restores to"
+        );
+    }
+
+    #[tokio::test]
+    async fn prefix_ctrl_d_does_not_open_copy_mode_on_an_unscrolled_pane() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, _pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.prefix_code = KeyCode::Char('a');
+        app.state.prefix_mods = KeyModifiers::CONTROL;
+
+        app.handle_key(TerminalKey::new(
+            app.state.prefix_code,
+            app.state.prefix_mods,
+        ))
+        .await;
+        app.handle_key(TerminalKey::new(KeyCode::Char('d'), KeyModifiers::CONTROL))
+            .await;
+
+        assert!(
+            app.state.copy_mode.is_none(),
+            "the viewport is already at the bottom; entering copy mode would strand the user"
+        );
+        assert_ne!(app.state.mode, Mode::Copy);
     }
 
     #[tokio::test]
