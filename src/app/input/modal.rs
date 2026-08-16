@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 use crate::{
     app::{
         state::{
-            AppState, ContextMenuKind, ContextMenuState, MenuListState, Mode, NavigatorStateFilter,
+            AppState, ContextMenuKind, ContextMenuState, ListCursor, Mode, NavigatorStateFilter,
         },
         App,
     },
@@ -111,7 +111,7 @@ pub(super) fn global_menu_actions(state: &AppState) -> Vec<GlobalMenuAction> {
 }
 
 pub(super) fn open_global_menu(state: &mut AppState) {
-    state.global_menu = MenuListState::new(0);
+    state.global_menu = ListCursor::new(0);
     state.mode = Mode::GlobalMenu;
 }
 
@@ -167,7 +167,7 @@ pub(crate) fn handle_global_menu_key(state: &mut AppState, key: KeyEvent) {
         KeyCode::Up | KeyCode::Char('k') => state.global_menu.move_prev(),
         KeyCode::Down | KeyCode::Char('j') => state.global_menu.move_next(actions.len()),
         KeyCode::Enter => {
-            if let Some(action) = actions.get(state.global_menu.highlighted).copied() {
+            if let Some(action) = actions.get(state.global_menu.selected).copied() {
                 apply_global_menu_action(state, action);
             }
         }
@@ -1133,7 +1133,7 @@ pub(crate) fn handle_context_menu_key(
         }
         KeyCode::Enter => {
             if let Some(menu) = state.context_menu.take() {
-                let idx = menu.list.highlighted;
+                let idx = menu.list.selected;
                 apply_context_menu_action(state, terminal_runtimes, menu, idx);
             }
         }
@@ -1643,7 +1643,7 @@ impl App {
             }
             KeyCode::Enter => {
                 if let Some(menu) = self.state.context_menu.take() {
-                    let idx = menu.list.highlighted;
+                    let idx = menu.list.selected;
                     self.apply_context_menu_action_via_api(menu, idx);
                 }
             }
@@ -1904,7 +1904,8 @@ mod tests {
         }
         state.open_notification_center();
 
-        let selected = |state: &AppState| state.notification_center.as_ref().map(|c| c.selected);
+        let selected =
+            |state: &AppState| state.notification_center.as_ref().map(|c| c.list.selected);
         handle_notification_center_key(&mut state, key(KeyCode::Char('j')));
         assert_eq!(selected(&state), Some(1));
         handle_notification_center_key(&mut state, key(KeyCode::Down));
@@ -1943,7 +1944,7 @@ mod tests {
             "panel stays open after clear"
         );
         assert_eq!(
-            state.notification_center.as_ref().map(|c| c.selected),
+            state.notification_center.as_ref().map(|c| c.list.selected),
             Some(0),
             "selection resets after clear"
         );
@@ -2924,7 +2925,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
@@ -2955,7 +2956,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
         let idx = menu
             .items()
@@ -3003,7 +3004,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
         let idx = menu
             .items()
@@ -3034,7 +3035,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
         let idx = menu
             .items()
@@ -3069,14 +3070,14 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
         let close_idx = menu
             .items()
             .iter()
             .position(|item| *item == "Close pane")
             .expect("close pane item");
-        menu.list.highlighted = close_idx;
+        menu.list.selected = close_idx;
         app.state.context_menu = Some(menu);
 
         app.handle_context_menu_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -3144,11 +3145,20 @@ mod tests {
         ]);
 
         app.handle_pane_todos_key_via_api(key(KeyCode::Down));
-        assert_eq!(app.state.pane_todos.as_ref().expect("panel").selected, 1);
+        assert_eq!(
+            app.state.pane_todos.as_ref().expect("panel").list.selected,
+            1
+        );
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('k')));
-        assert_eq!(app.state.pane_todos.as_ref().expect("panel").selected, 0);
+        assert_eq!(
+            app.state.pane_todos.as_ref().expect("panel").list.selected,
+            0
+        );
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('j')));
-        assert_eq!(app.state.pane_todos.as_ref().expect("panel").selected, 1);
+        assert_eq!(
+            app.state.pane_todos.as_ref().expect("panel").list.selected,
+            1
+        );
     }
 
     #[test]
@@ -3203,7 +3213,7 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('d')));
         assert!(panel_todo_texts(&app).is_empty());
         assert_eq!(
-            app.state.pane_todos.as_ref().expect("panel").selected,
+            app.state.pane_todos.as_ref().expect("panel").list.selected,
             0,
             "the selection re-clamps once the list shrinks"
         );

@@ -11,6 +11,8 @@
 
 mod button_row;
 mod geometry;
+mod list_cursor;
 
 pub(crate) use button_row::{ButtonRow, ButtonRowHit, ButtonSpec};
 pub(crate) use geometry::{AnchoredPanelSpec, PanelGeometry, VerticalAnchor};
+pub(crate) use list_cursor::{reveal_scroll, ListCursor};

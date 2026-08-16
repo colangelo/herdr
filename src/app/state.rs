@@ -1083,57 +1083,9 @@ impl SettingsSection {
 /// All built-in theme names in display order.
 pub const THEME_NAMES: &[&str] = crate::config::THEME_NAMES;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MenuListState {
-    pub highlighted: usize,
-}
-
-impl MenuListState {
-    pub fn new(highlighted: usize) -> Self {
-        Self { highlighted }
-    }
-
-    pub fn move_prev(&mut self) {
-        self.highlighted = self.highlighted.saturating_sub(1);
-    }
-
-    pub fn move_next(&mut self, item_count: usize) {
-        if item_count > 0 {
-            self.highlighted = (self.highlighted + 1).min(item_count - 1);
-        }
-    }
-
-    pub fn hover(&mut self, idx: Option<usize>) {
-        if let Some(idx) = idx {
-            self.highlighted = idx;
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SelectionListState {
-    pub selected: usize,
-}
-
-impl SelectionListState {
-    pub fn new(selected: usize) -> Self {
-        Self { selected }
-    }
-
-    pub fn move_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    pub fn move_next(&mut self, item_count: usize) {
-        if item_count > 0 {
-            self.selected = (self.selected + 1).min(item_count - 1);
-        }
-    }
-
-    pub fn select(&mut self, idx: usize) {
-        self.selected = idx;
-    }
-}
+/// The overlay kit's list cursor, re-exported so overlay state can name it
+/// without every module reaching into `crate::ui`.
+pub(crate) use crate::ui::overlay::ListCursor;
 
 /// Where the pane-move picker can send a pane. Maps 1:1 onto
 /// [`crate::api::schema::PaneMoveDestination`] at dispatch, so the picker only
@@ -1171,7 +1123,7 @@ pub enum PaneMoveTargetItem {
 pub struct PaneMoveTargetPickerState {
     pub source_pane_id: String,
     pub items: Vec<PaneMoveTargetItem>,
-    pub list: SelectionListState,
+    pub list: ListCursor,
 }
 
 impl PaneMoveTargetPickerState {
@@ -1185,7 +1137,7 @@ impl PaneMoveTargetPickerState {
         Self {
             source_pane_id,
             items,
-            list: SelectionListState::new(selected),
+            list: ListCursor::new(selected),
         }
     }
 
@@ -1245,7 +1197,7 @@ pub struct SettingsState {
     /// Which section tab is active.
     pub section: SettingsSection,
     /// Selected item index within the current section.
-    pub list: SelectionListState,
+    pub list: ListCursor,
     /// The palette before opening settings (for cancel/restore).
     pub original_palette: Option<Palette>,
     /// The theme name before opening settings.
@@ -1345,7 +1297,7 @@ pub struct ContextMenuState {
     pub kind: ContextMenuKind,
     pub x: u16,
     pub y: u16,
-    pub list: MenuListState,
+    pub list: ListCursor,
 }
 
 impl ContextMenuState {
@@ -1548,8 +1500,8 @@ pub enum NotificationCenterButton {
 /// TUI-only state for the notification center dropdown panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationCenterState {
-    /// Index into the newest-first entry list.
-    pub selected: usize,
+    /// Cursor into the newest-first entry list.
+    pub list: ListCursor,
     /// Which footer button the pointer is over, if any.
     pub hovered_button: Option<NotificationCenterButton>,
 }
@@ -1572,8 +1524,8 @@ pub enum PaneTodoPanelButton {
 pub struct PaneTodoPanelState {
     /// Pane whose todos the panel is showing.
     pub pane_id: PaneId,
-    /// Index into the pane's presentation-order list.
-    pub selected: usize,
+    /// Cursor into the pane's presentation-order list.
+    pub list: ListCursor,
     /// Which footer button the pointer is over, if any.
     pub hovered_button: Option<PaneTodoPanelButton>,
 }
@@ -1955,7 +1907,7 @@ pub struct AppState {
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
     /// Highlight state for the bottom-right global launcher menu.
-    pub global_menu: MenuListState,
+    pub global_menu: ListCursor,
     /// Resolved host terminal default colors for theming embedded panes.
     pub host_terminal_theme: TerminalTheme,
     /// Last known foreground host terminal cell size in pixels.
@@ -2001,7 +1953,7 @@ impl AppState {
     /// tracks what the user actually visited.
     pub(crate) fn open_notification_center(&mut self) {
         self.notification_center = Some(NotificationCenterState {
-            selected: 0,
+            list: ListCursor::default(),
             hovered_button: None,
         });
         self.mode = Mode::NotificationCenter;
@@ -2017,7 +1969,7 @@ impl AppState {
     pub(crate) fn clear_notifications(&mut self) {
         self.notification_log.clear();
         if let Some(center) = self.notification_center.as_mut() {
-            center.selected = 0;
+            center.list = ListCursor::default();
             center.hovered_button = None;
         }
     }
@@ -2030,21 +1982,19 @@ impl AppState {
 
     pub(crate) fn notification_center_move_selection(&mut self, delta: isize) {
         let len = self.notification_log.len();
+        let visible = self.notification_center_visible_rows();
         let Some(center) = self.notification_center.as_mut() else {
             return;
         };
-        if len == 0 {
-            center.selected = 0;
-            return;
-        }
-        center.selected = center.selected.saturating_add_signed(delta).min(len - 1);
+        center.list.move_by(delta, len);
+        center.list.reveal(visible, len);
     }
 
     pub(crate) fn notification_center_selected_entry(&self) -> Option<&NotificationEntry> {
         let center = self.notification_center.as_ref()?;
         self.notification_log
             .entries_newest_first()
-            .nth(center.selected)
+            .nth(center.list.selected)
     }
 
     /// Open the todo panel for a pane. The selection starts at the top of the
@@ -2052,7 +2002,7 @@ impl AppState {
     pub(crate) fn open_pane_todos(&mut self, pane_id: PaneId) {
         self.pane_todos = Some(PaneTodoPanelState {
             pane_id,
-            selected: 0,
+            list: ListCursor::default(),
             hovered_button: None,
         });
         self.mode = Mode::PaneTodos;
@@ -2113,14 +2063,12 @@ impl AppState {
             return;
         };
         let len = self.pane_todos_in_display_order(pane_id).len();
+        let visible = self.pane_todo_panel_visible_rows();
         let Some(panel) = self.pane_todos.as_mut() else {
             return;
         };
-        if len == 0 {
-            panel.selected = 0;
-            return;
-        }
-        panel.selected = panel.selected.saturating_add_signed(delta).min(len - 1);
+        panel.list.move_by(delta, len);
+        panel.list.reveal(visible, len);
     }
 
     /// The selected todo, cloned so callers can mutate through the API without
@@ -2128,7 +2076,7 @@ impl AppState {
     pub(crate) fn selected_pane_todo(&self) -> Option<crate::terminal::todo::PaneTodo> {
         let panel = self.pane_todos.as_ref()?;
         self.pane_todos_in_display_order(panel.pane_id)
-            .get(panel.selected)
+            .get(panel.list.selected)
             .map(|todo| (*todo).clone())
     }
 
@@ -2745,7 +2693,7 @@ impl AppState {
             host_terminal_appearance_explicit: false,
             settings: SettingsState {
                 section: SettingsSection::Theme,
-                list: SelectionListState::new(0),
+                list: ListCursor::new(0),
                 original_palette: None,
                 original_theme: None,
             },
@@ -2760,7 +2708,7 @@ impl AppState {
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
-            global_menu: MenuListState::new(0),
+            global_menu: ListCursor::new(0),
             host_terminal_theme: TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             host_mouse_pixels: None,
@@ -3416,7 +3364,7 @@ mod tests {
         state.open_notification_center();
         state.notification_center_move_selection(2);
         assert_eq!(
-            state.notification_center.as_ref().map(|c| c.selected),
+            state.notification_center.as_ref().map(|c| c.list.selected),
             Some(2)
         );
 
@@ -3429,7 +3377,7 @@ mod tests {
             "clearing leaves the panel open"
         );
         assert_eq!(
-            state.notification_center.as_ref().map(|c| c.selected),
+            state.notification_center.as_ref().map(|c| c.list.selected),
             Some(0),
             "selection resets after clear"
         );
@@ -3566,7 +3514,7 @@ mod tests {
             state
                 .notification_center
                 .as_ref()
-                .map(|center| center.selected),
+                .map(|center| center.list.selected),
             Some(0)
         );
 
@@ -3576,7 +3524,7 @@ mod tests {
             state
                 .notification_center
                 .as_ref()
-                .map(|center| center.selected),
+                .map(|center| center.list.selected),
             Some(2),
             "selection clamps to newest-first list length"
         );
@@ -3585,7 +3533,7 @@ mod tests {
             state
                 .notification_center
                 .as_ref()
-                .map(|center| center.selected),
+                .map(|center| center.list.selected),
             Some(0)
         );
         assert_eq!(
@@ -3793,7 +3741,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
 
         assert_eq!(
@@ -3813,7 +3761,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
 
         assert_eq!(
@@ -3833,7 +3781,7 @@ mod tests {
             },
             x: 0,
             y: 0,
-            list: MenuListState::new(0),
+            list: ListCursor::new(0),
         };
 
         assert_eq!(

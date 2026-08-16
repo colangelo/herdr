@@ -177,7 +177,7 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
         {
             let idx = start + row;
             let row_rect = Rect::new(list.x, list.y + row as u16, list.width, 1);
-            let is_selected = idx == panel.selected;
+            let is_selected = idx == panel.list.selected;
             let public_id = app.pane_todo_link_public_id(todo);
             let chip = todo
                 .link
@@ -851,12 +851,15 @@ mod tests {
 
         app.pane_todos_move_selection(5);
         assert_eq!(
-            app.pane_todos.as_ref().expect("panel state").selected,
+            app.pane_todos.as_ref().expect("panel state").list.selected,
             1,
             "selection stops at the last row"
         );
         app.pane_todos_move_selection(-9);
-        assert_eq!(app.pane_todos.as_ref().expect("panel state").selected, 0);
+        assert_eq!(
+            app.pane_todos.as_ref().expect("panel state").list.selected,
+            0
+        );
 
         let empty = app_with_open_panel(&[]);
         assert!(empty.selected_pane_todo().is_none());

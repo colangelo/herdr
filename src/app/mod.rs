@@ -827,7 +827,7 @@ impl App {
             host_terminal_appearance_explicit: false,
             settings: state::SettingsState {
                 section: state::SettingsSection::Theme,
-                list: state::SelectionListState::new(0),
+                list: state::ListCursor::new(0),
                 original_palette: None,
                 original_theme: None,
             },
@@ -841,7 +841,7 @@ impl App {
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
-            global_menu: state::MenuListState::new(0),
+            global_menu: state::ListCursor::new(0),
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             host_mouse_pixels: None,
@@ -6703,7 +6703,7 @@ last_pane = "prefix+tab"
             kind: state::ContextMenuKind::Workspace { ws_idx: 1 },
             x: 2,
             y: 2,
-            list: state::MenuListState::new(1),
+            list: state::ListCursor::new(1),
         });
         app.state.mode = Mode::ContextMenu;
 
