@@ -1,7 +1,14 @@
 # sidebar-agent-state-display Specification
 
 ## Purpose
-TBD - created by archiving change sidebar-working-display-state. Update Purpose after archive.
+Define the state a sidebar row shows for a group of panes: it comes from a
+display ranking where a working pane outranks a finished-but-unviewed one,
+kept deliberately distinct from the attention ranking that drives sorting and
+notifications, and defined in one shared place so the two cannot drift. The
+aggregate `agent_status` the JSON API reports for a container uses the same
+ranking as the row, a row's state depends only on the panes it covers so
+viewing one pane never changes what another row shows, and sort order agrees
+with the order motion is animating toward.
 ## Requirements
 ### Requirement: Aggregate row state is derived from a display ranking
 The state a sidebar row displays for a group of panes SHALL be derived from a display

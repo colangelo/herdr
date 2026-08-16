@@ -1,7 +1,14 @@
 # collapsed-sidebar-parity Specification
 
 ## Purpose
-TBD - created by archiving change collapsed-sidebar-parity. Update Purpose after archive.
+Define the parity the collapsed sidebar keeps with the expanded one: the active
+agent gets the same active background band and a bold jump symbol, space and
+agent rows are labelled with the jump symbol their chord actually resolves
+(digits then letters, always one cell so the state icon column cannot shift),
+non-active jump symbols honour `ui.workspace_number_color` /
+`ui.agent_number_color`, and `ui.sidebar_active_border = "left"`/`"right"`
+reserves an edge column and draws the accent bar on the active space and agent
+rows.
 ## Requirements
 ### Requirement: Collapsed active-agent highlight
 The collapsed sidebar SHALL highlight the active agent row with the same active background band (`sidebar_active_band_bg`) used by collapsed space rows, and the active row's jump symbol SHALL render bold in the palette `text` color. Non-active agent rows SHALL keep their current un-banded rendering.

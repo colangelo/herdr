@@ -1,7 +1,15 @@
 # sidebar-sort-motion Specification
 
 ## Purpose
-TBD - created by archiving change sidebar-bubble-motion. Update Purpose after archive.
+Define the list-motion primitive that lets priority-sorted sidebar lists bubble
+instead of teleporting: a persisted display order of stable keys that holds a
+diverged entry for a settle delay, cancels if it re-converges, then moves it
+one position per step interval to its target slot. Covers the coherence rule
+that the order mutates only inside an animation tick so rendering, jump
+numbers, and mouse hit-testing always agree; which lists adopt motion and under
+which sort; the shared `ui.sort_motion` / `ui.sort_motion_settle_ms` /
+`ui.sort_motion_step_ms` / `ui.sort_motion_easing` options; and that state
+icons and colors always render live regardless of motion.
 ## Requirements
 ### Requirement: Reusable list-motion primitive with settle and stepped movement
 The system SHALL provide a reusable list-motion component that maintains a persisted display order of stable keys and follows a live target order by (a) holding a diverged entry's position for a configurable settle delay, (b) cancelling the pending motion if the entry re-converges before the delay expires, and (c) then moving the entry one position per configurable step interval until it reaches its target slot. The same rules SHALL apply to upward and downward moves. New keys SHALL appear at their target position immediately and removed keys SHALL disappear immediately, without animation.
