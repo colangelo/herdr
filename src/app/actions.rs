@@ -19,7 +19,7 @@ use super::state::{
     navigator_display_index_of_row, navigator_display_lines, navigator_first_row_at_or_after,
     text_matches_query, AgentNotificationDelivery, AppState, Mode, NavigatorPurpose, NavigatorRow,
     NavigatorStateFilter, NavigatorTarget, PaneFocusTarget, PaneTodoEditLink,
-    PendingAgentNotification, ToastKind, ToastNotification, ToastTarget, ViewLayout,
+    PendingAgentNotification, ToastKind, ToastNotification, ToastTarget, TodoBoardItem, ViewLayout,
 };
 
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
@@ -579,6 +579,103 @@ impl AppState {
         }
     }
 
+    /// How a pane is named wherever the session lists panes: its title, then
+    /// its manual label, its agent, and finally the command it was launched
+    /// with, so a plain shell is identified by what it is running rather than
+    /// by a bare number.
+    ///
+    /// Shared by the navigator's pane rows and the todo board's group
+    /// headings, so a pane cannot be called one thing in the picker and
+    /// another on the board.
+    pub(crate) fn pane_display_label(&self, ws_idx: usize, pane_id: PaneId) -> String {
+        let pane_number = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.public_pane_number(pane_id))
+            .unwrap_or(0);
+        let terminal = self
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id));
+        terminal
+            .and_then(|terminal| terminal.effective_title())
+            .or_else(|| {
+                terminal.and_then(|terminal| terminal.manual_label.as_deref().map(str::to_string))
+            })
+            .or_else(|| {
+                terminal.and_then(|terminal| terminal.agent_name.as_deref().map(str::to_string))
+            })
+            .or_else(|| {
+                terminal.and_then(|terminal| terminal.effective_agent_label().map(str::to_string))
+            })
+            .or_else(|| launch_label(terminal.and_then(|terminal| terminal.launch_argv.as_ref())))
+            .unwrap_or_else(|| format!("pane {pane_number}"))
+    }
+
+    /// Every pane holding a todo, grouped by pane in the order the session
+    /// presents them — space, then tab, then pane — each group led by a
+    /// heading and followed by that pane's todos in the panel's own
+    /// presentation order.
+    ///
+    /// Ordering *across* panes is deliberately not by priority: a global
+    /// priority sort scatters one pane's todos through the list, and dealing
+    /// with a pane's work is the common case. Panes holding nothing are
+    /// omitted, so the board does not bury what it exists to show under panes
+    /// saying "nothing here".
+    pub(crate) fn todo_board_items(&self) -> Vec<TodoBoardItem> {
+        let mut items = Vec::new();
+        for (ws_idx, ws) in self.workspaces.iter().enumerate() {
+            for tab in &ws.tabs {
+                for pane_id in tab.layout.pane_ids() {
+                    // The panel's own ordering, rather than a second
+                    // derivation the two surfaces could drift apart on.
+                    let todos = self.pane_todos_in_display_order(pane_id);
+                    if todos.is_empty() {
+                        continue;
+                    }
+                    items.push(TodoBoardItem::PaneHeading {
+                        public_id: self.session_public_pane_id(pane_id),
+                        label: self.pane_display_label(ws_idx, pane_id),
+                    });
+                    items.extend(todos.iter().map(|todo| TodoBoardItem::Todo {
+                        pane_id,
+                        todo_id: todo.id,
+                    }));
+                }
+            }
+        }
+        items
+    }
+
+    /// Rebuild the board's projection against the live store, keeping the
+    /// selection on the todo it was on.
+    ///
+    /// Every board action ends here rather than the projection being rebuilt
+    /// per frame: a todo removed underneath the cursor leaves the selection at
+    /// the same place in the list instead of at the top, and the last todo of
+    /// a pane taking its heading with it falls out of rebuilding rather than
+    /// being a case to handle.
+    pub(crate) fn refresh_todo_board(&mut self) {
+        let items = self.todo_board_items();
+        let Some(board) = self.todo_board_mut() else {
+            return;
+        };
+        let previous = board.selected_todo();
+        let index = board.list.selected;
+        board.items = items;
+        let target = previous
+            .and_then(|(pane_id, todo_id)| {
+                board.items.iter().position(|item| {
+                    matches!(item, TodoBoardItem::Todo { pane_id: p, todo_id: t }
+                        if *p == pane_id && *t == todo_id)
+                })
+            })
+            .or_else(|| board.nearest_todo(index, true))
+            .unwrap_or(0);
+        board.list.select(target);
+    }
+
     fn navigator_pane_rows_for_tab(
         &self,
         ws_idx: usize,
@@ -597,24 +694,7 @@ impl AppState {
                 continue;
             };
             let terminal = self.terminals.get(&pane.attached_terminal_id);
-            let pane_number = ws.public_pane_number(pane_id).unwrap_or(0);
-            let label = terminal
-                .and_then(|terminal| terminal.effective_title())
-                .or_else(|| {
-                    terminal
-                        .and_then(|terminal| terminal.manual_label.as_deref().map(str::to_string))
-                })
-                .or_else(|| {
-                    terminal.and_then(|terminal| terminal.agent_name.as_deref().map(str::to_string))
-                })
-                .or_else(|| {
-                    terminal
-                        .and_then(|terminal| terminal.effective_agent_label().map(str::to_string))
-                })
-                .or_else(|| {
-                    launch_label(terminal.and_then(|terminal| terminal.launch_argv.as_ref()))
-                })
-                .unwrap_or_else(|| format!("pane {pane_number}"));
+            let label = self.pane_display_label(ws_idx, pane_id);
             let display_agent = terminal.and_then(|terminal| terminal.effective_display_agent());
             let agent_label = display_agent.as_deref().or_else(|| {
                 terminal
@@ -3685,6 +3765,260 @@ mod tests {
     use crate::detect::{Agent, AgentState};
     use crate::workspace::Workspace;
     use ratatui::layout::Direction;
+
+    // -----------------------------------------------------------------------
+    // The todo board's projection
+    // -----------------------------------------------------------------------
+
+    /// Put `todos` on a pane, as `(text, priority)` pairs in the order they are
+    /// added — so a test can assert presentation order against insertion order.
+    fn add_todos(
+        state: &mut AppState,
+        pane_id: PaneId,
+        todos: &[(&str, crate::terminal::todo::TodoPriority)],
+    ) {
+        let terminal_id = state
+            .workspaces
+            .iter()
+            .find_map(|ws| ws.pane_state(pane_id))
+            .expect("pane should exist")
+            .attached_terminal_id
+            .clone();
+        let terminal = state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal should exist");
+        for (text, priority) in todos {
+            terminal
+                .add_todo(text, *priority, None, 100)
+                .expect("todo should be added");
+        }
+    }
+
+    fn board_texts(state: &AppState) -> Vec<String> {
+        state
+            .todo_board_items()
+            .iter()
+            .map(|item| match item {
+                TodoBoardItem::PaneHeading { public_id, label } => {
+                    format!("# {} {label}", public_id.as_deref().unwrap_or("-"))
+                }
+                TodoBoardItem::Todo { pane_id, todo_id } => state
+                    .pane_todo_by_id(*pane_id, *todo_id)
+                    .map(|todo| todo.text)
+                    .unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    fn board_state(state: &AppState) -> Vec<String> {
+        board_texts(state)
+    }
+
+    /// Two spaces, each with a pane holding todos, plus one pane holding none.
+    fn app_with_board_todos() -> (AppState, PaneId, PaneId, PaneId) {
+        use crate::terminal::todo::TodoPriority;
+
+        let mut first = Workspace::test_new("one");
+        let first_root = first.tabs[0].root_pane;
+        let first_empty = first.test_split(Direction::Horizontal);
+        let second = Workspace::test_new("two");
+        let second_root = second.tabs[0].root_pane;
+
+        let mut state = AppState::test_new();
+        state.workspaces = vec![first, second];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::Terminal;
+
+        add_todos(
+            &mut state,
+            first_root,
+            &[
+                ("normal first", TodoPriority::Normal),
+                ("high second", TodoPriority::High),
+            ],
+        );
+        add_todos(
+            &mut state,
+            second_root,
+            &[("other space", TodoPriority::Normal)],
+        );
+        (state, first_root, first_empty, second_root)
+    }
+
+    #[test]
+    fn the_board_groups_todos_by_pane_in_space_tab_pane_order() {
+        let (state, _, _, _) = app_with_board_todos();
+        let texts = board_state(&state);
+
+        // Space one's pane and its todos come before space two's, and each
+        // pane's todos stay contiguous under their own heading.
+        assert!(
+            texts[0].starts_with('#'),
+            "first row is a heading: {texts:?}"
+        );
+        assert_eq!(&texts[1..3], &["high second", "normal first"]);
+        assert!(texts[3].starts_with('#'), "second group heading: {texts:?}");
+        assert_eq!(texts[4], "other space");
+        assert_eq!(texts.len(), 5);
+    }
+
+    /// The board reads the panel's own ordering rather than deriving a second
+    /// one: the high-priority todo added second is presented first in both.
+    #[test]
+    fn a_panes_todos_are_ordered_exactly_as_its_panel_orders_them() {
+        let (state, first_root, _, _) = app_with_board_todos();
+        let panel: Vec<String> = state
+            .pane_todos_in_display_order(first_root)
+            .iter()
+            .map(|todo| todo.text.clone())
+            .collect();
+        let board: Vec<String> = state
+            .todo_board_items()
+            .iter()
+            .filter_map(|item| match item {
+                TodoBoardItem::Todo { pane_id, todo_id } if *pane_id == first_root => state
+                    .pane_todo_by_id(*pane_id, *todo_id)
+                    .map(|todo| todo.text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(panel, board);
+    }
+
+    /// A board that listed every pane to say "nothing here" would bury the
+    /// todos it exists to show.
+    #[test]
+    fn panes_holding_no_todos_contribute_no_heading_and_no_rows() {
+        let (state, _, first_empty, _) = app_with_board_todos();
+        let empty_id = state
+            .session_public_pane_id(first_empty)
+            .expect("the empty pane has an identifier");
+        assert!(
+            !board_state(&state)
+                .iter()
+                .any(|row| row.contains(&empty_id)),
+            "the empty pane should not appear"
+        );
+    }
+
+    #[test]
+    fn a_heading_identifies_its_pane_by_addressable_id_then_label() {
+        let (state, first_root, _, _) = app_with_board_todos();
+        let expected = state
+            .session_public_pane_id(first_root)
+            .expect("pane identifier");
+        match &state.todo_board_items()[0] {
+            TodoBoardItem::PaneHeading { public_id, label } => {
+                assert_eq!(public_id.as_deref(), Some(expected.as_str()));
+                assert_eq!(label, &state.pane_display_label(0, first_root));
+            }
+            other => panic!("expected a heading, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selection_steps_over_headings_in_both_directions() {
+        let (mut state, _, _, _) = app_with_board_todos();
+        state.open_todo_board();
+
+        // Opens on the first todo, not on the heading above it.
+        assert_eq!(state.todo_board().expect("board").list.selected, 1);
+
+        // Forward past the second group's heading lands on its todo.
+        state.move_todo_board_selection_by(1);
+        assert_eq!(state.todo_board().expect("board").list.selected, 2);
+        state.move_todo_board_selection_by(1);
+        assert_eq!(state.todo_board().expect("board").list.selected, 4);
+
+        // And back the same way.
+        state.move_todo_board_selection_by(-1);
+        assert_eq!(state.todo_board().expect("board").list.selected, 2);
+
+        // Clamping at either end never parks on a heading.
+        state.move_todo_board_selection_by(-10);
+        assert_eq!(state.todo_board().expect("board").list.selected, 1);
+        state.move_todo_board_selection_by(10);
+        assert_eq!(state.todo_board().expect("board").list.selected, 4);
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn the_selection_survives_a_todo_removed_underneath_it() {
+        let (mut state, first_root, _, _) = app_with_board_todos();
+        state.open_todo_board();
+        state.move_todo_board_selection_by(1);
+        let selected = state
+            .todo_board()
+            .and_then(|board| board.selected_todo())
+            .expect("a todo is selected");
+        assert_eq!(selected.0, first_root);
+
+        // Remove the todo the cursor is on; the board rebuilds and the
+        // selection stays in the list rather than snapping to the top.
+        let terminal_id = state.workspaces[0]
+            .pane_state(first_root)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .remove_todo(selected.1)
+            .expect("todo should be removed");
+        state.refresh_todo_board();
+
+        let board = state.todo_board().expect("board");
+        assert!(
+            board.selected_todo().is_some(),
+            "the selection landed on a todo: {:?}",
+            board.items
+        );
+        assert_eq!(board_state(&state).len(), 4);
+    }
+
+    /// The last todo of a pane takes its heading with it, because the
+    /// projection is rebuilt rather than patched.
+    #[test]
+    fn removing_a_panes_last_todo_drops_its_heading() {
+        let (mut state, _, _, second_root) = app_with_board_todos();
+        state.open_todo_board();
+        let second_id = state
+            .session_public_pane_id(second_root)
+            .expect("pane identifier");
+        assert!(board_state(&state)
+            .iter()
+            .any(|row| row.contains(&second_id)));
+
+        let todo_id = state
+            .pane_todos_in_display_order(second_root)
+            .first()
+            .expect("the pane holds one todo")
+            .id;
+        let terminal_id = state.workspaces[1]
+            .pane_state(second_root)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .remove_todo(todo_id)
+            .expect("todo should be removed");
+        state.refresh_todo_board();
+
+        assert!(
+            !board_state(&state)
+                .iter()
+                .any(|row| row.contains(&second_id)),
+            "the emptied pane keeps no heading"
+        );
+        state.assert_invariants_for_test();
+    }
 
     fn app_with_workspaces(names: &[&str]) -> AppState {
         let mut state = AppState::test_new();
