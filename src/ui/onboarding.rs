@@ -112,3 +112,36 @@ fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
             .add_modifier(Modifier::BOLD),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn snapshot_onboarding() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            app.mode = crate::app::state::Mode::Onboarding;
+        })
+        .assert(
+            Rect::new(8, 4, 64, 16),
+            &[
+                "┌──────────────────────────────────────────────────────────────┐",
+                "│  herdr                                                       │",
+                "│  terminal workspace manager for coding agents                │",
+                "│                                                              │",
+                "│  this is a mouse-first terminal.                             │",
+                "│  click the sidebar to switch workspaces, drag pane           │",
+                "│  borders to resize, right-click for context menus.           │",
+                "│                                                              │",
+                "│  ctrl+b enters prefix mode · ? shows keybinds and settings   │",
+                "│  next: install optional agent integrations for more reliable │",
+                "│                                                              │",
+                "│                                                              │",
+                "│                                                              │",
+                "│                                                              │",
+                "│ ↵ continue                                                   │",
+                "└──────────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
+}

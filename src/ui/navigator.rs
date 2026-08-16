@@ -682,4 +682,34 @@ mod tests {
         assert!(!has_following_sibling_at_depth(&rows, 5, 1));
         assert!(!has_following_sibling_at_depth(&rows, 5, 2));
     }
+
+    #[test]
+    fn snapshot_navigator() {
+        crate::ui::test_support::overlay_snapshot_of(|app| app.open_navigator()).assert(
+            Rect::new(5, 2, 70, 21),
+            &[
+                "┌────────────────────────────────────────────────────────────────────┐",
+                "│ / search panes                                                   1 │",
+                "│────────────────────────────────────────────────────────────────────│",
+                "│ ◆ ▾ · overlay (1)                                                  │",
+                "│ ◆ └── · pane 1                                  shell              │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│                                                                    │",
+                "│ overlay · pane 1 · shell───────────────────────────────────────────│",
+                "│ enter switch  / search  b/w/i/d/a states  j/k/^j/^k/↑↓ move  esc cl│",
+                "└────────────────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
 }

@@ -547,4 +547,43 @@ mod tests {
 
         assert_eq!(entry.0, "prefix+ctrl+x");
     }
+
+    /// Opened the way `open_keybind_help` opens it — the fields it resets are
+    /// the fields the render reads.
+    #[test]
+    fn snapshot_keybind_help() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            app.keybind_help.scroll = 0;
+            app.keybind_help.query.clear();
+            app.keybind_help.search_focused = false;
+            app.mode = crate::app::state::Mode::KeybindHelp;
+        })
+        .assert(
+            Rect::new(2, 1, 76, 22),
+            &[
+                "┌──────────────────────────────────────────────────────────────────────────┐",
+                "│ keybinds                                                       esc close │",
+                "│ press / to filter by command or shortcut                                 │",
+                "│                                                                          │",
+                "│ global                                                                  ▐│",
+                "│ ctrl+b                       prefix mode                                ▐│",
+                "│ prefix+?                     keybinds                                   ▕│",
+                "│ prefix+s                     settings                                   ▕│",
+                "│ prefix+q                     detach                                     ▕│",
+                "│ prefix+shift+r               reload config                              ▕│",
+                "│ prefix+o                     open notification target                   ▕│",
+                "│ prefix+ctrl+n                notification center                        ▕│",
+                "│                                                                         ▕│",
+                "│ navigation                                                              ▕│",
+                "│ esc                          back                                       ▕│",
+                "│ up / down                    workspace list                             ▕│",
+                "│ h / j / k / l / left / right move focus                                 ▕│",
+                "│ tab / shift+tab              cycle pane                                 ▕│",
+                "│ enter                        open workspace                             ▕│",
+                "│                                                                          │",
+                "│ search / · scroll j/k/↑↓/pgup/pgdn · close esc/enter                     │",
+                "└──────────────────────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
 }

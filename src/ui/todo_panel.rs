@@ -367,7 +367,139 @@ mod tests {
 
     use crate::app::state::AppState;
     use crate::terminal::todo::{TodoLink, TodoPriority, TodoUpdate};
+    use crate::ui::test_support::{self, row_text};
     use crate::workspace::Workspace;
+
+    /// A one-pane app carrying `todos`, laid out at `width`x`height`, with the
+    /// panel left closed — the background an open panel is diffed against.
+    fn app_with_todos(
+        todos: &[(&str, bool, TodoPriority)],
+        width: u16,
+        height: u16,
+    ) -> (AppState, crate::layout::PaneId) {
+        let mut app = test_support::app_with_one_pane("todos");
+        test_support::layout_sized(&mut app, width, height);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        for (text, done, priority) in todos {
+            let todo = terminal
+                .add_todo(text, *priority, None, 100)
+                .expect("todo should be added");
+            if *done {
+                terminal
+                    .update_todo(
+                        todo.id,
+                        TodoUpdate {
+                            done: Some(true),
+                            ..TodoUpdate::default()
+                        },
+                        200,
+                    )
+                    .expect("todo should be updated");
+            }
+        }
+        test_support::layout_sized(&mut app, width, height);
+        (app, pane_id)
+    }
+
+    fn snapshot(
+        todos: &[(&str, bool, TodoPriority)],
+        width: u16,
+        height: u16,
+    ) -> test_support::OverlaySnapshot {
+        let (base, _) = app_with_todos(todos, width, height);
+        let (mut open, pane_id) = app_with_todos(todos, width, height);
+        open.open_pane_todos(pane_id);
+        test_support::layout_sized(&mut open, width, height);
+        test_support::overlay_snapshot_sized(&base, &open, width, height)
+    }
+
+    /// Wide enough for the whole footer: every box the panel can offer is on
+    /// the row.
+    #[test]
+    fn snapshot_populated() {
+        snapshot(
+            &[
+                (
+                    "ship the overlay kit before the todo board lands",
+                    false,
+                    TodoPriority::High,
+                ),
+                (
+                    "write the rendered-layout tests first",
+                    false,
+                    TodoPriority::Normal,
+                ),
+                ("read the plan", true, TodoPriority::Normal),
+            ],
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        )
+        .assert(
+            Rect::new(26, 2, 54, 7),
+            &[
+                "┌────────────────────────────────────────────────────┐",
+                "│ ▲ ship the overlay kit before the todo board lands │",
+                "│ ● write the rendered-layout tests first            │",
+                "│ ✓ read the plan                                    │",
+                "│                                                    │",
+                "│  a add    spc toggle    c clear done    esc close  │",
+                "└────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
+
+    /// A pane with nothing on it still opens a panel offering `add`: sizing the
+    /// footer away is what made a quiet pane a dead end.
+    #[test]
+    fn snapshot_empty() {
+        snapshot(
+            &[],
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        )
+        .assert(
+            Rect::new(50, 2, 30, 5),
+            &[
+                "┌────────────────────────────┐",
+                "│ no todos                   │",
+                "│                            │",
+                "│     a add    esc close     │",
+                "└────────────────────────────┘",
+            ],
+        );
+    }
+
+    /// Too narrow for the whole footer: the row drops boxes from the least
+    /// essential up, and `add` and `close` survive.
+    #[test]
+    fn snapshot_narrow() {
+        snapshot(
+            &[
+                ("ship the kit", false, TodoPriority::High),
+                ("read the plan", true, TodoPriority::Normal),
+            ],
+            34,
+            test_support::SNAPSHOT_HEIGHT,
+        )
+        .assert(
+            Rect::new(4, 3, 30, 6),
+            &[
+                "┌────────────────────────────┐",
+                "│ ▲ ship the kit             │",
+                "│ ✓ read the plan            │",
+                "│                            │",
+                "│     a add    esc close     │",
+                "└────────────────────────────┘",
+            ],
+        );
+    }
 
     /// A workspace with one pane, the panel open on it, and the frame geometry
     /// the notification center tests use.
@@ -415,12 +547,6 @@ mod tests {
             .draw(|frame| render_pane_todo_panel(app, frame))
             .unwrap();
         terminal.backend().buffer().clone()
-    }
-
-    fn row_text(buffer: &ratatui::buffer::Buffer, rect: Rect) -> String {
-        (rect.x..rect.x + rect.width)
-            .map(|x| buffer[(x, rect.y)].symbol())
-            .collect()
     }
 
     #[test]

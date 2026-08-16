@@ -294,6 +294,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
 mod tests {
     use super::*;
     use crate::app::state::{AppState, ToastKind, ToastNotification};
+    use crate::ui::test_support;
     use ratatui::layout::Rect;
     use ratatui::{backend::TestBackend, Terminal};
 
@@ -305,6 +306,112 @@ mod tests {
             position: None,
             target: None,
         }
+    }
+
+    /// A quiet one-pane app carrying `titles` in the notification log, laid out
+    /// at the snapshot size.
+    fn app_with_notifications(
+        position: crate::config::NotificationCenterPositionConfig,
+        titles: &[&str],
+    ) -> AppState {
+        let mut app = test_support::app_with_one_pane("notify");
+        app.notification_center_position = position;
+        for title in titles {
+            app.post_notification(toast(title));
+        }
+        test_support::layout(&mut app);
+        app
+    }
+
+    fn opened(
+        position: crate::config::NotificationCenterPositionConfig,
+        titles: &[&str],
+    ) -> AppState {
+        let mut app = app_with_notifications(position, titles);
+        app.open_notification_center();
+        test_support::layout(&mut app);
+        app
+    }
+
+    /// Wide enough for all three boxes; the narrow cases above drop
+    /// `mark read` first.
+    #[test]
+    fn snapshot_top_right_wide() {
+        let position = crate::config::NotificationCenterPositionConfig::TopRight;
+        let titles = ["the build finished on the release runner"];
+        test_support::overlay_snapshot(
+            &app_with_notifications(position, &titles),
+            &opened(position, &titles),
+        )
+        .assert(
+            Rect::new(30, 1, 50, 5),
+            &[
+                "┌────────────────────────────────────────────────┐",
+                "│ ● the build finished on the release runner now │",
+                "│                                                │",
+                "│    r mark read    c clear all    esc close     │",
+                "└────────────────────────────────────────────────┘",
+            ],
+        );
+    }
+
+    #[test]
+    fn snapshot_bottom_right_populated() {
+        let position = crate::config::NotificationCenterPositionConfig::BottomRight;
+        test_support::overlay_snapshot(
+            &app_with_notifications(position, &["build finished", "tests failed"]),
+            &opened(position, &["build finished", "tests failed"]),
+        )
+        .assert(
+            Rect::new(50, 18, 30, 6),
+            &[
+                "┌────────────────────────────┐",
+                "│ ● tests failed         now │",
+                "│ ● build finished       now │",
+                "│                            │",
+                "│  c clear all    esc close  │",
+                "└────────────────────────────┘",
+            ],
+        );
+    }
+
+    /// An empty log still opens a panel: the footer goes away, but the box does
+    /// not, so the toggle is never a dead end.
+    #[test]
+    fn snapshot_empty() {
+        let position = crate::config::NotificationCenterPositionConfig::TopRight;
+        test_support::overlay_snapshot(
+            &app_with_notifications(position, &[]),
+            &opened(position, &[]),
+        )
+        .assert(
+            Rect::new(50, 1, 30, 3),
+            &[
+                "┌────────────────────────────┐",
+                "│ no notifications           │",
+                "└────────────────────────────┘",
+            ],
+        );
+    }
+
+    #[test]
+    fn snapshot_top_right_populated() {
+        let position = crate::config::NotificationCenterPositionConfig::TopRight;
+        test_support::overlay_snapshot(
+            &app_with_notifications(position, &["build finished", "tests failed"]),
+            &opened(position, &["build finished", "tests failed"]),
+        )
+        .assert(
+            Rect::new(50, 1, 30, 6),
+            &[
+                "┌────────────────────────────┐",
+                "│ ● tests failed         now │",
+                "│ ● build finished       now │",
+                "│                            │",
+                "│  c clear all    esc close  │",
+                "└────────────────────────────┘",
+            ],
+        );
     }
 
     #[test]
