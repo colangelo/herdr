@@ -6,91 +6,41 @@ use ratatui::{
     Frame,
 };
 
+use super::overlay::{ButtonRow, ButtonSpec};
 use super::text::{display_width, relative_time_label, truncate_end};
-use super::widgets::{
-    action_button_row_rects, panel_contrast_fg, render_action_button, render_panel_shell,
-    ActionButtonSpec,
-};
+use super::widgets::{panel_contrast_fg, render_action_button, render_panel_shell};
 use crate::app::state::{NotificationCenterButton, ToastKind};
 use crate::app::AppState;
 
-/// Footer buttons in the settings-panel language: the shortcut hint inside
-/// the filled box, in render order.
-const MARK_READ_BUTTON: (&str, &str) = ("r", "mark read");
-const CLEAR_BUTTON: (&str, &str) = ("c", "clear all");
-const CLOSE_BUTTON: (&str, &str) = ("esc", "close");
-
-fn button_spec(button: (&'static str, &'static str)) -> ActionButtonSpec<'static> {
-    ActionButtonSpec {
-        hint: Some(button.0),
-        label: button.1,
-    }
-}
-
-/// Footer button rects; the mouse layer and the render agree on this
-/// geometry. `mark_read` is dropped first when the panel is too narrow for
-/// all three boxes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NotificationCenterButtonRects {
-    pub mark_read: Option<Rect>,
-    pub clear: Rect,
-    pub close: Rect,
-}
-
-impl NotificationCenterButtonRects {
-    pub(crate) fn hit(&self, col: u16, row: u16) -> Option<NotificationCenterButton> {
-        let contains = |rect: Rect| col >= rect.x && col < rect.x + rect.width && row == rect.y;
-        if self.mark_read.is_some_and(contains) {
-            return Some(NotificationCenterButton::MarkRead);
-        }
-        if contains(self.clear) {
-            return Some(NotificationCenterButton::Clear);
-        }
-        if contains(self.close) {
-            return Some(NotificationCenterButton::Close);
-        }
-        None
-    }
-}
-
-/// Compute the footer button row for the panel's inner rect: the settings
-/// buttons' centered row layout on the last inner row.
+/// The footer row, in the settings-panel language: the shortcut hint inside
+/// the filled box, in render order. `mark read` is the one box narrow rows can
+/// do without.
 pub(crate) fn notification_center_button_rects(
-    inner: Rect,
-) -> Option<NotificationCenterButtonRects> {
-    // Needs room for the whole footer block, blank row included, or the
-    // buttons would sit flush against the last notification.
-    if inner.width == 0 || inner.height < super::widgets::FOOTER_ROWS {
-        return None;
-    }
-    let gap = 2u16;
-    let all = [
-        button_spec(MARK_READ_BUTTON),
-        button_spec(CLEAR_BUTTON),
-        button_spec(CLOSE_BUTTON),
-    ];
-    let all_width: u16 = all
-        .iter()
-        .map(|spec| super::widgets::action_button_width(spec.hint, spec.label))
-        .sum::<u16>()
-        + gap * 2;
-    let with_mark_read = all_width <= inner.width;
-    let row_offset = inner.height - 1;
-    if with_mark_read {
-        let rects = action_button_row_rects(inner, &all, gap, row_offset);
-        Some(NotificationCenterButtonRects {
-            mark_read: Some(rects[0]),
-            clear: rects[1],
-            close: rects[2],
-        })
-    } else {
-        let rects = action_button_row_rects(inner, &all[1..], gap, row_offset);
-        Some(NotificationCenterButtonRects {
-            mark_read: None,
-            clear: rects[0],
-            close: rects[1],
-        })
-    }
+    footer_row: Rect,
+) -> Option<ButtonRow<NotificationCenterButton>> {
+    ButtonRow::layout(
+        footer_row,
+        &[
+            ButtonSpec {
+                button: NotificationCenterButton::MarkRead,
+                hint: Some("r"),
+                label: "mark read",
+                drop_rank: Some(0),
+            },
+            ButtonSpec {
+                button: NotificationCenterButton::Clear,
+                hint: Some("c"),
+                label: "clear all",
+                drop_rank: None,
+            },
+            ButtonSpec {
+                button: NotificationCenterButton::Close,
+                hint: Some("esc"),
+                label: "close",
+                drop_rank: None,
+            },
+        ],
+    )
 }
 
 /// Hit area for the floating indicator used when
@@ -260,29 +210,15 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
                     .add_modifier(Modifier::BOLD)
             }
         };
-        if let Some(mark_read_rect) = buttons.mark_read {
+        for placed in buttons.placed() {
             render_action_button(
                 frame,
-                mark_read_rect,
-                Some(MARK_READ_BUTTON.0),
-                MARK_READ_BUTTON.1,
-                style_for(NotificationCenterButton::MarkRead),
+                placed.rect,
+                placed.hint,
+                placed.label,
+                style_for(placed.button),
             );
         }
-        render_action_button(
-            frame,
-            buttons.clear,
-            Some(CLEAR_BUTTON.0),
-            CLEAR_BUTTON.1,
-            style_for(NotificationCenterButton::Clear),
-        );
-        render_action_button(
-            frame,
-            buttons.close,
-            Some(CLOSE_BUTTON.0),
-            CLOSE_BUTTON.1,
-            style_for(NotificationCenterButton::Close),
-        );
     }
 }
 
@@ -483,7 +419,7 @@ mod tests {
         let buffer = terminal.backend().buffer();
 
         // The buttons sit on the row directly above the panel's bottom border.
-        assert_eq!(buttons.clear.y, panel.y + panel.height - 2);
+        assert_eq!(buttons.row_y(), panel.y + panel.height - 2);
 
         // And the row between the last entry and the buttons renders blank.
         // Geometry alone would not catch a stray draw into the separator, so
@@ -492,7 +428,7 @@ mod tests {
         let separator_y = list.y + list.height;
         assert_eq!(
             separator_y + 1,
-            buttons.clear.y,
+            buttons.row_y(),
             "separator precedes buttons"
         );
         let separator: String = (list.x..list.x + list.width)
@@ -505,11 +441,13 @@ mod tests {
 
         // Each carries the settings-style filled background (surface0 at
         // rest) with the shortcut hint inside the box.
-        for (rect, text) in [
-            (buttons.mark_read.expect("mark-read fits"), "r mark read"),
-            (buttons.clear, "c clear all"),
-            (buttons.close, "esc close"),
-        ] {
+        for (placed, text) in
+            buttons
+                .placed()
+                .iter()
+                .zip(["r mark read", "c clear all", "esc close"])
+        {
+            let rect = placed.rect;
             let mid = &buffer[(rect.x + rect.width / 2, rect.y)];
             assert_eq!(mid.style().bg, Some(app.palette.surface0));
             let row: String = (rect.x..rect.x + rect.width)

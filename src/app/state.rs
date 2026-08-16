@@ -3448,7 +3448,12 @@ mod tests {
         let buttons = state
             .notification_center_buttons()
             .expect("footer buttons present with entries");
-        let button = buttons.clear;
+        let button = buttons
+            .rect(NotificationCenterButton::Clear)
+            .expect("clear all is never dropped");
+        let close = buttons
+            .rect(NotificationCenterButton::Close)
+            .expect("close is never dropped");
         let (list, _start) = state
             .notification_center_list_window()
             .expect("list window present");
@@ -3461,12 +3466,12 @@ mod tests {
             button.y,
             "one blank row between the list and the buttons"
         );
-        assert_eq!(buttons.close.y, button.y, "buttons share the footer row");
+        assert_eq!(close.y, button.y, "buttons share the footer row");
         assert_eq!(list.height, 3);
         assert!(button.width <= list.width, "button fits within the panel");
         assert!(button.x >= list.x, "button sits within the inner area");
         assert!(
-            buttons.close.x + buttons.close.width <= list.x + list.width,
+            close.x + close.width <= list.x + list.width,
             "buttons stay within the inner area"
         );
     }

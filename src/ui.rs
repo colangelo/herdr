@@ -13,6 +13,7 @@ mod mobile;
 mod navigator;
 mod notification_center;
 mod onboarding;
+pub(crate) mod overlay;
 mod panes;
 mod release_notes;
 mod scrollbar;
@@ -47,12 +48,10 @@ use self::mobile::{
     render_mobile_toast_banner,
 };
 use self::navigator::render_navigator_overlay;
+pub(crate) use self::notification_center::notification_center_button_rects;
 use self::notification_center::{
     floating_notification_indicator_rect, render_floating_notification_indicator,
     render_notification_center,
-};
-pub(crate) use self::notification_center::{
-    notification_center_button_rects, NotificationCenterButtonRects,
 };
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
@@ -80,8 +79,8 @@ pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
 };
 use self::tabs::render_tab_bar;
+pub(crate) use self::todo_panel::pane_todo_panel_button_rects;
 use self::todo_panel::render_pane_todo_panel;
-pub(crate) use self::todo_panel::{pane_todo_panel_button_rects, PaneTodoPanelButtonRects};
 // The chip's cells have exactly one definition, so a click can never land on
 // cells the renderer did not draw: the renderer reaches it inside the module
 // and the mouse hit-test reaches it through this re-export.
@@ -124,7 +123,7 @@ pub(crate) use self::{
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
     tabs::{compute_tab_bar_view, notification_indicator_width, tab_bar_content_area},
-    widgets::{centered_popup_rect, footer_split, modal_stack_areas, FOOTER_ROWS},
+    widgets::{centered_popup_rect, modal_stack_areas, FOOTER_ROWS},
 };
 // The indicator's cells have exactly one definition; the pane renderer reaches
 // it through the module with the terminal it already resolved, and the mouse
