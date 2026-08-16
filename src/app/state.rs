@@ -2769,6 +2769,20 @@ impl AppState {
         self.close_overlay(crate::app::state::OverlayKind::TodoBoard);
     }
 
+    /// Close whichever todo surface is open. The edit modal is reachable from
+    /// both, so its exits must not name one of them.
+    pub(crate) fn close_open_todo_surface(&mut self) {
+        self.close_pane_todos();
+        self.close_todo_board();
+    }
+
+    /// Re-settle whichever todo surface is open after a mutation: the panel
+    /// re-clamps its cursor, the board rebuilds its projection.
+    pub(crate) fn refresh_open_todo_surface(&mut self) {
+        self.pane_todos_move_selection(0);
+        self.refresh_todo_board();
+    }
+
     /// The todo panel, whether it is the open overlay or suspended behind the
     /// edit modal that was opened over it.
     pub(crate) fn open_pane_todo_panel(&self) -> Option<&PaneTodoPanelState> {

@@ -1308,10 +1308,12 @@ impl App {
         let Some(pane_id) = self.state.pane_todos().map(|panel| panel.pane_id) else {
             return;
         };
-        let Some(ws_idx) = self.state.active else {
-            return;
-        };
-        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+        // The panel's pane is in the active workspace today, but public
+        // identifiers are workspace-scoped and resolving one against the
+        // active workspace is what silently dropped the board's saves. Resolve
+        // from the pane's own workspace here too, so this cannot become the
+        // same bug the day a panel is opened for a pane somewhere else.
+        let Some(public_pane_id) = self.state.session_public_pane_id(pane_id) else {
             return;
         };
 
@@ -1460,15 +1462,16 @@ impl App {
             // silently dropping what was typed.
             return;
         }
-        let Some(ws_idx) = self.state.active else {
+        // Resolved against the todo's own workspace, not the active one. The
+        // modal is reachable from the todo board, which reaches across spaces
+        // by design, so a todo being edited need not live in the space you are
+        // standing in — and scoping the lookup to the active workspace made
+        // `ctrl+s` return early and drop the save with no error at all.
+        let Some(public_pane_id) = self.state.session_public_pane_id(pane_id) else {
             return;
         };
-        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
-            return;
-        };
-        // Resolved against the target's own workspace, not `ws_idx`: a link
-        // may point at a pane in any workspace, and scoping the lookup to the
-        // active one drops it here with no error.
+        // Same rule for the link target: it may point at a pane in any
+        // workspace.
         let link_pane_id = match link {
             crate::app::state::PaneTodoEditLink::Set(target) => self.session_public_pane_id(target),
             _ => None,
@@ -1508,7 +1511,7 @@ impl App {
             return;
         }
         self.close_pane_todo_edit_and_return();
-        self.state.pane_todos_move_selection(0);
+        self.state.refresh_open_todo_surface();
     }
 
     /// Save, then follow the link — exactly `ctrl+s` then the panel's `g`, in
@@ -1525,7 +1528,10 @@ impl App {
         if self.state.pane_todo_edit().is_some() {
             return;
         }
-        self.state.close_pane_todos();
+        // Whichever surface the modal came back to is on its way out too:
+        // naming only the panel here left an open board behind a terminal
+        // mode that disagreed with it.
+        self.state.close_open_todo_surface();
         self.focus_pane_internal_via_api(ws_idx, pane_id);
         self.state.mode = Mode::Terminal;
     }
@@ -3647,6 +3653,84 @@ mod tests {
                 .is_some_and(|board| board.selected_todo().is_some()),
             "the board came back with its selection"
         );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// The edit modal resolved its own pane against the *active* workspace,
+    /// which is always right from the panel and wrong from the board: a todo
+    /// on another space had no identifier there, so `ctrl+s` returned early
+    /// and the save vanished with no error.
+    #[test]
+    fn saving_an_edit_opened_from_the_board_stores_across_a_space_boundary() {
+        let (mut app, _, there) = app_with_board_across_spaces(None);
+        assert_eq!(app.state.active, Some(0), "editing from another space");
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        ));
+        for ch in "shipped".chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        ));
+
+        assert_eq!(
+            app.state
+                .pane_todos_in_display_order(there)
+                .first()
+                .map(|todo| todo.text.as_str()),
+            Some("shipped"),
+            "the save must reach the owning pane in its own space"
+        );
+        assert_eq!(
+            app.state.mode,
+            Mode::TodoBoard,
+            "and land back on the board"
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// `ctrl+g` saves and travels. Opened from the board it closed the *panel*
+    /// on the way out, leaving the board's overlay behind under a terminal
+    /// mode that disagrees with it.
+    #[test]
+    fn saving_and_following_from_the_board_leaves_no_overlay_behind() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let here = app.state.workspaces[0].tabs[0].root_pane;
+        let there = app.state.workspaces[1].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&there]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "check the 403",
+                crate::terminal::todo::TodoPriority::Normal,
+                Some(crate::terminal::todo::TodoLink {
+                    pane: Some(here),
+                    label: "api".into(),
+                }),
+                100,
+            )
+            .expect("todo should be added");
+        app.state.active = Some(1);
+        app.state.open_todo_board();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('g'),
+            KeyModifiers::CONTROL,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.active, Some(0), "travelled to the linked pane");
+        assert!(app.state.todo_board().is_none(), "the board did not linger");
         app.state.assert_invariants_for_test();
     }
 
