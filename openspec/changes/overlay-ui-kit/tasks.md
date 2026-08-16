@@ -45,14 +45,14 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 6. One overlay value (refactor-risk — read `AGENTS.md` first)
 
-- [ ] 6.1 Before moving anything: name the protected behaviours in the change (mode/state pairing, input-source selection, key-repeat gating, help-panel coverage, mouse dispatch on mode) and confirm each has a characterization test, adding what is missing
-- [ ] 6.2 Run a roundtable per `AGENTS.md`; this touches core state and UI/input state projection
-- [ ] 6.3 Add `enum Overlay` carrying today's overlay state structs; replace the parallel `Option<XState>` fields on `AppState` with `overlay: Option<Overlay>`
-- [ ] 6.4 Derive `wants_ascii_input` and `honors_key_repeat` from the variant, deleting the hand-maintained allowlists on `Mode` (`src/app/state.rs:843`, `:881`) along with the doc comments warning they can be silently missed
-- [ ] 6.5 Derive keybind help entries from the variant; add a guard test asserting every variant contributes at least one, mirroring the existing serialize/deserialize keybinding guard
-- [ ] 6.6 Keep `Mode` for non-overlay modes and keep input dispatch keyed on it; the variant supplies the mode
-- [ ] 6.7 Tests: `AppState::assert_invariants_for_test` with `AppState::test_with_adversarial_identity_state` covering mode/overlay agreement; a test that an overlay with no help entry fails; group 1's snapshots unchanged
-- [ ] 6.8 Run `just check` in full, including the Windows lint leg
+- [x] 6.1 Before moving anything: name the protected behaviours in the change (mode/state pairing, input-source selection, key-repeat gating, help-panel coverage, mouse dispatch on mode) and confirm each has a characterization test, adding what is missing
+- [x] 6.2 Run a roundtable per `AGENTS.md`; this touches core state and UI/input state projection
+- [x] 6.3 Add `enum Overlay` carrying today's overlay state structs; replace the parallel `Option<XState>` fields on `AppState` with `overlay: Option<Overlay>`
+- [x] 6.4 Derive `wants_ascii_input` from the variant, leaving `Mode` only the five non-overlay modes. There is no `Mode::honors_key_repeat`: key repeat is gated by `App::terminal_input_context`, which returns `Some` only for `Terminal`, `Copy`, `AppScroll` and a popup pane, so it is already structural and has no allowlist to delete — see `roundtable.md`
+- [x] 6.5 Derive keybind help entries from the variant; add a guard test asserting every variant contributes at least one, mirroring the existing serialize/deserialize keybinding guard
+- [x] 6.6 Keep `Mode` for non-overlay modes and keep input dispatch keyed on it; the variant supplies the mode
+- [x] 6.7 Tests: `AppState::assert_invariants_for_test` with `AppState::test_with_adversarial_identity_state` covering mode/overlay agreement; a test that an overlay with no help entry fails; group 1's snapshots unchanged
+- [x] 6.8 Run `just check` in full, including the Windows lint leg
 
 ## 7. Close out
 
