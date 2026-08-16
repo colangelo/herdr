@@ -21,11 +21,11 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 3. Button rows
 
-- [ ] 3.1 Add `ButtonRow<B>` over the existing `action_button_*` helpers, with drop priority and a never-dropped dismiss button
-- [ ] 3.2 Move `pane_todo_panel_button_rects` + `PaneTodoPanelButtonRects::hit`/`row_y` (`src/ui/todo_panel.rs:45-121`) onto it
-- [ ] 3.3 Move `notification_center_button_rects` + its `hit`/`row_y` (`src/ui/notification_center.rs:41-100`) onto it
-- [ ] 3.4 Keep the near-miss rule (a click on the row but not on a button is inert) in the row rather than in each overlay's mouse handler
-- [ ] 3.5 Tests: narrow rows drop by priority and keep the dismiss button; hit-test equals drawn rects; group 1's snapshots unchanged, including the narrow todo panel that drops `clear done`
+- [x] 3.1 Add `ButtonRow<B>` over the existing `action_button_*` helpers, with drop priority and a never-dropped dismiss button
+- [x] 3.2 Move `pane_todo_panel_button_rects` + `PaneTodoPanelButtonRects::hit`/`row_y` (`src/ui/todo_panel.rs:45-121`) onto it
+- [x] 3.3 Move `notification_center_button_rects` + its `hit`/`row_y` (`src/ui/notification_center.rs:41-100`) onto it
+- [x] 3.4 Keep the near-miss rule (a click on the row but not on a button is inert) in the row rather than in each overlay's mouse handler
+- [x] 3.5 Tests: narrow rows drop by priority and keep the dismiss button; hit-test equals drawn rects; group 1's snapshots unchanged, including the narrow todo panel that drops `clear done`
 
 ## 4. One list cursor
 
