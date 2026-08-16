@@ -52,4 +52,4 @@ panel against an anchor, and the board has none by design.
 
 - [x] 5.1 `just check` green
 - [x] 5.2 Confirm the board adds no per-render work to the pane-scaled paths — it renders only while open, and the projection is built on open, not per frame
-- [ ] 5.3 Dogfood on the `-ac-beta` channel: todos on panes in two spaces, triage from the board, jump to an owner across a space boundary
+- [x] 5.3 Dogfood on the `-ac-beta` channel: todos on panes in two spaces, triage from the board, jump to an owner across a space boundary
