@@ -37,11 +37,11 @@ group 5 adopts. Nothing else here depends on it.
 
 ## 5. One keymap, one text field
 
-- [ ] 5.1 Extract the list chords into one shared matcher accepting arrows, `j`/`k`, `ctrl+j`/`ctrl+k`, `ctrl+n`/`ctrl+p`, half-page, first/last, with a flag for whether plain characters are text
-- [ ] 5.2 Adopt it in the navigator (both states), keybind help, notification center, todo panel, settings, and the pickers
-- [ ] 5.3 Adopt `TextField` in the rename modals (`handle_rename_edit_key`), worktree create, the navigator search box, and the keybind-help search box, deleting each one's append-only editing
-- [ ] 5.4 Use the field's word-boundary definition everywhere, deleting the duplicate `word_delete_class` usage
-- [ ] 5.5 Tests: each list-bearing overlay moves on every chord; modified chords work with a search box focused while plain characters are text; each converted input supports the shared editing set; group 1's snapshots unchanged
+- [x] 5.1 Extract the list chords into one shared matcher accepting arrows, `j`/`k`, `ctrl+j`/`ctrl+k`, `ctrl+n`/`ctrl+p`, half-page, first/last, with a flag for whether plain characters are text
+- [x] 5.2 Adopt it in the navigator (both states), keybind help, notification center, todo panel, settings, and the pickers
+- [x] 5.3 Adopt `TextField` in the rename modals (`handle_rename_edit_key`), worktree create, the navigator search box, and the keybind-help search box, deleting each one's append-only editing
+- [x] 5.4 Use the field's word-boundary definition everywhere, deleting the duplicate `word_delete_class` usage
+- [x] 5.5 Tests: each list-bearing overlay moves on every chord; modified chords work with a search box focused while plain characters are text; each converted input supports the shared editing set; group 1's snapshots unchanged
 
 ## 6. One overlay value (refactor-risk — read `AGENTS.md` first)
 
