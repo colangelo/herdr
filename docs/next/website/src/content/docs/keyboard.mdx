@@ -50,6 +50,7 @@ Panes:
 | Scroll back down a page / half page / line | `prefix+PageDown` / `prefix+ctrl+d` / `prefix+ctrl+j` |
 | Pane todos | `prefix+ctrl+t` |
 | Add a pane todo | unset |
+| Session todo board | unset |
 
 Tabs:
 
@@ -81,6 +82,10 @@ Every pane that draws a top border carries a `▾` indicator at the right end of
 `prefix+ctrl+t`, or a click on the indicator, opens that pane's todo panel. Inside it, `Up`/`Down` or `j`/`k` move the selection, `a` adds a todo, `Enter` (or a row click) opens the todo for editing, `Space` toggles done, `g` (or the footer's `go` button, or a click on the link chip) follows a linked todo to its pane, `d` removes the selected todo, `c` clears the completed ones, and `Esc` or `q` closes. The `go` button appears only while the selected todo's link still resolves, since a dead link is inert. The add action is offered even when the pane holds no todos. A todo linked to a pane that no longer exists renders dimmed and does nothing when followed.
 
 In the edit view, `Tab` cycles the priority, `ctrl+l` opens the link picker, `ctrl+t` toggles done (the panel's `Space`, which the edit view's text field owns), `ctrl+s` saves, `ctrl+g` saves and then follows the link, and `Esc` cancels. Terminals that report the enhanced keyboard protocol can save with `alt+Enter` too. Clicking the priority, link, or done row does the same as its shortcut. The done row is absent while composing a new todo, which is never already done. `keys.add_pane_todo` is unset by default and opens the edit view on a new todo. Set `ui.show_pane_todo_indicator = false` to hide the indicator, and `ui.pane_todo_color` to override its color.
+
+`keys.open_todo_board` is unset by default and opens a board listing every pane's todos in one place — the view for triage across the session, where the pane panel is the view for the pane in front of you. Todos are grouped by their owning pane in space, tab, then pane order, each group headed by the pane's addressable identifier and label; panes holding no todos are omitted. Todos are not interleaved into one priority-ordered list, so a pane's todos stay contiguous and you can skip whole panes by eye.
+
+Its keys are the panel's, with one difference. `Enter` (or a row click) focuses the pane that *owns* the selected todo and closes the board, which is what the board offers over `herdr todo list --all`; editing therefore moves to `e`. `Space` toggles done, `g` (or the link chip) still follows a linked todo to its *linked* pane rather than its owner, `d` removes, `c` clears the completed todos of the selected todo's pane, and `Esc` or `q` closes. Group headings are never selectable and the selection steps over them. The board opens even when nothing is outstanding, showing an empty state rather than refusing. Both surfaces read the same store, so a todo looks and sorts the same in either and a change made on one shows on the other.
 
 The text field has an insertion point, so typing and pasting land where the cursor is rather than at the end, and a click in the text puts the cursor there. The readline chords all work:
 
