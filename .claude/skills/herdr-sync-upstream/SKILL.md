@@ -80,6 +80,18 @@ of `unused variable` warnings over a duplicated preamble. Log every auto-merged
 block and re-read the log after `cargo check`.
 
 Known conflict patterns:
+- `src/app/state.rs` and the overlay call sites (`src/app/input/{mod,modal,mouse,
+  navigate,settings,overlays}.rs`, `src/ui/{navigator,settings,keybind_help,menus}.rs`)
+  — the fork's overlay kit (Gitea #65) replaced `Mode` plus ten-plus parallel
+  `Option<XState>` fields on `AppState` with one `Option<Overlay>` and a set of
+  generated accessors. `Mode` and `AppState` are what upstream edits most, so
+  every upstream change that adds an overlay field or reads one conflicts here.
+  Resolve by taking upstream's *behaviour* and expressing it through the kit:
+  a new upstream overlay state becomes a line in the `overlays!` list rather
+  than a new field, and `state.foo.bar` becomes `state.foo().bar` or one of the
+  `set_foo_*` helpers. `AppState::assert_invariants_for_test` catches a
+  resolution that leaves mode and overlay disagreeing; the overlay snapshot
+  tests catch one that moves an overlay on screen.
 - `.gitignore` — upstream appends entries where the fork `.env` block sits: keep both.
 - `.github/workflows/release.yml` — upstream restructures jobs; re-apply the fork
   hunks (see §4 checklist) rather than fighting the diff.

@@ -15,7 +15,11 @@ sync, mostly sidebar/UI features, and it touches `src/` broadly (`src/app/`,
 conflicts, not just workflow-file ones.
 
 Remotes: `origin` = github.com/colangelo/herdr, `internal` = Gitea
-(ac/herdr), `upstream` = github.com/ogulcancelik/herdr.
+(ac/herdr), `upstream` = github.com/ogulcancelik/herdr — upstream moved to
+the `herdrdev` org (2026-07); git redirects the old slug, but `gh`/API calls
+must use `herdrdev/herdr`, and upstream's `scripts/changelog.py`
+`DEFAULT_RELEASE_REPO` now says `herdrdev/herdr` (harmless here: the fork's
+CI and `release-ac` pass `--repo colangelo/herdr` explicitly).
 
 ## 1. Assess
 
@@ -39,6 +43,13 @@ git log master..upstream/master --oneline -- src/
 
 ## 2. Rebase on a scratch branch
 
+Tag the pre-sync tip first — it is the revert point, and §5's lease refers to it:
+
+```bash
+git tag -a revert-point/$(date +%F)-pre-upstream-sync master -m "known-good fork master before the sync"
+git push origin --follow-tags && git push internal --follow-tags
+```
+
 ```bash
 BASE=$(git merge-base master upstream/master)
 git branch -f reconcile-test master
@@ -46,23 +57,95 @@ git checkout reconcile-test
 git rebase --onto upstream/master "$BASE" reconcile-test
 ```
 
+**Force `rerere.autoupdate` off for the replay.** It is on globally here, and
+during a rebase it stages its own replayed resolution — which leaves
+`rebase --continue` reporting *"you have staged changes in your working tree"*
+and refusing to proceed, with no `stopped-sha`/`message` left in
+`.git/rebase-merge` to explain why. Run every continue as
+`git -c rerere.autoupdate=false rebase --continue`. If you hit the state anyway,
+recover by committing the staged resolution under the stopped commit's own
+identity — `git commit --no-edit -C $(awk '/^pick /{s=$2} END{print s}' \
+"$(git rev-parse --git-dir)/rebase-merge/done")` — then continue. (Hit
+2026-08-10; cost ~20 min of misdiagnosis.)
+
+**A "keep both sides" auto-resolver must check each side is brace-balanced.**
+Unions are right for import lists, struct fields and match arms that both sides
+merely *append* to. They are wrong when the two sides share a trailing
+continuation — upstream's last match arm and the fork's new arm both ending in
+one `leave_navigate_mode(); }` — because concatenating splices one arm into the
+other. They are also wrong when the sides are *alternative implementations* of
+the same block (upstream reimplementing a feature the fork already has); those
+are brace-balanced, so balance alone will not catch them and the tell is a pile
+of `unused variable` warnings over a duplicated preamble. Log every auto-merged
+block and re-read the log after `cargo check`.
+
 Known conflict patterns:
+- `src/app/state.rs` and the overlay call sites (`src/app/input/{mod,modal,mouse,
+  navigate,settings,overlays}.rs`, `src/ui/{navigator,settings,keybind_help,menus}.rs`)
+  — the fork's overlay kit (Gitea #65) replaced `Mode` plus ten-plus parallel
+  `Option<XState>` fields on `AppState` with one `Option<Overlay>` and a set of
+  generated accessors. `Mode` and `AppState` are what upstream edits most, so
+  every upstream change that adds an overlay field or reads one conflicts here.
+  Resolve by taking upstream's *behaviour* and expressing it through the kit:
+  a new upstream overlay state becomes a line in the `overlays!` list rather
+  than a new field, and `state.foo.bar` becomes `state.foo().bar` or one of the
+  `set_foo_*` helpers. `AppState::assert_invariants_for_test` catches a
+  resolution that leaves mode and overlay disagreeing; the overlay snapshot
+  tests catch one that moves an overlay on screen.
 - `.gitignore` — upstream appends entries where the fork `.env` block sits: keep both.
 - `.github/workflows/release.yml` — upstream restructures jobs; re-apply the fork
   hunks (see §4 checklist) rather than fighting the diff.
 - `docs/next/CHANGELOG.md` — conflicts on nearly every fork docs commit, because
   both sides edit `## Unreleased`. Resolve by merging per `###` heading (upstream
-  entries first, then fork entries). **Automate this carefully:** a naive
-  section-merger that keys only on `###` will happily merge across a `## [X.Y.Z]`
-  release boundary and fold upstream's Unreleased entries into a released
-  section. After the rebase, verify with
-  `grep '^## ' docs/next/CHANGELOG.md | sort | uniq -d` (must be empty) and
-  confirm the version sections are in reverse-chronological order.
+  entries first, then fork entries), keeping ONE block per heading in the
+  `Added` / `Changed` / `Fixed` order the released sections already use.
+  **Automate this carefully** — two distinct ways it has gone wrong:
+  1. A naive merger keying only on `###` merges across a `## [X.Y.Z]` release
+     boundary and folds upstream's Unreleased entries into a released section.
+  2. A resolution that keeps *both* sides' blocks leaves two `### Fixed` blocks
+     in one section with the first entries duplicated between them. Hit on the
+     2026-07-25 sync and only caught 2026-07-26, by eye: `## Unreleased` had
+     `Added / Fixed / Changed / Fixed`, with two entries appearing twice.
+
+  This is not cosmetic. `SECTION_RE` in `scripts/changelog.py` matches only
+  `##`, so `prepare_release` copies the Unreleased body **verbatim** into the new
+  version section — duplicate headings and repeated entries ship in the real
+  release notes. `just check` does not catch it (`scripts.test_changelog` tests
+  the tooling, not the document).
+
+  After the rebase, verify BOTH:
+
+  ```bash
+  # 1. no duplicate ## version headings; sections reverse-chronological
+  grep '^## ' docs/next/CHANGELOG.md | sort | uniq -d     # must be empty
+  # 2. no repeated ### block or entry inside any one section — silence is pass
+  awk '/^## /{s=$0; split("",h); split("",e); next} /^### /{if (h[$0]++) print "dup heading in " s ": " $0; next} /^- /{if (e[$0]++) print "dup entry in " s ": " substr($0,1,50)}' docs/next/CHANGELOG.md
+  ```
+
+  (One line on purpose — verified on macOS stock awk 20200816. A heredoc here
+  breaks on paste, because its closing delimiter ends up indented.)
+
+  When repairing an already-duplicated section, rebuild it programmatically with
+  assertions on every line index rather than editing by eye, then prove nothing
+  was lost:
+  `diff <(grep '^- ' OLD | sort -u) <(grep '^- ' NEW | sort -u)` must be empty.
 - `justfile` `test`/`check` recipes — both sides add `scripts.test_*` modules to
   the same `python3 -m unittest` line: take the union.
 - `tests/cli/sessions.rs` — asserts a hardcoded protocol number. Keep the fork's
   value (fork protocol is intentionally ahead of upstream's) and make sure it
   matches `src/protocol/wire.rs::PROTOCOL_VERSION`.
+- **The protocol number collides every sync.** Both sides bump independently from
+  the same base, so upstream keeps landing on the number the fork already took
+  (19 → both, 20 → both). Expect to bump the fork one past upstream's every time.
+  Git may DROP the fork's previous bump commits as redundant when upstream's
+  value catches up — that is correct, but it means the tree silently reverts to
+  upstream's number and you must re-bump. **Sweep for the number, not the
+  commit**, and note the pins come in two shapes: numeric
+  (`assert_eq!(value["result"]["protocol"], N)`) and string
+  (`stdout.contains("  protocol: N")` — the latter only runs in the Linux CLI
+  suite, so macOS `just check` will not catch it). Also regenerate the schema
+  artifact: `HERDR_UPDATE_API_SCHEMA=1 cargo nextest run
+  generated_protocol_schema_artifact_is_current`.
 - If a rebase goes sideways, `git rebase --abort` and retry; master is untouched
   until §5.
 
@@ -106,6 +189,12 @@ test stage — nextest cancels the run on first failure by default, so a single
 failure hides the other ~1600 tests and you cannot tell a one-off from a broad
 breakage.
 
+`just check` does NOT validate the changelog document, so run the two
+`docs/next/CHANGELOG.md` duplicate checks from §2 here as well — a bad merge
+resolution there is silent until it reaches published release notes. Note also
+that `just check` omits `release-docs-check`; run that separately before any
+release.
+
 **Before blaming the rebase for a test failure, get an upstream baseline.**
 Build clean `upstream/master` in a scratch worktree and run the same test
 there:
@@ -134,6 +223,23 @@ git push --force-with-lease=master:$OLD internal master
 
 If the internal push times out: Tailscale may be stopped (`tailscale status`;
 `tailscale up`), or see the m4m MagicDNS caveat in global CLAUDE.md.
+
+**CI's conventional-commits job validates the WHOLE patch set after a sync**, not
+just the new commits: its range is `$BEFORE_SHA..$AFTER_SHA`, and the force-push
+guard only narrows that to the head commit when `BEFORE_SHA` is *unreachable*.
+Tagging the pre-sync tip (§2) keeps it reachable, so the job re-reads all ~230
+subjects and any long-standing bad one fails the push. Check before pushing:
+
+```bash
+python3 scripts/conventional_commits.py --range "upstream/master..master"
+```
+
+Fix by rewording in place — a `rebase -i` over the patch set with
+`GIT_SEQUENCE_EDITOR` marking the offenders `reword` and `GIT_EDITOR` rewriting
+the subject. Prove it touched nothing else by comparing `git rev-parse
+master^{tree}` before and after; the trees must be identical. (2026-08-10:
+`style: rustfmt after rebase conflict resolutions` — `style` is not an allowed
+type — and `ignore .vscode` had ridden along invisibly for months.)
 
 ## 6. Post-sync checks
 
@@ -164,9 +270,19 @@ If the internal push times out: Tailscale may be stopped (`tailscale status`;
       --tag "$TAG" --version "$BASE" --protocol "$PROTOCOL" --force \
       --output website/latest.json
   ```
+
+  Since upstream's *verify stable release checksums* (2026-08), that manifest
+  must also carry a 64-char `sha256` per target, asserted by
+  `update::tests::checked_in_website_manifest_matches_update_schema` and by
+  `latest-json-check`. A manifest generated before that lands has no `sha256`
+  map and fails both; regenerate it with the command above — GitHub already
+  records asset digests for the older fork releases, so this needs no re-upload.
+  `latest-json-check` also validates the manifest *published* at
+  raw.githubusercontent, so it stays red until §5's push lands and the raw cache
+  turns over.
 - **Drift check**: skim upstream changes to `justfile` release recipes,
   `scripts/changelog.py`, and `release.yml` — if the release flow moved,
-  update `.pi/skills/herdr-release/SKILL.md` and the `release-ac` recipe
+  update `.claude/skills/herdr-release/SKILL.md` and the `release-ac` recipe
   to match.
 - **Versioned release docs stay upstream-only.** Upstream v0.7.5+ added
   `docs/versions/` + `website/scripts/docs-versions.mjs` + a `Website`
@@ -175,10 +291,10 @@ If the internal push times out: Tailscale may be stopped (`tailscale status`;
   here. `release-docs-check` deliberately omits that line and the `Website`
   workflow is disabled — if a sync reintroduces either, drop it again rather
   than "fixing" the manifest. Full rationale: the "Versioned release docs are
-  upstream-only" section of `.pi/skills/herdr-release/SKILL.md`.
+  upstream-only" section of `.claude/skills/herdr-release/SKILL.md`.
 - Keep the fork's PROJECTS entry honest:
   `~/_sync/dev/CONTEXT/PROJECTS/herdr.md`.
 
-Related: `.pi/skills/herdr-release/SKILL.md` (cutting the -ac release
+Related: `.claude/skills/herdr-release/SKILL.md` (cutting the -ac release
 after a sync), `~/_sync/dev/CONTEXT/SKILLS/fork-maintenance/SKILL.md`
 (the general pattern).
