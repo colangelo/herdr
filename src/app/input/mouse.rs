@@ -1521,14 +1521,12 @@ impl AppState {
         Rect::new(x, y, right.saturating_sub(x), bottom.saturating_sub(y))
     }
 
-    pub(crate) fn notification_center_rect(&self) -> Option<Rect> {
+    /// Where the notification center sits, as one spec the shared resolver
+    /// places. Anchored under the tab bar's right edge, or the screen's
+    /// top-right when the tab bar is hidden.
+    fn notification_center_geometry(&self) -> Option<crate::ui::overlay::PanelGeometry> {
         self.notification_center.as_ref()?;
         let screen = self.screen_rect();
-        if screen.width == 0 || screen.height == 0 {
-            return None;
-        }
-        // Anchor under the tab bar's right edge; fall back to the screen's
-        // top-right when the tab bar is hidden.
         let anchor = if self.view.tab_bar_rect.width > 0 {
             self.view.tab_bar_rect
         } else {
@@ -1548,51 +1546,39 @@ impl AppState {
             })
             .max()
             .unwrap_or(16);
-        // borders + kind dot block + right-aligned age column
-        let panel_w = ((content_width + 2 + 3 + 5) as u16)
-            .clamp(30, 60)
-            .min(screen.width.max(1));
-        let rows = (self.notification_log.len().max(1) as u16).min(NOTIFICATION_PANEL_MAX_ROWS);
-        // Reserve the footer block — button row plus the blank row above it —
-        // when there are entries to act on.
-        let footer = if self.notification_log.is_empty() {
-            0
-        } else {
-            crate::ui::FOOTER_ROWS
-        };
-        let panel_h = (rows + 2 + footer).min(screen.height.max(1));
-        let right = anchor.x + anchor.width;
-        let x = right.saturating_sub(panel_w).max(screen.x);
-        let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
-        let y = match self.notification_center_position {
-            crate::config::NotificationCenterPositionConfig::TopRight => {
-                (anchor.y + anchor.height).min(bottom_y)
-            }
-            crate::config::NotificationCenterPositionConfig::BottomRight => {
+        crate::ui::overlay::AnchoredPanelSpec {
+            anchor,
+            screen,
+            // borders + kind dot block + right-aligned age column
+            content_width: (content_width + 2 + 3 + 5) as u16,
+            width_bounds: (30, 60),
+            rows: self.notification_log.len() as u16,
+            max_rows: NOTIFICATION_PANEL_MAX_ROWS,
+            // The footer block is reserved only when there are entries to act
+            // on; an empty panel is just the box.
+            footer_rows: if self.notification_log.is_empty() {
+                0
+            } else {
+                crate::ui::FOOTER_ROWS
+            },
+            vertical: match self.notification_center_position {
+                crate::config::NotificationCenterPositionConfig::TopRight => {
+                    crate::ui::overlay::VerticalAnchor::Below
+                }
                 // Open directly above the floating indicator so the diamond
                 // stays visible as the panel's toggle (global-launcher idiom);
                 // without an indicator, sit flush at the bottom.
-                let indicator = self.view.notification_hit_area;
-                if indicator.width > 0 {
-                    indicator.y.saturating_sub(panel_h).max(screen.y)
-                } else {
-                    bottom_y
+                crate::config::NotificationCenterPositionConfig::BottomRight => {
+                    crate::ui::overlay::VerticalAnchor::Above(self.view.notification_hit_area)
                 }
-            }
-        };
-        Some(Rect::new(x, y, panel_w, panel_h))
+            },
+        }
+        .resolve()
     }
 
-    /// Full inner rect (panel minus borders), covering both the list and the
-    /// footer button row.
-    fn notification_center_inner(&self) -> Option<Rect> {
-        let rect = self.notification_center_rect()?;
-        Some(Rect::new(
-            rect.x + 1,
-            rect.y + 1,
-            rect.width.saturating_sub(2),
-            rect.height.saturating_sub(2),
-        ))
+    pub(crate) fn notification_center_rect(&self) -> Option<Rect> {
+        self.notification_center_geometry()
+            .map(|geometry| geometry.outer)
     }
 
     /// The footer button row (settings-style filled boxes on the last inner
@@ -1604,15 +1590,14 @@ impl AppState {
         if self.notification_log.is_empty() {
             return None;
         }
-        crate::ui::notification_center_button_rects(self.notification_center_inner()?)
+        crate::ui::notification_center_button_rects(self.notification_center_geometry()?.inner)
     }
 
     /// Y of the footer row that holds the buttons. Clicks in this row but
     /// outside a button are inert rather than closing the panel, so a
     /// near-miss on a button does not dismiss the center.
     fn notification_center_footer_row_y(&self) -> Option<u16> {
-        self.notification_center_buttons()
-            .map(|buttons| buttons.row_y())
+        Some(self.notification_center_geometry()?.footer_row?.y)
     }
 
     /// The panel's inner list rect (footer block excluded) and the first
@@ -1620,27 +1605,22 @@ impl AppState {
     /// agree, and it stops one row short of the buttons — see
     /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
-        let inner = self.notification_center_inner()?;
-        let (list, _) =
-            crate::ui::footer_split(inner, self.notification_center_buttons().is_some());
+        let list = self.notification_center_geometry()?.list;
         let selected = self.notification_center.as_ref()?.selected;
         let visible = list.height as usize;
         let start = selected.saturating_sub(visible.saturating_sub(1));
         Some((list, start))
     }
 
-    /// Panel rect, hanging off the pane's top border at its right edge so it
-    /// drops out of the indicator. `None` unless the panel is open, so render
-    /// and hit-test go quiet together.
-    pub(crate) fn pane_todo_panel_rect(&self) -> Option<Rect> {
+    /// Where the pane todo panel sits: hanging off the pane's top border at
+    /// its right edge, so it drops out of the indicator rather than covering
+    /// it. `None` unless the panel is open, so render and hit-test go quiet
+    /// together.
+    fn pane_todo_panel_geometry(&self) -> Option<crate::ui::overlay::PanelGeometry> {
         let panel = self.pane_todos.as_ref()?;
         // A panel whose pane has gone renders nothing and hit-tests to
         // nothing; the next Esc closes it.
         self.pane_terminal(panel.pane_id)?;
-        let screen = self.screen_rect();
-        if screen.width == 0 || screen.height == 0 {
-            return None;
-        }
         let anchor = self
             .pane_info_by_id(panel.pane_id)
             .map(|info| info.rect)
@@ -1669,19 +1649,26 @@ impl AppState {
             })
             .max()
             .unwrap_or(16);
-        // borders + state glyph block + trailing space
-        let panel_w = ((content_width + 2 + 3 + 1) as u16)
-            .clamp(30, 60)
-            .min(screen.width.max(1));
-        let rows = (todos.len().max(1) as u16).min(PANE_TODO_PANEL_MAX_ROWS);
-        // The footer block is always reserved: an empty panel still carries add
-        // and close, and sizing it away is what made a quiet pane a dead end.
-        let panel_h = (rows + 2 + crate::ui::FOOTER_ROWS).min(screen.height.max(1));
-        let right = anchor.x.saturating_add(anchor.width);
-        let x = right.saturating_sub(panel_w).max(screen.x);
-        let bottom_y = screen.y + screen.height.saturating_sub(panel_h);
-        let y = anchor.y.saturating_add(1).min(bottom_y).max(screen.y);
-        Some(Rect::new(x, y, panel_w, panel_h))
+        crate::ui::overlay::AnchoredPanelSpec {
+            anchor,
+            screen: self.screen_rect(),
+            // borders + state glyph block + trailing space
+            content_width: (content_width + 2 + 3 + 1) as u16,
+            width_bounds: (30, 60),
+            rows: todos.len() as u16,
+            max_rows: PANE_TODO_PANEL_MAX_ROWS,
+            // The footer block is always reserved: an empty panel still carries
+            // add and close, and sizing it away is what made a quiet pane a
+            // dead end.
+            footer_rows: crate::ui::FOOTER_ROWS,
+            vertical: crate::ui::overlay::VerticalAnchor::InsideTop,
+        }
+        .resolve()
+    }
+
+    pub(crate) fn pane_todo_panel_rect(&self) -> Option<Rect> {
+        self.pane_todo_panel_geometry()
+            .map(|geometry| geometry.outer)
     }
 
     /// Whether an open panel is drawn over this cell. `render_pane_todo_panel`
@@ -1690,17 +1677,6 @@ impl AppState {
     fn pane_todo_panel_covers(&self, col: u16, row: u16) -> bool {
         self.pane_todo_panel_rect()
             .is_some_and(|rect| rect_contains(rect, col, row))
-    }
-
-    /// Full inner rect (panel minus borders), covering list and footer.
-    fn pane_todo_panel_inner(&self) -> Option<Rect> {
-        let rect = self.pane_todo_panel_rect()?;
-        Some(Rect::new(
-            rect.x + 1,
-            rect.y + 1,
-            rect.width.saturating_sub(2),
-            rect.height.saturating_sub(2),
-        ))
     }
 
     /// The footer button row. Present even on a pane with no todos, where it
@@ -1716,7 +1692,7 @@ impl AppState {
             .selected_pane_todo()
             .is_some_and(|todo| self.pane_todo_link_target(&todo).is_some());
         crate::ui::pane_todo_panel_button_rects(
-            self.pane_todo_panel_inner()?,
+            self.pane_todo_panel_geometry()?.inner,
             has_todos,
             has_live_link,
         )
@@ -1747,8 +1723,7 @@ impl AppState {
     /// Y of the footer row. Clicks in this row but outside a button are inert
     /// rather than closing, so a near-miss does not dismiss the panel.
     fn pane_todo_panel_footer_row_y(&self) -> Option<u16> {
-        self.pane_todo_panel_buttons()
-            .map(|buttons| buttons.row_y())
+        Some(self.pane_todo_panel_geometry()?.footer_row?.y)
     }
 
     /// The panel's list rect (footer block excluded) and the first visible
@@ -1756,8 +1731,7 @@ impl AppState {
     /// where, and it stops one row short of the buttons — see
     /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn pane_todo_panel_list_window(&self) -> Option<(Rect, usize)> {
-        let inner = self.pane_todo_panel_inner()?;
-        let (list, _) = crate::ui::footer_split(inner, self.pane_todo_panel_buttons().is_some());
+        let list = self.pane_todo_panel_geometry()?.list;
         let selected = self.pane_todos.as_ref()?.selected;
         let visible = list.height as usize;
         let start = selected.saturating_sub(visible.saturating_sub(1));
@@ -5251,7 +5225,7 @@ mod tests {
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 buttons.add.x,
-                buttons.row_y(),
+                buttons.close.y,
             ),
         );
 
@@ -5542,7 +5516,7 @@ mod tests {
         // follows it, so the cell just past it is reliably gap.
         let gap_col = buttons.add.x + buttons.add.width;
         assert_eq!(
-            buttons.hit(gap_col, buttons.row_y()),
+            buttons.hit(gap_col, buttons.close.y),
             None,
             "the near-miss column must really miss every button"
         );
@@ -5552,7 +5526,7 @@ mod tests {
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 gap_col,
-                buttons.row_y(),
+                buttons.close.y,
             ),
         );
 

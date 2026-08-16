@@ -64,10 +64,6 @@ impl PaneTodoPanelButtonRects {
         }
         None
     }
-
-    pub(crate) fn row_y(&self) -> u16 {
-        self.close.y
-    }
 }
 
 pub(crate) fn pane_todo_panel_button_rects(
@@ -787,7 +783,7 @@ mod tests {
             "nothing to toggle or clear on a pane with no todos"
         );
 
-        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1));
         assert!(footer.contains("a add"), "the way out of the empty state");
         assert!(footer.contains("esc close"));
     }
@@ -842,7 +838,7 @@ mod tests {
         let rect = app.pane_todo_panel_rect().expect("panel rect should exist");
         let buffer = draw(&app);
         assert!(
-            row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1)).contains("g go"),
+            row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1)).contains("g go"),
             "the footer advertises the key that was already there"
         );
 
@@ -870,10 +866,10 @@ mod tests {
         // convention, so nothing sits flush against the footer.
         assert_eq!(
             list.y + list.height + 1,
-            buttons.row_y(),
+            buttons.close.y,
             "one blank row between the list and the buttons"
         );
-        assert_eq!(buttons.row_y(), rect.y + rect.height - 2);
+        assert_eq!(buttons.close.y, rect.y + rect.height - 2);
 
         // A short todo pins the panel to its 30-cell minimum, and 28 inner
         // cells hold only two boxes: all four need 7 + 12 + 14 + 11 plus three
@@ -885,7 +881,7 @@ mod tests {
         assert!(buttons.clear_done.is_none());
 
         let buffer = draw(&app);
-        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1));
         assert!(footer.contains("a add"));
         assert!(footer.contains("esc close"));
 
@@ -917,7 +913,7 @@ mod tests {
         assert!(buttons.clear_done.is_some());
 
         let buffer = draw(&app);
-        let footer = row_text(&buffer, Rect::new(rect.x, buttons.row_y(), rect.width, 1));
+        let footer = row_text(&buffer, Rect::new(rect.x, buttons.close.y, rect.width, 1));
         assert!(footer.contains("a add"));
         assert!(footer.contains("spc toggle"));
         assert!(footer.contains("c clear done"));
