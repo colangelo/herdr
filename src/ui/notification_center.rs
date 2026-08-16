@@ -51,10 +51,6 @@ impl NotificationCenterButtonRects {
         }
         None
     }
-
-    pub(crate) fn row_y(&self) -> u16 {
-        self.clear.y
-    }
 }
 
 /// Compute the footer button row for the panel's inner rect: the settings
