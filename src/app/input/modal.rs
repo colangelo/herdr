@@ -3694,6 +3694,54 @@ mod tests {
         app.state.assert_invariants_for_test();
     }
 
+    /// The other half of the same case: a todo on the space you are already
+    /// standing in. It went through the old lookup fine, so this pins that the
+    /// fix did not trade one direction for the other.
+    #[test]
+    fn saving_an_edit_opened_from_the_board_stores_within_the_active_space() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let here = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&here]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist")
+            .add_todo(
+                "rerun the deploy",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+        app.state.active = Some(0);
+        app.state.open_todo_board();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        ));
+        for ch in "shipped".chars() {
+            app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char(ch)));
+        }
+        app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
+        ));
+
+        assert_eq!(
+            app.state
+                .pane_todos_in_display_order(here)
+                .first()
+                .map(|todo| todo.text.as_str()),
+            Some("shipped")
+        );
+        assert_eq!(app.state.mode, Mode::TodoBoard);
+        app.state.assert_invariants_for_test();
+    }
+
     /// `ctrl+g` saves and travels. Opened from the board it closed the *panel*
     /// on the way out, leaving the board's overlay behind under a terminal
     /// mode that disagrees with it.
