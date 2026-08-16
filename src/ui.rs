@@ -952,7 +952,7 @@ mod tests {
         let mut app = crate::app::state::AppState::test_new();
         app.mode = Mode::RenameWorkspace;
         app.pending_workspace_create_cwd = Some("/tmp/project".into());
-        app.name_input = "project".into();
+        app.set_name_input("project");
 
         let area = Rect::new(0, 0, 80, 20);
         compute_view(&mut app, area);

@@ -233,6 +233,18 @@ impl TextField {
     /// Insert one typed character. Refused whole when the buffer is already at
     /// the store's limit, so a full field simply stops accepting input rather
     /// than composing a todo the server will reject.
+    /// Empty the field, cursor included. The kill ring survives: a clear is
+    /// not a kill, so it does not clobber what is waiting to be yanked.
+    pub(crate) fn clear(&mut self) {
+        if self.text.is_empty() {
+            return;
+        }
+        self.push_undo();
+        self.text.clear();
+        self.cursor = 0;
+        self.last_edit = None;
+    }
+
     pub(crate) fn insert_char(&mut self, ch: char) -> bool {
         if self.char_count() >= self.max_chars {
             return false;

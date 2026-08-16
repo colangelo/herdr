@@ -40,6 +40,9 @@ mod app_scroll;
 mod clipboard;
 mod copy_mode;
 mod lease;
+pub(crate) mod list_keys;
+pub(crate) mod text_keys;
+pub(crate) use modal::edits_the_name_input;
 mod modal;
 mod mouse;
 mod navigate;
@@ -983,12 +986,12 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::RenameTab;
-        app.state.name_input = "2".into();
+        app.state.set_name_input("2");
         app.state.name_input_replace_on_type = true;
 
         app.handle_paste("feature/logs".into()).await;
 
-        assert_eq!(app.state.name_input, "feature/logs");
+        assert_eq!(app.state.name_input.text(), "feature/logs");
         assert!(!app.state.name_input_replace_on_type);
     }
 
@@ -997,13 +1000,13 @@ mod tests {
         let mut app = test_app();
         app.state.mode = Mode::KeybindHelp;
         app.handle_paste("ignored".into()).await;
-        assert!(app.state.keybind_help.query.is_empty());
+        assert!(app.state.keybind_help.query.text().is_empty());
 
         app.state.keybind_help.search_focused = true;
         app.state.keybind_help.scroll = 3;
         app.handle_paste("work\nspace".into()).await;
 
-        assert_eq!(app.state.keybind_help.query, "workspace");
+        assert_eq!(app.state.keybind_help.query.text(), "workspace");
         assert_eq!(app.state.keybind_help.scroll, 0);
     }
 
@@ -1011,7 +1014,7 @@ mod tests {
     async fn paste_routes_to_new_linked_worktree_input() {
         let mut app = test_app();
         app.state.mode = Mode::NewLinkedWorktree;
-        app.state.name_input = "generated-branch".into();
+        app.state.set_name_input("generated-branch");
         app.state.name_input_replace_on_type = true;
         app.state.worktree_create = Some(crate::app::state::WorktreeCreateState {
             source_workspace_id: "source".into(),
@@ -1028,7 +1031,7 @@ mod tests {
 
         app.handle_paste("feature/linear-302".into()).await;
 
-        assert_eq!(app.state.name_input, "feature/linear-302");
+        assert_eq!(app.state.name_input.text(), "feature/linear-302");
         assert_eq!(
             app.state
                 .worktree_create

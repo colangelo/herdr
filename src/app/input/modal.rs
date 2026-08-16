@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Direction;
 use ratatui::layout::Rect;
 
+use super::list_keys::{list_chord, ListChord, PlainChars};
 use crate::{
     app::{
         state::{
@@ -14,7 +15,6 @@ use crate::{
     layout::NavDirection,
     // Aliased: `ratatui::layout::Direction` is already in scope here and means
     // something entirely different.
-    ui::text_field::{word_class, Direction as Motion},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,14 +164,16 @@ pub(crate) fn handle_global_menu_key(state: &mut AppState, key: KeyEvent) {
     let actions = global_menu_actions(state);
     match key.code {
         KeyCode::Esc => leave_modal(state),
-        KeyCode::Up | KeyCode::Char('k') => state.global_menu.move_prev(),
-        KeyCode::Down | KeyCode::Char('j') => state.global_menu.move_next(actions.len()),
         KeyCode::Enter => {
             if let Some(action) = actions.get(state.global_menu.selected).copied() {
                 apply_global_menu_action(state, action);
             }
         }
-        _ => {}
+        _ => {
+            if let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) {
+                chord.apply(&mut state.global_menu, actions.len(), actions.len());
+            }
+        }
     }
 }
 
@@ -188,33 +190,29 @@ pub(crate) fn handle_navigator_key(
             KeyCode::Enter => {
                 state.accept_navigator_selection_from(terminal_runtimes);
             }
-            KeyCode::Backspace => {
-                state.navigator.state_filter = None;
-                state.navigator.query.pop();
-                state.select_first_navigator_match_from(terminal_runtimes);
+            // The shared chords, with plain characters as text: reaching for
+            // the search never demotes the picker to the arrow keys, and
+            // `j` / `k` are typed rather than moving.
+            _ if list_chord(key.code, key.modifiers, PlainChars::AreText).is_some() => {
+                navigator_list_chord(state, terminal_runtimes, key, PlainChars::AreText);
             }
-            KeyCode::Up => state.move_navigator_selection_from(terminal_runtimes, -1),
-            KeyCode::Down => state.move_navigator_selection_from(terminal_runtimes, 1),
-            // `ctrl+j` / `ctrl+k` move here as well as in the list state, so
-            // reaching for the search never demotes the picker to arrow keys.
-            // Plain `j` / `k` stay list-only: here they are text.
-            KeyCode::Char('n' | 'j') if key.modifiers == KeyModifiers::CONTROL => {
-                state.move_navigator_selection_from(terminal_runtimes, 1)
+            // Everything else is the shared editing set on the search box.
+            _ => {
+                let mut query = std::mem::replace(
+                    &mut state.navigator.query,
+                    crate::app::state::search_query_field(),
+                );
+                let edited = super::text_keys::apply_text_key(
+                    &mut query,
+                    key,
+                    super::text_keys::Shape::SingleLine,
+                );
+                state.navigator.query = query;
+                if edited {
+                    state.navigator.state_filter = None;
+                    state.select_first_navigator_match_from(terminal_runtimes);
+                }
             }
-            KeyCode::Char('p' | 'k') if key.modifiers == KeyModifiers::CONTROL => {
-                state.move_navigator_selection_from(terminal_runtimes, -1)
-            }
-            KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
-                state.navigator.query.clear();
-                state.navigator.state_filter = None;
-                state.clamp_navigator_selection_from(terminal_runtimes);
-            }
-            KeyCode::Char(c)
-                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
-            {
-                insert_navigator_search_text(state, terminal_runtimes, &c.to_string());
-            }
-            _ => {}
         }
         return;
     }
@@ -266,49 +264,50 @@ pub(crate) fn handle_navigator_key(
             state.navigator.state_filter = Some(NavigatorStateFilter::Done);
             state.select_first_navigator_match_from(terminal_runtimes);
         }
-        // Spelled out rather than left to these arms carrying no modifier
-        // guard: `ctrl+j` / `ctrl+k` move in both picker states by design, not
-        // by accident. The arrows keep upstream's unmodified-only guard, so
-        // stray alt/ctrl arrows still do nothing here.
-        KeyCode::Char('j')
-            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::CONTROL =>
-        {
-            state.move_navigator_selection_from(terminal_runtimes, 1)
-        }
-        KeyCode::Down if key.modifiers.is_empty() => {
-            state.move_navigator_selection_from(terminal_runtimes, 1)
-        }
-        KeyCode::Char('k')
-            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::CONTROL =>
-        {
-            state.move_navigator_selection_from(terminal_runtimes, -1)
-        }
-        KeyCode::Up if key.modifiers.is_empty() => {
-            state.move_navigator_selection_from(terminal_runtimes, -1)
-        }
-        KeyCode::Char('d') if key.modifiers == KeyModifiers::CONTROL => state
-            .move_navigator_selection_by_lines_from(
-                terminal_runtimes,
-                (state.navigator_body_rect().height / 2).max(1) as isize,
-            ),
-        KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => state
-            .move_navigator_selection_by_lines_from(
-                terminal_runtimes,
-                -((state.navigator_body_rect().height / 2).max(1) as isize),
-            ),
         KeyCode::Char(' ') => state.toggle_selected_navigator_workspace_from(terminal_runtimes),
-        KeyCode::Home => {
+        KeyCode::Char('G') => navigator_select_last(state, terminal_runtimes),
+        _ => navigator_list_chord(state, terminal_runtimes, key, PlainChars::AreChords),
+    }
+}
+
+fn navigator_select_last(
+    state: &mut AppState,
+    terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+) {
+    state.navigator.selected = state
+        .navigator_rows_from(terminal_runtimes)
+        .len()
+        .saturating_sub(1);
+    state.ensure_navigator_selection_visible_from(terminal_runtimes);
+}
+
+/// The shared list chords, mapped onto the navigator's own movers. Its
+/// half-page moves by *display lines* rather than rows, because a workspace and
+/// its panes are one row each but not one line each.
+fn navigator_list_chord(
+    state: &mut AppState,
+    terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    key: KeyEvent,
+    plain: PlainChars,
+) {
+    let Some(chord) = list_chord(key.code, key.modifiers, plain) else {
+        return;
+    };
+    let half = (state.navigator_body_rect().height / 2).max(1) as isize;
+    match chord {
+        ListChord::Prev => state.move_navigator_selection_from(terminal_runtimes, -1),
+        ListChord::Next => state.move_navigator_selection_from(terminal_runtimes, 1),
+        ListChord::HalfPageUp => {
+            state.move_navigator_selection_by_lines_from(terminal_runtimes, -half)
+        }
+        ListChord::HalfPageDown => {
+            state.move_navigator_selection_by_lines_from(terminal_runtimes, half)
+        }
+        ListChord::First => {
             state.navigator.selected = 0;
             state.ensure_navigator_selection_visible_from(terminal_runtimes);
         }
-        KeyCode::End | KeyCode::Char('G') => {
-            state.navigator.selected = state
-                .navigator_rows_from(terminal_runtimes)
-                .len()
-                .saturating_sub(1);
-            state.ensure_navigator_selection_visible_from(terminal_runtimes);
-        }
-        _ => {}
+        ListChord::Last => navigator_select_last(state, terminal_runtimes),
     }
 }
 
@@ -321,7 +320,7 @@ pub(crate) fn insert_navigator_search_text(
         return;
     }
     state.navigator.state_filter = None;
-    state.navigator.query.push_str(text);
+    state.navigator.query.insert_str(text);
     state.select_first_navigator_match_from(terminal_runtimes);
 }
 
@@ -329,10 +328,8 @@ pub(crate) fn insert_keybind_help_query_text(state: &mut AppState, text: &str) {
     if !state.keybind_help.search_focused {
         return;
     }
-    state
-        .keybind_help
-        .query
-        .extend(text.chars().filter(|ch| !ch.is_control()));
+    let text: String = text.chars().filter(|ch| !ch.is_control()).collect();
+    state.keybind_help.query.insert_str(&text);
     state.keybind_help.scroll = 0;
 }
 
@@ -350,25 +347,30 @@ pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
     if state.keybind_help.search_focused {
         let text_char = keybind_help_text_char(key.clone());
         match key.code {
-            KeyCode::Up => state.scroll_keybind_help(-1),
-            KeyCode::Down => state.scroll_keybind_help(1),
             KeyCode::PageUp => state.scroll_keybind_help(-8),
             KeyCode::PageDown => state.scroll_keybind_help(8),
-            KeyCode::Home => state.keybind_help.scroll = 0,
-            KeyCode::End => state.keybind_help.scroll = state.keybind_help_max_scroll(),
-            KeyCode::Backspace => {
-                state.keybind_help.query.pop();
-                state.keybind_help.scroll = 0;
-            }
-            KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
-                state.keybind_help.query.clear();
-                state.keybind_help.scroll = 0;
-            }
             KeyCode::Esc => keybind_help_back(state),
             KeyCode::Enter => leave_modal(state),
+            _ if keybind_help_list_chord(state, key.code, key.modifiers, PlainChars::AreText) => {}
+            // The shared editing set, fed the character the terminal actually
+            // reported so a shifted or IME-composed key still types.
             _ => {
-                if let Some(character) = text_char {
-                    insert_keybind_help_query_text(state, &character.to_string());
+                let mut query = std::mem::replace(
+                    &mut state.keybind_help.query,
+                    crate::app::state::search_query_field(),
+                );
+                let typed = text_char
+                    .filter(|_| matches!(key.code, KeyCode::Char(_)))
+                    .map(|character| KeyEvent::new(KeyCode::Char(character), KeyModifiers::empty()))
+                    .unwrap_or_else(|| KeyEvent::new(key.code, key.modifiers));
+                let edited = super::text_keys::apply_text_key(
+                    &mut query,
+                    typed,
+                    super::text_keys::Shape::SingleLine,
+                );
+                state.keybind_help.query = query;
+                if edited {
+                    state.keybind_help.scroll = 0;
                 }
             }
         }
@@ -376,12 +378,8 @@ pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
     }
 
     match key.code {
-        KeyCode::Up | KeyCode::Char('k') => state.scroll_keybind_help(-1),
-        KeyCode::Down | KeyCode::Char('j') => state.scroll_keybind_help(1),
         KeyCode::PageUp => state.scroll_keybind_help(-8),
         KeyCode::PageDown => state.scroll_keybind_help(8),
-        KeyCode::Home => state.keybind_help.scroll = 0,
-        KeyCode::End => state.keybind_help.scroll = state.keybind_help_max_scroll(),
         _ if keybind_help_text_char(key.clone()) == Some('/') => {
             state.keybind_help.search_focused = true;
             state.keybind_help.scroll = 0;
@@ -389,8 +387,33 @@ pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
         KeyCode::Esc => keybind_help_back(state),
         KeyCode::Enter => leave_modal(state),
         _ if keybind_help_text_char(key.clone()) == Some('?') => leave_modal(state),
-        _ => {}
+        _ => {
+            keybind_help_list_chord(state, key.code, key.modifiers, PlainChars::AreChords);
+        }
     }
+}
+
+/// The shared list chords, mapped onto the help panel's scroll: it is a long
+/// page rather than a list of rows, so a chord moves the viewport instead of a
+/// selection. Returns whether the key was one.
+fn keybind_help_list_chord(
+    state: &mut AppState,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+    plain: PlainChars,
+) -> bool {
+    let Some(chord) = list_chord(code, modifiers, plain) else {
+        return false;
+    };
+    match chord {
+        ListChord::Prev => state.scroll_keybind_help(-1),
+        ListChord::Next => state.scroll_keybind_help(1),
+        ListChord::HalfPageUp => state.scroll_keybind_help(-8),
+        ListChord::HalfPageDown => state.scroll_keybind_help(8),
+        ListChord::First => state.keybind_help.scroll = 0,
+        ListChord::Last => state.keybind_help.scroll = state.keybind_help_max_scroll(),
+    }
+    true
 }
 
 fn keybind_help_text_char(key: TerminalKey) -> Option<char> {
@@ -414,8 +437,8 @@ pub(super) fn open_rename_workspace(
     state.pending_workspace_create_cwd = None;
     state.selected = ws_idx;
     state.rename_pane_target = None;
-    state.name_input =
-        state.workspaces[ws_idx].display_name_from(&state.terminals, terminal_runtimes);
+    let name = state.workspaces[ws_idx].display_name_from(&state.terminals, terminal_runtimes);
+    state.set_name_input(name);
     state.name_input_replace_on_type = false;
     state.mode = Mode::RenameWorkspace;
 }
@@ -426,7 +449,7 @@ pub(crate) fn open_new_workspace_dialog(state: &mut AppState, cwd: std::path::Pa
     state.requested_new_tab_name = None;
     state.pending_workspace_create_cwd = Some(cwd);
     state.rename_pane_target = None;
-    state.name_input = suggested_name;
+    state.set_name_input(suggested_name);
     state.name_input_replace_on_type = true;
     state.mode = Mode::RenameWorkspace;
 }
@@ -438,7 +461,7 @@ pub(super) fn open_rename_active_tab(state: &mut AppState, replace_on_type: bool
     state.rename_pane_target = None;
     if let Some(ws) = state.active.and_then(|i| state.workspaces.get(i)) {
         if let Some(name) = ws.active_tab_display_name() {
-            state.name_input = name;
+            state.set_name_input(name);
             state.name_input_replace_on_type = replace_on_type;
             state.mode = Mode::RenameTab;
         }
@@ -457,10 +480,9 @@ pub(super) fn open_rename_pane(state: &mut AppState, pane_id: crate::layout::Pan
     state.requested_new_tab_name = None;
     state.pending_workspace_create_cwd = None;
     state.rename_pane_target = Some(pane_id);
-    state.name_input = terminal
-        .and_then(|t| t.manual_label.clone())
-        .unwrap_or_default();
-    state.name_input_replace_on_type = terminal.and_then(|t| t.manual_label.as_ref()).is_none();
+    let manual_label = terminal.and_then(|t| t.manual_label.clone());
+    state.name_input_replace_on_type = manual_label.is_none();
+    state.set_name_input(manual_label.unwrap_or_default());
     state.mode = Mode::RenamePane;
 }
 
@@ -482,7 +504,7 @@ pub(super) fn open_new_tab_dialog(state: &mut AppState) {
     state.requested_new_tab_name = None;
     state.pending_workspace_create_cwd = None;
     state.rename_pane_target = None;
-    state.name_input = next_new_tab_default_name(state);
+    state.set_name_input(next_new_tab_default_name(state));
     state.name_input_replace_on_type = true;
     state.mode = Mode::RenameTab;
 }
@@ -546,10 +568,10 @@ pub(super) const SETTINGS_ACTIONS: &[ModalActionSpec<ModalAction>] = &[
 pub(super) fn apply_rename_action(state: &mut AppState, action: ModalAction) {
     match action {
         ModalAction::Save => {
-            let new_name = if state.name_input.trim().is_empty() {
-                state.name_input.clone()
+            let new_name = if state.name_input.text().trim().is_empty() {
+                state.name_input.text().to_string()
             } else {
-                state.name_input.trim().to_string()
+                state.name_input.text().trim().to_string()
             };
             match state.mode {
                 Mode::RenameWorkspace
@@ -648,158 +670,51 @@ fn clear_rename_input(state: &mut AppState) {
     state.name_input_replace_on_type = false;
 }
 
+/// Paste and other bulk insertions into the shared name field.
 pub(crate) fn insert_rename_input_text(state: &mut AppState, text: &str) {
     if state.name_input_replace_on_type {
         clear_rename_input(state);
     }
-    state.name_input.push_str(text);
+    state.name_input.insert_str(text);
 }
 
-fn delete_rename_input_char(state: &mut AppState) {
-    if state.name_input_replace_on_type {
-        clear_rename_input(state);
-    } else {
-        state.name_input.pop();
-    }
-}
-
-fn delete_rename_input_word(state: &mut AppState) {
-    if state.name_input_replace_on_type {
-        clear_rename_input(state);
-        return;
-    }
-    delete_last_word(&mut state.name_input);
-}
-
-/// Delete trailing whitespace, then the run of like-classed characters before
-/// it. The word class is `TextField`'s, so "a word" means the same thing in
-/// the append-only rename input as it does in a cursor-bearing field.
-fn delete_last_word(buffer: &mut String) {
-    while buffer.chars().last().is_some_and(char::is_whitespace) {
-        buffer.pop();
-    }
-    let Some(class) = buffer.chars().last().map(word_class) else {
-        return;
-    };
-    while buffer
-        .chars()
-        .last()
-        .is_some_and(|ch| !ch.is_whitespace() && word_class(ch) == class)
-    {
-        buffer.pop();
-    }
-}
-
-/// Translate a key into a call on the todo field. The keymap lives here and
-/// the buffer lives in `TextField`, so this is only ever a lookup table.
-///
-/// The chords are readline's, with one substitution forced by how terminals
-/// report keys: undo is offered on `ctrl+_`, `ctrl+-`, and `ctrl+/` at once.
-/// Herdr's own parser turns the legacy `0x1F` byte into `ctrl+-`
-/// (`src/input/parse.rs`), so that arm is what makes undo reachable without
-/// the enhanced keyboard protocol; the other two are how the same physical
-/// chords arrive once a terminal reports them individually.
+/// Translate a key into a call on the todo field, through the shared editing
+/// set. Enter is a newline here rather than a commit: a field that accepts
+/// newlines cannot also have Enter mean "done", so save moved to `ctrl+s`.
 fn handle_pane_todo_edit_text_key(state: &mut AppState, key: KeyEvent) {
     let Some(edit) = state.pane_todo_edit.as_mut() else {
         return;
     };
-    let text = &mut edit.text;
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
-    match key.code {
-        // -- motions --
-        KeyCode::Char('a') if ctrl => text.move_home(),
-        KeyCode::Char('e') if ctrl => text.move_end(),
-        KeyCode::Char('b') if ctrl => text.move_char(Motion::Backward),
-        KeyCode::Char('f') if ctrl => text.move_char(Motion::Forward),
-        KeyCode::Char('b') if alt => text.move_word(Motion::Backward),
-        KeyCode::Char('f') if alt => text.move_word(Motion::Forward),
-        KeyCode::Left if ctrl || alt => text.move_word(Motion::Backward),
-        KeyCode::Right if ctrl || alt => text.move_word(Motion::Forward),
-        KeyCode::Left => text.move_char(Motion::Backward),
-        KeyCode::Right => text.move_char(Motion::Forward),
-        KeyCode::Up => text.move_line(Motion::Backward),
-        KeyCode::Down => text.move_line(Motion::Forward),
-        KeyCode::Home => text.move_home(),
-        KeyCode::End => text.move_end(),
-
-        // -- kills and deletes --
-        KeyCode::Char('k') if ctrl => {
-            text.kill_to_end();
-        }
-        KeyCode::Char('u') if ctrl => {
-            text.kill_to_start();
-        }
-        KeyCode::Char('w') if ctrl => {
-            text.kill_word_backward();
-        }
-        KeyCode::Char('y') if ctrl => {
-            text.yank();
-        }
-        // Undo, on every chord a terminal might deliver 0x1F or its
-        // enhanced-protocol equivalent under.
-        KeyCode::Char('_' | '-' | '/') if ctrl => {
-            text.undo();
-        }
-        KeyCode::Char('d') if ctrl => {
-            text.delete_forward();
-        }
-        KeyCode::Delete => {
-            text.delete_forward();
-        }
-        // cmd+backspace is "delete to the start of the line" on macOS, which
-        // is exactly kill-to-start — and on the single-line text that is the
-        // common case, exactly the whole-buffer clear it used to be.
-        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => {
-            text.kill_to_start();
-        }
-        KeyCode::Backspace if ctrl || alt => {
-            text.kill_word_backward();
-        }
-        // `ctrl+h` is readline's backward-delete-char, and is what many
-        // terminals send for Backspace itself.
-        KeyCode::Char('h') if ctrl => {
-            text.delete_backward();
-        }
-        KeyCode::Backspace => {
-            text.delete_backward();
-        }
-
-        // -- insertion --
-        // Enter is a newline, not a commit: a field that accepts newlines
-        // cannot also have Enter mean "done". Save moved to `ctrl+s`.
-        KeyCode::Enter => {
-            text.insert_char('\n');
-        }
-        KeyCode::Char(c) if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-            text.insert_char(c);
-        }
-        _ => {}
-    }
+    super::text_keys::apply_text_key(&mut edit.text, key, super::text_keys::Shape::Multiline);
 }
 
 fn handle_rename_edit_key(state: &mut AppState, key: KeyEvent) {
+    // A name field seeded from the current name replaces on the first edit
+    // rather than appending to it, so retyping a name does not mean clearing
+    // it first. The flag is consumed by whichever edit lands first.
+    if state.name_input_replace_on_type && edits_the_name_input(key) {
+        clear_rename_input(state);
+    }
+    super::text_keys::apply_text_key(
+        &mut state.name_input,
+        key,
+        super::text_keys::Shape::SingleLine,
+    );
+}
+
+/// Whether this key would change the field, as opposed to only moving in it.
+/// A motion must not consume the replace-on-type flag: arrowing into a seeded
+/// name and then typing should still replace it.
+pub(crate) fn edits_the_name_input(key: KeyEvent) -> bool {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     match key.code {
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            clear_rename_input(state);
-        }
-        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => {
-            clear_rename_input(state);
-        }
-        KeyCode::Backspace
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::ALT) =>
-        {
-            delete_rename_input_word(state);
-        }
-        KeyCode::Char('h' | 'w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            delete_rename_input_word(state);
-        }
-        KeyCode::Backspace => delete_rename_input_char(state),
-        KeyCode::Char(c) if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-            insert_rename_input_text(state, &c.to_string());
-        }
-        _ => {}
+        KeyCode::Char('a' | 'e' | 'b' | 'f') if ctrl => false,
+        KeyCode::Char('b' | 'f') if alt => false,
+        KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End => false,
+        KeyCode::Backspace | KeyCode::Delete => true,
+        KeyCode::Char(_) => true,
+        _ => false,
     }
 }
 
@@ -1078,16 +993,18 @@ pub(super) fn apply_context_menu_action(
 #[cfg(test)]
 pub(crate) fn handle_notification_center_key(state: &mut AppState, key: KeyEvent) {
     match key.code {
-        KeyCode::Up | KeyCode::Char('k') => state.notification_center_move_selection(-1),
-        KeyCode::Down | KeyCode::Char('j') => state.notification_center_move_selection(1),
         KeyCode::Enter => activate_notification_center_selection_local(state),
-        KeyCode::Char('c') => state.clear_notifications(),
-        KeyCode::Char('r') => state.mark_all_notifications_read(),
-        KeyCode::Esc | KeyCode::Char('q') => {
+        KeyCode::Char('c') if key.modifiers.is_empty() => state.clear_notifications(),
+        KeyCode::Char('r') if key.modifiers.is_empty() => state.mark_all_notifications_read(),
+        KeyCode::Esc => {
             state.close_notification_center();
             leave_modal(state);
         }
-        _ => {}
+        KeyCode::Char('q') if key.modifiers.is_empty() => {
+            state.close_notification_center();
+            leave_modal(state);
+        }
+        _ => notification_center_list_chord(state, key),
     }
 }
 
@@ -1125,59 +1042,106 @@ pub(crate) fn handle_context_menu_key(
             state.context_menu = None;
             leave_modal(state);
         }
-        KeyCode::Up => {
-            if let Some(menu) = &mut state.context_menu {
-                menu.list.move_prev();
-            }
-        }
-        KeyCode::Down => {
-            if let Some(menu) = &mut state.context_menu {
-                menu.list.move_next(menu.items().len());
-            }
-        }
         KeyCode::Enter => {
             if let Some(menu) = state.context_menu.take() {
                 let idx = menu.list.selected;
                 apply_context_menu_action(state, terminal_runtimes, menu, idx);
             }
         }
-        _ => {}
+        _ => context_menu_list_chord(state, key),
     }
+}
+
+/// The shared list chords for the context menu, in both the test twin and the
+/// API path.
+fn context_menu_list_chord(state: &mut AppState, key: KeyEvent) {
+    let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
+        return;
+    };
+    if let Some(menu) = &mut state.context_menu {
+        let len = menu.items().len();
+        chord.apply(&mut menu.list, len, len);
+    }
+}
+
+/// The shared list chords for the notification center, in both the test twin
+/// and the API path.
+fn notification_center_list_chord(state: &mut AppState, key: KeyEvent) {
+    let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
+        return;
+    };
+    let len = state.notification_log.len();
+    let visible = state.notification_center_visible_rows();
+    let selected = state
+        .notification_center
+        .as_ref()
+        .map(|center| center.list.selected)
+        .unwrap_or(0);
+    state.notification_center_move_selection(chord.delta(selected, visible, len));
 }
 
 impl App {
     pub(crate) fn handle_notification_center_key_via_api(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.state.notification_center_move_selection(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.state.notification_center_move_selection(1),
             KeyCode::Enter => self.activate_notification_center_selection(),
-            KeyCode::Char('c') => self.state.clear_notifications(),
-            KeyCode::Char('r') => self.state.mark_all_notifications_read(),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Char('c') if key.modifiers.is_empty() => self.state.clear_notifications(),
+            KeyCode::Char('r') if key.modifiers.is_empty() => {
+                self.state.mark_all_notifications_read()
+            }
+            KeyCode::Esc => {
                 self.state.close_notification_center();
                 leave_modal(&mut self.state);
             }
-            _ => {}
+            KeyCode::Char('q') if key.modifiers.is_empty() => {
+                self.state.close_notification_center();
+                leave_modal(&mut self.state);
+            }
+            _ => notification_center_list_chord(&mut self.state, key),
         }
     }
 
     pub(crate) fn handle_pane_todos_key_via_api(&mut self, key: KeyEvent) {
+        // The letter actions carry a modifier guard so their `ctrl+` forms
+        // fall through to the shared list chords: `ctrl+d` is half a page
+        // down here as it is everywhere else, not a second way to spell
+        // "remove".
+        let bare = key.modifiers.is_empty();
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.state.pane_todos_move_selection(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.state.pane_todos_move_selection(1),
             // Enter edits rather than jumps: todos are authored, notifications
             // are not. Jumping is on the link chip and `g`.
             KeyCode::Enter => self.apply_pane_todo_action(PaneTodoAction::Edit),
-            KeyCode::Char('a') => self.apply_pane_todo_action(PaneTodoAction::Add),
-            KeyCode::Char(' ') => self.apply_pane_todo_action(PaneTodoAction::ToggleDone),
-            KeyCode::Char('g') => self.apply_pane_todo_action(PaneTodoAction::FollowLink),
-            KeyCode::Char('d') => self.apply_pane_todo_action(PaneTodoAction::Remove),
-            KeyCode::Char('c') => self.apply_pane_todo_action(PaneTodoAction::ClearDone),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Char('a') if bare => self.apply_pane_todo_action(PaneTodoAction::Add),
+            KeyCode::Char(' ') if bare => self.apply_pane_todo_action(PaneTodoAction::ToggleDone),
+            KeyCode::Char('g') if bare => self.apply_pane_todo_action(PaneTodoAction::FollowLink),
+            KeyCode::Char('d') if bare => self.apply_pane_todo_action(PaneTodoAction::Remove),
+            KeyCode::Char('c') if bare => self.apply_pane_todo_action(PaneTodoAction::ClearDone),
+            KeyCode::Esc => {
                 self.state.close_pane_todos();
                 leave_modal(&mut self.state);
             }
-            _ => {}
+            KeyCode::Char('q') if bare => {
+                self.state.close_pane_todos();
+                leave_modal(&mut self.state);
+            }
+            _ => {
+                if let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) {
+                    let len = self
+                        .state
+                        .pane_todos
+                        .as_ref()
+                        .map(|panel| self.state.pane_todos_in_display_order(panel.pane_id).len())
+                        .unwrap_or(0);
+                    let visible = self.state.pane_todo_panel_visible_rows();
+                    let selected = self
+                        .state
+                        .pane_todos
+                        .as_ref()
+                        .map(|panel| panel.list.selected)
+                        .unwrap_or(0);
+                    self.state
+                        .pane_todos_move_selection(chord.delta(selected, visible, len));
+                }
+            }
         }
     }
 
@@ -1428,10 +1392,10 @@ impl App {
     }
 
     fn save_rename_modal_via_api(&mut self) {
-        let new_name = if self.state.name_input.trim().is_empty() {
-            self.state.name_input.clone()
+        let new_name = if self.state.name_input.text().trim().is_empty() {
+            self.state.name_input.text().to_string()
         } else {
-            self.state.name_input.trim().to_string()
+            self.state.name_input.text().trim().to_string()
         };
 
         match self.state.mode {
@@ -1634,23 +1598,13 @@ impl App {
                 self.state.context_menu = None;
                 leave_modal(&mut self.state);
             }
-            KeyCode::Up => {
-                if let Some(menu) = &mut self.state.context_menu {
-                    menu.list.move_prev();
-                }
-            }
-            KeyCode::Down => {
-                if let Some(menu) = &mut self.state.context_menu {
-                    menu.list.move_next(menu.items().len());
-                }
-            }
             KeyCode::Enter => {
                 if let Some(menu) = self.state.context_menu.take() {
                     let idx = menu.list.selected;
                     self.apply_context_menu_action_via_api(menu, idx);
                 }
             }
-            _ => {}
+            _ => context_menu_list_chord(&mut self.state, key),
         }
     }
 
@@ -1897,6 +1851,188 @@ mod tests {
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    /// The whole shared set, in the overlays this module drives. A new
+    /// overlay that forgets a chord fails here rather than being discovered by
+    /// a user who reached for it.
+    const MOVE_DOWN_CHORDS: [(KeyCode, KeyModifiers); 5] = [
+        (KeyCode::Down, KeyModifiers::empty()),
+        (KeyCode::Char('j'), KeyModifiers::empty()),
+        (KeyCode::Char('j'), KeyModifiers::CONTROL),
+        (KeyCode::Char('n'), KeyModifiers::CONTROL),
+        (KeyCode::End, KeyModifiers::empty()),
+    ];
+
+    const MOVE_UP_CHORDS: [(KeyCode, KeyModifiers); 5] = [
+        (KeyCode::Up, KeyModifiers::empty()),
+        (KeyCode::Char('k'), KeyModifiers::empty()),
+        (KeyCode::Char('k'), KeyModifiers::CONTROL),
+        (KeyCode::Char('p'), KeyModifiers::CONTROL),
+        (KeyCode::Home, KeyModifiers::empty()),
+    ];
+
+    fn notification_state() -> AppState {
+        let mut state = state_with_workspaces(&["one"]);
+        for title in ["a", "b", "c", "d", "e"] {
+            state.post_notification(notification_toast(title, None));
+        }
+        state.view.terminal_area = Rect::new(0, 1, 80, 24);
+        state.view.tab_bar_rect = Rect::new(0, 0, 80, 1);
+        state.open_notification_center();
+        state
+    }
+
+    #[test]
+    fn the_notification_center_moves_on_every_shared_chord() {
+        let selected =
+            |state: &AppState| state.notification_center.as_ref().map(|c| c.list.selected);
+        for (code, modifiers) in MOVE_DOWN_CHORDS {
+            let mut state = notification_state();
+            handle_notification_center_key(&mut state, KeyEvent::new(code, modifiers));
+            assert!(
+                selected(&state).is_some_and(|idx| idx > 0),
+                "{code:?}+{modifiers:?} should move down"
+            );
+        }
+        for (code, modifiers) in MOVE_UP_CHORDS {
+            let mut state = notification_state();
+            handle_notification_center_key(
+                &mut state,
+                KeyEvent::new(KeyCode::End, KeyModifiers::empty()),
+            );
+            let bottom = selected(&state).expect("selection");
+            handle_notification_center_key(&mut state, KeyEvent::new(code, modifiers));
+            assert!(
+                selected(&state).is_some_and(|idx| idx < bottom),
+                "{code:?}+{modifiers:?} should move up"
+            );
+        }
+        // Half a page, which the panel had no chord for at all before.
+        let mut state = notification_state();
+        handle_notification_center_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        assert!(selected(&state).is_some_and(|idx| idx > 0));
+        handle_notification_center_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(selected(&state), Some(0));
+    }
+
+    #[test]
+    fn the_global_menu_moves_on_every_shared_chord() {
+        for (code, modifiers) in MOVE_DOWN_CHORDS {
+            let mut state = state_with_workspaces(&["one"]);
+            open_global_menu(&mut state);
+            handle_global_menu_key(&mut state, KeyEvent::new(code, modifiers));
+            assert!(
+                state.global_menu.selected > 0,
+                "{code:?}+{modifiers:?} should move down"
+            );
+        }
+        for (code, modifiers) in MOVE_UP_CHORDS {
+            let mut state = state_with_workspaces(&["one"]);
+            open_global_menu(&mut state);
+            handle_global_menu_key(
+                &mut state,
+                KeyEvent::new(KeyCode::End, KeyModifiers::empty()),
+            );
+            let bottom = state.global_menu.selected;
+            assert!(bottom > 0, "the menu should have more than one action");
+            handle_global_menu_key(&mut state, KeyEvent::new(code, modifiers));
+            assert!(
+                state.global_menu.selected < bottom,
+                "{code:?}+{modifiers:?} should move up"
+            );
+        }
+    }
+
+    #[test]
+    fn the_keybind_help_scrolls_on_every_shared_chord() {
+        for (code, modifiers) in MOVE_DOWN_CHORDS {
+            let mut state = state_with_workspaces(&["one"]);
+            state.view.terminal_area = Rect::new(0, 0, 100, 30);
+            open_keybind_help(&mut state);
+            handle_keybind_help_key(&mut state, TerminalKey::new(code, modifiers));
+            assert!(
+                state.keybind_help.scroll > 0,
+                "{code:?}+{modifiers:?} should scroll down"
+            );
+        }
+        for (code, modifiers) in MOVE_UP_CHORDS {
+            let mut state = state_with_workspaces(&["one"]);
+            state.view.terminal_area = Rect::new(0, 0, 100, 30);
+            open_keybind_help(&mut state);
+            handle_keybind_help_key(
+                &mut state,
+                TerminalKey::new(KeyCode::End, KeyModifiers::empty()),
+            );
+            let bottom = state.keybind_help.scroll;
+            assert!(bottom > 0, "the help panel should be longer than the frame");
+            handle_keybind_help_key(&mut state, TerminalKey::new(code, modifiers));
+            assert!(
+                state.keybind_help.scroll < bottom,
+                "{code:?}+{modifiers:?} should scroll up"
+            );
+        }
+    }
+
+    /// The kit's promise for a focused search box: the modified chords still
+    /// move, and the plain ones are text.
+    #[test]
+    fn the_keybind_help_search_box_moves_on_modified_chords_and_types_plain_ones() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.view.terminal_area = Rect::new(0, 0, 100, 30);
+        open_keybind_help(&mut state);
+        state.keybind_help.search_focused = true;
+
+        handle_keybind_help_key(
+            &mut state,
+            TerminalKey::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(state.keybind_help.scroll, 1);
+        assert!(state.keybind_help.query.text().is_empty());
+
+        handle_keybind_help_key(
+            &mut state,
+            TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty()),
+        );
+        assert_eq!(state.keybind_help.query.text(), "j");
+    }
+
+    /// Every converted input reaches the same motions and kills, over the same
+    /// definition of a word.
+    #[test]
+    fn every_overlay_text_input_edits_the_same_way() {
+        use crate::ui::text_field::TextField;
+
+        let edit = |field: &mut TextField, code: KeyCode, modifiers: KeyModifiers| {
+            super::super::text_keys::apply_text_key(
+                field,
+                KeyEvent::new(code, modifiers),
+                super::super::text_keys::Shape::SingleLine,
+            );
+        };
+
+        for max in [
+            crate::app::state::NAME_INPUT_MAX_CHARS,
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        ] {
+            let mut field = TextField::from_text("herdr overlay-kit", max);
+            edit(&mut field, KeyCode::Char('w'), KeyModifiers::CONTROL);
+            assert_eq!(field.text(), "herdr overlay-");
+            edit(&mut field, KeyCode::Char('w'), KeyModifiers::CONTROL);
+            assert_eq!(field.text(), "herdr overlay");
+            edit(&mut field, KeyCode::Char('a'), KeyModifiers::CONTROL);
+            assert_eq!(field.cursor(), 0);
+            edit(&mut field, KeyCode::Char('k'), KeyModifiers::CONTROL);
+            assert!(field.text().is_empty());
+            edit(&mut field, KeyCode::Char('y'), KeyModifiers::CONTROL);
+            assert_eq!(field.text(), "herdr overlay");
+        }
     }
 
     #[test]
@@ -2227,15 +2363,15 @@ mod tests {
     fn rename_modal_keyboard_and_mouse_share_actions() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameWorkspace;
-        state.name_input = "hello".into();
+        state.set_name_input("hello");
 
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
         );
-        assert!(state.name_input.is_empty());
+        assert!(state.name_input.text().is_empty());
 
-        state.name_input = "renamed".into();
+        state.set_name_input("renamed");
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
@@ -2251,7 +2387,7 @@ mod tests {
         state.view.sidebar_rect = Rect::new(0, 0, 26, 20);
         state.view.terminal_area = Rect::new(26, 0, 80, 20);
         state.mode = Mode::RenameWorkspace;
-        state.name_input = "mouse".into();
+        state.set_name_input("mouse");
         let inner = state.rename_modal_inner().unwrap();
         let (save, _, _) = crate::ui::rename_button_rects(inner);
         let action = modal_action_from_buttons(save.x, save.y, &[(save, ModalAction::Save)]);
@@ -2262,7 +2398,7 @@ mod tests {
     fn tab_rename_updates_captured_snapshot() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameTab;
-        state.name_input = "logs".into();
+        state.set_name_input("logs");
 
         handle_rename_key(
             &mut state,
@@ -2280,7 +2416,7 @@ mod tests {
     fn rename_cancel_returns_to_terminal_when_workspace_is_active() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameTab;
-        state.name_input = "test".into();
+        state.set_name_input("test");
 
         handle_rename_key(
             &mut state,
@@ -2288,123 +2424,134 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Terminal);
-        assert!(state.name_input.is_empty());
+        assert!(state.name_input.text().is_empty());
     }
 
     #[test]
     fn rename_modal_replaces_prefilled_text_on_first_type() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameTab;
-        state.name_input = "2".into();
+        state.set_name_input("2");
         state.name_input_replace_on_type = true;
 
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
         );
-        assert_eq!(state.name_input, "n");
+        assert_eq!(state.name_input.text(), "n");
         assert!(!state.name_input_replace_on_type);
 
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
         );
-        assert_eq!(state.name_input, "ne");
+        assert_eq!(state.name_input.text(), "ne");
     }
 
     #[test]
     fn rename_modal_replaces_prefilled_text_on_paste() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameTab;
-        state.name_input = "2".into();
+        state.set_name_input("2");
         state.name_input_replace_on_type = true;
 
         insert_rename_input_text(&mut state, "feature/logs");
 
-        assert_eq!(state.name_input, "feature/logs");
+        assert_eq!(state.name_input.text(), "feature/logs");
         assert!(!state.name_input_replace_on_type);
 
         insert_rename_input_text(&mut state, "-copy");
 
-        assert_eq!(state.name_input, "feature/logs-copy");
+        assert_eq!(state.name_input.text(), "feature/logs-copy");
     }
 
     #[test]
     fn rename_modal_handles_line_editing_shortcuts() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameWorkspace;
-        state.name_input = "website zero".into();
+        state.set_name_input("website zero");
 
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()),
         );
-        assert_eq!(state.name_input, "website zer");
+        assert_eq!(state.name_input.text(), "website zer");
 
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL),
         );
-        assert_eq!(state.name_input, "website ");
+        assert_eq!(state.name_input.text(), "website ");
 
-        state.name_input = "website-zero".into();
+        state.set_name_input("website-zero");
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT),
         );
-        assert_eq!(state.name_input, "website-");
+        assert_eq!(state.name_input.text(), "website-");
 
-        state.name_input = "website-zero".into();
+        // `ctrl+h` is readline's backward-delete-*char*, and is what many
+        // terminals send for Backspace itself — deleting a whole word on it
+        // made Backspace eat a word on those terminals.
+        state.set_name_input("website-zero");
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
         );
-        assert_eq!(state.name_input, "website-");
+        assert_eq!(state.name_input.text(), "website-zer");
 
-        state.name_input = "website-zero".into();
+        state.set_name_input("website-zero");
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
         );
-        assert_eq!(state.name_input, "website-");
+        assert_eq!(state.name_input.text(), "website-");
 
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER),
         );
-        assert!(state.name_input.is_empty());
+        assert!(state.name_input.text().is_empty());
 
-        state.name_input = "website zero".into();
+        state.set_name_input("website zero");
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
         );
-        assert!(state.name_input.is_empty());
+        assert!(state.name_input.text().is_empty());
     }
 
     #[test]
     fn rename_modal_does_not_insert_modified_shortcut_chars() {
         let mut state = state_with_workspaces(&["test"]);
         state.mode = Mode::RenameWorkspace;
-        state.name_input = "website".into();
+        state.set_name_input("website");
 
+        // A modified character is a command, not text: `ctrl+a` moves the
+        // caret to the start rather than typing an `a`.
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
         );
-        assert_eq!(state.name_input, "website");
+        assert_eq!(state.name_input.text(), "website");
+        assert_eq!(state.name_input.cursor(), 0);
 
+        // And the field has a caret now, so a typed character lands where the
+        // caret is rather than always at the end.
         handle_rename_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::SHIFT),
         );
-        assert_eq!(state.name_input, "websiteZ");
+        assert_eq!(state.name_input.text(), "Zwebsite");
     }
 
     #[test]
     fn keybind_help_slash_focuses_filter_and_preserves_vim_scroll() {
         let mut state = state_with_workspaces(&["test"]);
-        state.keybind_help.query = "stale".into();
+        state.keybind_help.query = crate::ui::text_field::TextField::from_text(
+            "stale",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         state.keybind_help.search_focused = true;
         state.view.terminal_area = Rect::new(0, 0, 100, 30);
 
@@ -2424,7 +2571,7 @@ mod tests {
             &mut state,
             TerminalKey::new(KeyCode::Char('w'), KeyModifiers::empty()),
         );
-        assert!(state.keybind_help.query.is_empty());
+        assert!(state.keybind_help.query.text().is_empty());
 
         handle_keybind_help_key(
             &mut state,
@@ -2439,7 +2586,7 @@ mod tests {
         }
 
         assert!(state.keybind_help.search_focused);
-        assert_eq!(state.keybind_help.query, "work");
+        assert_eq!(state.keybind_help.query.text(), "work");
         assert_eq!(state.keybind_help.scroll, 0);
     }
 
@@ -2453,19 +2600,19 @@ mod tests {
         );
 
         insert_keybind_help_query_text(&mut state, "work\nspace");
-        assert_eq!(state.keybind_help.query, "workspace");
+        assert_eq!(state.keybind_help.query.text(), "workspace");
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Backspace, KeyModifiers::empty()),
         );
-        assert_eq!(state.keybind_help.query, "workspac");
+        assert_eq!(state.keybind_help.query.text(), "workspac");
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
         );
-        assert!(state.keybind_help.query.is_empty());
+        assert!(state.keybind_help.query.text().is_empty());
     }
 
     #[test]
@@ -2473,7 +2620,10 @@ mod tests {
         let mut state = state_with_workspaces(&["test"]);
         open_keybind_help(&mut state);
         state.keybind_help.search_focused = true;
-        state.keybind_help.query = "work".into();
+        state.keybind_help.query = crate::ui::text_field::TextField::from_text(
+            "work",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
 
         handle_keybind_help_key(
             &mut state,
@@ -2481,7 +2631,7 @@ mod tests {
         );
         assert_eq!(state.mode, Mode::KeybindHelp);
         assert!(!state.keybind_help.search_focused);
-        assert!(state.keybind_help.query.is_empty());
+        assert!(state.keybind_help.query.text().is_empty());
 
         handle_keybind_help_key(
             &mut state,
@@ -2528,7 +2678,7 @@ mod tests {
                 .with_shifted_codepoint('?' as u32),
         );
 
-        assert_eq!(state.keybind_help.query, "?");
+        assert_eq!(state.keybind_help.query.text(), "?");
     }
 
     #[test]
@@ -2541,7 +2691,7 @@ mod tests {
 
         insert_navigator_search_text(&mut state, &terminal_runtimes, "beta");
 
-        assert_eq!(state.navigator.query, "beta");
+        assert_eq!(state.navigator.query.text(), "beta");
         assert_eq!(state.navigator.state_filter, None);
     }
 
@@ -2554,7 +2704,7 @@ mod tests {
 
         insert_navigator_search_text(&mut state, &terminal_runtimes, "beta");
 
-        assert!(state.navigator.query.is_empty());
+        assert!(state.navigator.query.text().is_empty());
     }
 
     #[test]
@@ -2572,7 +2722,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Navigator);
         assert!(!state.navigator.search_focused);
-        assert!(state.navigator.query.is_empty());
+        assert!(state.navigator.query.text().is_empty());
 
         handle_navigator_key(
             &mut state,
@@ -2584,7 +2734,7 @@ mod tests {
             state.navigator.state_filter,
             Some(NavigatorStateFilter::Working)
         );
-        assert!(state.navigator.query.is_empty());
+        assert!(state.navigator.query.text().is_empty());
 
         handle_navigator_key(
             &mut state,
@@ -2601,7 +2751,10 @@ mod tests {
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.mode = Mode::Navigator;
         state.navigator.search_focused = true;
-        state.navigator.query = "a".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "a",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
 
         handle_navigator_key(
             &mut state,
@@ -2611,7 +2764,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Navigator);
         assert!(!state.navigator.search_focused);
-        assert_eq!(state.navigator.query, "a");
+        assert_eq!(state.navigator.query.text(), "a");
 
         handle_navigator_key(
             &mut state,
@@ -2620,7 +2773,7 @@ mod tests {
         );
 
         assert_eq!(state.navigator.selected, 1);
-        assert_eq!(state.navigator.query, "a");
+        assert_eq!(state.navigator.query.text(), "a");
 
         handle_navigator_key(
             &mut state,
@@ -2630,7 +2783,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Navigator);
         assert!(state.navigator.search_focused);
-        assert_eq!(state.navigator.query, "a");
+        assert_eq!(state.navigator.query.text(), "a");
 
         handle_navigator_key(
             &mut state,
@@ -2638,7 +2791,7 @@ mod tests {
             KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
         );
 
-        assert_eq!(state.navigator.query, "al");
+        assert_eq!(state.navigator.query.text(), "al");
 
         handle_navigator_key(
             &mut state,
@@ -2671,17 +2824,21 @@ mod tests {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         state.mode = Mode::Navigator;
         state.navigator.search_focused = true;
-        state.navigator.query = "a".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "a",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
 
         handle_navigator_key(&mut state, &terminal_runtimes, down);
         assert_eq!(state.navigator.selected, 1);
         assert_eq!(
-            state.navigator.query, "a",
+            state.navigator.query.text(),
+            "a",
             "the chord moves the selection rather than typing into the search"
         );
         handle_navigator_key(&mut state, &terminal_runtimes, up);
         assert_eq!(state.navigator.selected, 0);
-        assert_eq!(state.navigator.query, "a");
+        assert_eq!(state.navigator.query.text(), "a");
 
         // And in the list state, where they used to work only because the
         // `j` / `k` arms carried no modifier guard.
@@ -2754,7 +2911,7 @@ mod tests {
         open_rename_active_tab(&mut state, true);
 
         assert_eq!(state.mode, Mode::RenameTab);
-        assert_eq!(state.name_input, "2");
+        assert_eq!(state.name_input.text(), "2");
         assert!(state.name_input_replace_on_type);
     }
 
@@ -2779,7 +2936,7 @@ mod tests {
     fn saving_new_tab_dialog_requests_creation_with_name() {
         let mut state = state_with_workspaces(&["test"]);
         open_new_tab_dialog(&mut state);
-        state.name_input = "logs".into();
+        state.set_name_input("logs");
         state.name_input_replace_on_type = false;
 
         handle_rename_key(
@@ -2832,7 +2989,7 @@ mod tests {
         assert!(state.workspaces[0].tabs[0].custom_name.is_none());
 
         open_new_tab_dialog(&mut state);
-        assert_eq!(state.name_input, "2");
+        assert_eq!(state.name_input.text(), "2");
     }
 
     #[test]
@@ -3935,7 +4092,7 @@ mod tests {
         );
         assert_eq!(app.state.navigator.selected, 1);
         assert!(
-            app.state.navigator.query.is_empty(),
+            app.state.navigator.query.text().is_empty(),
             "the chord moved the selection rather than typing into the search"
         );
         handle_navigator_key(

@@ -271,6 +271,23 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
     groups
 }
 
+/// Put the host cursor on a `" / "`-prefixed search row's insertion point.
+pub(super) fn set_search_caret(
+    frame: &mut Frame,
+    row: Rect,
+    field: &crate::ui::text_field::TextField,
+) {
+    if row.width == 0 {
+        return;
+    }
+    let caret_x = row
+        .x
+        .saturating_add(3)
+        .saturating_add(field.cursor_column().min(u16::MAX as usize) as u16)
+        .min(row.right().saturating_sub(1));
+    frame.set_cursor_position((caret_x, row.y));
+}
+
 fn filter_keybind_help_groups(groups: Vec<HelpGroup>, query: &str) -> Vec<HelpGroup> {
     if query.is_empty() {
         return groups;
@@ -300,7 +317,8 @@ pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)> 
         .add_modifier(Modifier::BOLD);
     let label_style = Style::default().fg(app.palette.text);
 
-    let groups = filter_keybind_help_groups(keybind_help_groups(app), &app.keybind_help.query);
+    let groups =
+        filter_keybind_help_groups(keybind_help_groups(app), app.keybind_help.query.text());
     let key_width = groups
         .iter()
         .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
@@ -380,7 +398,7 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                app.keybind_help.query.as_str(),
+                app.keybind_help.query.text(),
                 Style::default()
                     .fg(app.palette.text)
                     .add_modifier(Modifier::BOLD),
@@ -393,6 +411,12 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
         ))
     };
     frame.render_widget(Paragraph::new(search_line), header_rows[1]);
+    if app.keybind_help.search_focused {
+        // The search box has an insertion point now, so the host cursor goes
+        // where it is — an IME composes at the host cursor, and a caret the
+        // user cannot see is a caret they cannot use.
+        set_search_caret(frame, header_rows[1], &app.keybind_help.query);
+    }
 
     let body_area = stack.content;
     let metrics = crate::pane::ScrollMetrics {

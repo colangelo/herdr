@@ -654,7 +654,9 @@ impl App {
             worktree_directory,
             collapsed_space_keys,
             request_complete_onboarding: false,
-            name_input: String::new(),
+            name_input: crate::ui::text_field::TextField::new(
+                crate::app::state::NAME_INPUT_MAX_CHARS,
+            ),
             name_input_replace_on_type: false,
             release_notes: None,
             product_announcement: startup_product_announcement.map(|announcement| {
@@ -6801,12 +6803,12 @@ last_pane = "prefix+tab"
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::RenameTab;
-        app.state.name_input = "2".into();
+        app.state.set_name_input("2");
         app.state.name_input_replace_on_type = true;
 
         app.route_client_input(b"\x1b[200~feature/logs\x1b[201~".to_vec());
 
-        assert_eq!(app.state.name_input, "feature/logs");
+        assert_eq!(app.state.name_input.text(), "feature/logs");
         assert!(!app.state.name_input_replace_on_type);
     }
 
@@ -6817,7 +6819,7 @@ last_pane = "prefix+tab"
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::RenameWorkspace;
-        app.state.name_input = "new".into();
+        app.state.set_name_input("new");
 
         app.route_client_input(b"\r".to_vec());
 
@@ -6865,7 +6867,7 @@ last_pane = "prefix+tab"
     fn route_client_events_pastes_text_into_new_linked_worktree_modal() {
         let mut app = test_app();
         app.state.mode = Mode::NewLinkedWorktree;
-        app.state.name_input = "generated-branch".into();
+        app.state.set_name_input("generated-branch");
         app.state.name_input_replace_on_type = true;
         app.state.worktree_create = Some(state::WorktreeCreateState {
             source_workspace_id: "source".into(),
@@ -6887,7 +6889,7 @@ last_pane = "prefix+tab"
             true,
         );
 
-        assert_eq!(app.state.name_input, "feature/linear-302");
+        assert_eq!(app.state.name_input.text(), "feature/linear-302");
         assert_eq!(
             app.state
                 .worktree_create

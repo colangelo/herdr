@@ -60,7 +60,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
         .map(|tab| tab.panes.len())
         .sum::<usize>();
     let mut spans = vec![Span::styled(" / ", focus_style)];
-    let query = app.navigator.query.trim();
+    let query = app.navigator.query.text().trim();
     match app.navigator.state_filter {
         Some(NavigatorStateFilter::Blocked) => push_state_chip(
             &mut spans,
@@ -110,6 +110,9 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
         Style::default().fg(p.overlay0),
     ));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    if app.navigator.search_focused && app.navigator.state_filter.is_none() {
+        super::keybind_help::set_search_caret(frame, area, &app.navigator.query);
+    }
 }
 
 fn push_state_chip(
@@ -184,7 +187,7 @@ fn render_row(
         Style::default().fg(p.overlay0).bg(p.panel_bg)
     };
     let filter_active =
-        app.navigator.state_filter.is_some() || !app.navigator.query.trim().is_empty();
+        app.navigator.state_filter.is_some() || !app.navigator.query.text().trim().is_empty();
     let context_only = filter_active && !row.matched;
     let text_style = if selected {
         base_style.add_modifier(Modifier::BOLD)

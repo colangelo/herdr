@@ -418,7 +418,7 @@ impl AppState {
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) -> Vec<NavigatorRow> {
-        let query = self.navigator.query.trim().to_lowercase();
+        let query = self.navigator.query.text().trim().to_lowercase();
         let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
@@ -770,7 +770,7 @@ impl AppState {
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        let query = self.navigator.query.trim().to_lowercase();
+        let query = self.navigator.query.text().trim().to_lowercase();
         let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
         if !matches!(query_kind, NavigatorQueryKind::Empty) {
             let rows = self.navigator_rows_from(terminal_runtimes);
@@ -3975,7 +3975,10 @@ mod tests {
         state.ensure_test_terminals();
 
         state.open_navigator();
-        state.navigator.query = "foo".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "foo",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         assert!(state.navigator_rows().iter().any(|row| {
             row.matched
                 && matches!(
@@ -3987,7 +3990,10 @@ mod tests {
                 )
         }));
 
-        state.navigator.query = "baz".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "baz",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         state.select_first_navigator_match_from(&crate::terminal::TerminalRuntimeRegistry::new());
         let rows = state.navigator_rows();
         assert!(rows
@@ -4063,7 +4069,10 @@ mod tests {
         let mut runtime_registry = crate::terminal::TerminalRuntimeRegistry::new();
         runtime_registry.insert(terminal_id, runtime);
         state.open_navigator_from(&runtime_registry);
-        state.navigator.query = "herdr".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "herdr",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         let rows = state.navigator_rows_from(&runtime_registry);
 
         for (_, runtime) in runtime_registry.drain() {
@@ -4170,7 +4179,10 @@ mod tests {
             .set_detected_state(Some(Agent::Claude), AgentState::Idle);
 
         state.open_navigator();
-        state.navigator.query = "idle".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "idle",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         let rows = state.navigator_rows();
 
         assert!(rows.iter().any(|row| matches!(
@@ -4189,7 +4201,10 @@ mod tests {
         state.workspaces[0].identity_cwd = "/tmp/herdr-worktrees/issue-work".into();
 
         state.open_navigator();
-        state.navigator.query = "work".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "work",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
 
         assert!(state.navigator_rows().is_empty());
     }
@@ -4228,7 +4243,10 @@ mod tests {
         )));
 
         state.navigator.state_filter = None;
-        state.navigator.query = "w".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "w",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         let text_rows = state.navigator_rows();
 
         assert!(text_rows.iter().any(|row| matches!(
@@ -4255,7 +4273,10 @@ mod tests {
             .unwrap()
             .set_manual_label("weekly review".into());
         state.open_navigator();
-        state.navigator.query = "weekly".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "weekly",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
 
         let rows = state.navigator_rows();
 
@@ -4281,7 +4302,10 @@ mod tests {
         }
 
         state.open_navigator();
-        state.navigator.query = "one".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "one",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         let rows = state.navigator_rows();
 
         // Both panes cascade in even though only the workspace label matched,
@@ -4307,7 +4331,10 @@ mod tests {
 
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.open_navigator_from(&terminal_runtimes);
-        state.navigator.query = "ui".into();
+        state.navigator.query = crate::ui::text_field::TextField::from_text(
+            "ui",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
         state.select_first_navigator_match_from(&terminal_runtimes);
 
         let rows = state.navigator_rows_from(&terminal_runtimes);

@@ -750,7 +750,10 @@ mod tests {
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::KeybindHelp;
         app.state.keybind_help.search_focused = true;
-        app.state.keybind_help.query = "work".into();
+        app.state.keybind_help.query = crate::ui::text_field::TextField::from_text(
+            "work",
+            crate::app::state::SEARCH_QUERY_MAX_CHARS,
+        );
 
         let rect = app.state.keybind_help_popup_rect();
         let inner = Rect::new(
@@ -769,7 +772,7 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::KeybindHelp);
         assert!(!app.state.keybind_help.search_focused);
-        assert!(app.state.keybind_help.query.is_empty());
+        assert!(app.state.keybind_help.query.text().is_empty());
     }
 
     #[test]
