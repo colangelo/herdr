@@ -19,7 +19,7 @@ pub(crate) const SETTINGS_POPUP_WIDTH: u16 = 76;
 pub(crate) const SETTINGS_POPUP_BASE_HEIGHT: u16 = 22;
 
 pub(crate) fn settings_popup_height(app: &AppState) -> u16 {
-    if app.settings.section != crate::app::state::SettingsSection::Integrations {
+    if app.settings_section() != crate::app::state::SettingsSection::Integrations {
         return SETTINGS_POPUP_BASE_HEIGHT;
     }
     let list_rows = app.integration_recommendations.len().max(1) as u16;
@@ -30,6 +30,10 @@ pub(crate) fn settings_popup_height(app: &AppState) -> u16 {
 }
 
 pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
+    let Some(settings) = app.settings() else {
+        return;
+    };
+
     use crate::app::state::SettingsSection;
 
     let p = &app.palette;
@@ -80,7 +84,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
         .select(
             SettingsSection::ALL
                 .iter()
-                .position(|section| *section == app.settings.section)
+                .position(|section| *section == settings.section)
                 .unwrap_or(0),
         )
         .style(Style::default().fg(p.overlay1))
@@ -102,7 +106,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 
     let content_area = stack.content;
 
-    match app.settings.section {
+    match settings.section {
         SettingsSection::Theme => {
             render_settings_theme(app, frame, content_area);
         }
@@ -117,7 +121,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                     ("distinct symbols  × ◐ ✓ ○ ·", StatusIndicatorStyle::Symbols),
                 ],
                 app.status_indicators,
-                app.settings.list.selected,
+                settings.list.selected,
                 p,
                 1,
             );
@@ -130,7 +134,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 "sound alerts",
                 "play sounds when agents change state in background",
                 app.sound_enabled(),
-                app.settings.list.selected,
+                settings.list.selected,
             );
         }
         SettingsSection::Toast => {
@@ -146,7 +150,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                     ("via system", ToastDelivery::System),
                 ],
                 app.toast_delivery(),
-                app.settings.list.selected,
+                settings.list.selected,
                 p,
                 2,
             );
@@ -159,7 +163,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 "agent border labels",
                 "show detected agent names in split pane borders",
                 app.agent_border_labels_enabled(),
-                app.settings.list.selected,
+                settings.list.selected,
             );
         }
         SettingsSection::Integrations => {
@@ -170,10 +174,9 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
     if let Some(footer_area) = stack.footer {
         let footer_rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)])
             .areas::<2>(footer_area);
-        let primary_label = settings_primary_button_label(app.settings.section);
+        let primary_label = settings_primary_button_label(settings.section);
         let show_primary = settings_show_primary_action(app);
-        let (apply_rect, close_rect) =
-            settings_button_rects(inner, app.settings.section, show_primary);
+        let (apply_rect, close_rect) = settings_button_rects(inner, settings.section, show_primary);
         if let Some(apply_rect) = apply_rect {
             render_action_button(
                 frame,
@@ -219,7 +222,7 @@ pub(crate) fn settings_primary_button_label(
 }
 
 pub(crate) fn settings_show_primary_action(app: &AppState) -> bool {
-    match app.settings.section {
+    match app.settings_section() {
         crate::app::state::SettingsSection::Integrations => app
             .integration_recommendations
             .iter()
@@ -371,6 +374,10 @@ fn render_settings_integrations(app: &AppState, frame: &mut Frame, area: Rect) {
 }
 
 fn render_settings_theme(app: &AppState, frame: &mut Frame, area: Rect) {
+    let Some(settings) = app.settings() else {
+        return;
+    };
+
     use crate::app::state::THEME_NAMES;
 
     let p = &app.palette;
@@ -397,7 +404,7 @@ fn render_settings_theme(app: &AppState, frame: &mut Frame, area: Rect) {
         .highlight_symbol(" ▸ ")
         .style(Style::default().fg(p.subtext0));
 
-    let mut state = ListState::default().with_selected(Some(app.settings.list.selected));
+    let mut state = ListState::default().with_selected(Some(settings.list.selected));
     frame.render_stateful_widget(list, area, &mut state);
 }
 
@@ -432,9 +439,14 @@ mod tests {
     #[test]
     fn snapshot_settings() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
-            app.settings.section = crate::app::state::SettingsSection::Theme;
-            app.settings.list = crate::app::state::ListCursor::new(0);
-            app.mode = crate::app::state::Mode::Settings;
+            app.open_overlay(crate::app::state::Overlay::Settings(
+                crate::app::state::SettingsState {
+                    section: crate::app::state::SettingsSection::Theme,
+                    list: crate::app::state::ListCursor::new(0),
+                    original_palette: None,
+                    original_theme: None,
+                },
+            ));
         })
         .assert(
             Rect::new(2, 1, 76, 22),

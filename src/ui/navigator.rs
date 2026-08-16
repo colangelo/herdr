@@ -47,8 +47,12 @@ pub(super) fn render_navigator_overlay(
 }
 
 fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
+    let Some(nav) = app.navigator() else {
+        return;
+    };
+
     let p = &app.palette;
-    let focus_style = if app.navigator.search_focused {
+    let focus_style = if nav.search_focused {
         Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(p.overlay0)
@@ -60,8 +64,8 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
         .map(|tab| tab.panes.len())
         .sum::<usize>();
     let mut spans = vec![Span::styled(" / ", focus_style)];
-    let query = app.navigator.query.text().trim();
-    match app.navigator.state_filter {
+    let query = nav.query.text().trim();
+    match nav.state_filter {
         Some(NavigatorStateFilter::Blocked) => push_state_chip(
             &mut spans,
             crate::detect::AgentState::Blocked,
@@ -93,7 +97,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
         // The picker has no title bar to name it, so the placeholder and the
         // footer verb below are what say which job the overlay is doing.
         None if query.is_empty() => spans.push(Span::styled(
-            if app.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+            if nav.purpose == NavigatorPurpose::PaneTodoLink {
                 "search panes to link"
             } else {
                 "search panes"
@@ -110,8 +114,8 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
         Style::default().fg(p.overlay0),
     ));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
-    if app.navigator.search_focused && app.navigator.state_filter.is_none() {
-        super::keybind_help::set_search_caret(frame, area, &app.navigator.query);
+    if nav.search_focused && nav.state_filter.is_none() {
+        super::keybind_help::set_search_caret(frame, area, &nav.query);
     }
 }
 
@@ -152,7 +156,11 @@ fn render_rows(
     frame: &mut Frame,
     body: Rect,
 ) {
-    let start = app.navigator.scroll.min(lines.len());
+    let Some(nav) = app.navigator() else {
+        return;
+    };
+
+    let start = nav.scroll.min(lines.len());
     let end = lines.len().min(start.saturating_add(body.height as usize));
     for (visible_idx, line) in lines[start..end].iter().enumerate() {
         let NavigatorDisplayLine::Row(idx) = *line else {
@@ -160,7 +168,7 @@ fn render_rows(
         };
         let y = body.y + visible_idx as u16;
         let rect = Rect::new(body.x, y, body.width, 1);
-        let selected = idx == app.navigator.selected;
+        let selected = idx == nav.selected;
         render_row(app, frame, rect, rows, idx, selected);
     }
 }
@@ -173,6 +181,10 @@ fn render_row(
     idx: usize,
     selected: bool,
 ) {
+    let Some(nav) = app.navigator() else {
+        return;
+    };
+
     let row = &rows[idx];
     let p = &app.palette;
     frame.render_widget(Clear, rect);
@@ -186,8 +198,7 @@ fn render_row(
     } else {
         Style::default().fg(p.overlay0).bg(p.panel_bg)
     };
-    let filter_active =
-        app.navigator.state_filter.is_some() || !app.navigator.query.text().trim().is_empty();
+    let filter_active = nav.state_filter.is_some() || !nav.query.text().trim().is_empty();
     let context_only = filter_active && !row.matched;
     let text_style = if selected {
         base_style.add_modifier(Modifier::BOLD)
@@ -247,7 +258,7 @@ fn render_row(
     // The picker stages a pane by its public identifier, so a row about to be
     // staged leads with the identifier it would store. The goto purpose leaves
     // it off: there the row is a place to go, not a value to record.
-    let public_id = (app.navigator.purpose == NavigatorPurpose::PaneTodoLink)
+    let public_id = (nav.purpose == NavigatorPurpose::PaneTodoLink)
         .then(|| row.public_pane_id.clone())
         .flatten()
         .map(|id| format!("{id} "))
@@ -337,6 +348,10 @@ fn has_following_sibling_at_depth(rows: &[NavigatorRow], idx: usize, depth: u8) 
 }
 
 fn render_navigator_scrollbar(app: &AppState, line_count: usize, frame: &mut Frame, body: Rect) {
+    let Some(nav) = app.navigator() else {
+        return;
+    };
+
     if body.width <= 1 || body.height == 0 {
         return;
     }
@@ -348,7 +363,7 @@ fn render_navigator_scrollbar(app: &AppState, line_count: usize, frame: &mut Fra
         viewport_rows: viewport,
         offset_from_bottom: line_count
             .saturating_sub(viewport)
-            .saturating_sub(app.navigator.scroll),
+            .saturating_sub(nav.scroll),
         max_offset_from_bottom: line_count.saturating_sub(viewport),
     };
     if !should_show_scrollbar(metrics) {
@@ -399,8 +414,12 @@ fn render_detail(
 }
 
 fn selected_detail(app: &AppState, terminal_runtimes: &TerminalRuntimeRegistry) -> String {
+    let Some(nav) = app.navigator() else {
+        return String::new();
+    };
+
     let rows = app.navigator_rows_from(terminal_runtimes);
-    let Some(row) = rows.get(app.navigator.selected) else {
+    let Some(row) = rows.get(nav.selected) else {
         return String::new();
     };
     match row.target {
@@ -563,17 +582,21 @@ fn display_state(state: crate::detect::AgentState, seen: bool) -> &'static str {
 }
 
 fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
+    let Some(nav) = app.navigator() else {
+        return;
+    };
+
     if area.height == 0 {
         return;
     }
     let p = &app.palette;
     let key = Style::default().fg(p.accent).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
-    let line = if app.navigator.search_focused {
+    let line = if nav.search_focused {
         Line::from(vec![
             Span::styled(" enter", key),
             Span::styled(
-                if app.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+                if nav.purpose == NavigatorPurpose::PaneTodoLink {
                     " link  "
                 } else {
                     " switch  "
@@ -591,7 +614,7 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled(" enter", key),
             Span::styled(
-                if app.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+                if nav.purpose == NavigatorPurpose::PaneTodoLink {
                     " link  "
                 } else {
                     " switch  "

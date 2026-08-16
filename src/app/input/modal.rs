@@ -111,15 +111,13 @@ pub(super) fn global_menu_actions(state: &AppState) -> Vec<GlobalMenuAction> {
 }
 
 pub(super) fn open_global_menu(state: &mut AppState) {
-    state.global_menu = ListCursor::new(0);
-    state.mode = Mode::GlobalMenu;
+    state.open_overlay(crate::app::state::Overlay::GlobalMenu(ListCursor::new(0)));
 }
 
 pub(super) fn open_keybind_help(state: &mut AppState) {
-    state.keybind_help.scroll = 0;
-    state.keybind_help.query.clear();
-    state.keybind_help.search_focused = false;
-    state.mode = Mode::KeybindHelp;
+    state.open_overlay(crate::app::state::Overlay::KeybindHelp(
+        crate::app::state::KeybindHelpState::default(),
+    ));
 }
 
 fn open_update_release_notes(state: &mut AppState) {
@@ -127,13 +125,14 @@ fn open_update_release_notes(state: &mut AppState) {
         return;
     };
 
-    state.release_notes = Some(crate::app::state::ReleaseNotesState {
-        version: notes.version,
-        body: notes.body,
-        scroll: 0,
-        preview: notes.preview,
-    });
-    state.mode = Mode::ReleaseNotes;
+    state.open_overlay(crate::app::state::Overlay::ReleaseNotes(
+        crate::app::state::ReleaseNotesState {
+            version: notes.version,
+            body: notes.body,
+            scroll: 0,
+            preview: notes.preview,
+        },
+    ));
 }
 
 pub(super) fn request_detach(state: &mut AppState) {
@@ -165,13 +164,17 @@ pub(crate) fn handle_global_menu_key(state: &mut AppState, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => leave_modal(state),
         KeyCode::Enter => {
-            if let Some(action) = actions.get(state.global_menu.selected).copied() {
+            if let Some(action) = actions.get(state.global_menu_selected()).copied() {
                 apply_global_menu_action(state, action);
             }
         }
         _ => {
             if let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) {
-                chord.apply(&mut state.global_menu, actions.len(), actions.len());
+                let mut menu = state.global_menu().copied().unwrap_or_default();
+                chord.apply(&mut menu, actions.len(), actions.len());
+                if let Some(open) = state.global_menu_mut() {
+                    *open = menu;
+                }
             }
         }
     }
@@ -182,10 +185,10 @@ pub(crate) fn handle_navigator_key(
     terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     key: KeyEvent,
 ) {
-    if state.navigator.search_focused {
+    if state.navigator_search_focused() {
         match key.code {
             KeyCode::Esc => {
-                state.navigator.search_focused = false;
+                state.set_navigator_search_focused(false);
             }
             KeyCode::Enter => {
                 state.accept_navigator_selection_from(terminal_runtimes);
@@ -198,18 +201,17 @@ pub(crate) fn handle_navigator_key(
             }
             // Everything else is the shared editing set on the search box.
             _ => {
-                let mut query = std::mem::replace(
-                    &mut state.navigator.query,
-                    crate::app::state::search_query_field(),
-                );
-                let edited = super::text_keys::apply_text_key(
-                    &mut query,
-                    key,
-                    super::text_keys::Shape::SingleLine,
-                );
-                state.navigator.query = query;
+                let edited = state
+                    .edit_navigator_query(|query| {
+                        super::text_keys::apply_text_key(
+                            query,
+                            key,
+                            super::text_keys::Shape::SingleLine,
+                        )
+                    })
+                    .unwrap_or(false);
                 if edited {
-                    state.navigator.state_filter = None;
+                    state.set_navigator_state_filter(None);
                     state.select_first_navigator_match_from(terminal_runtimes);
                 }
             }
@@ -221,7 +223,7 @@ pub(crate) fn handle_navigator_key(
         KeyCode::Esc => {
             // Dismissing a link selection goes back to the modal that opened
             // it, leaving the staged link exactly as it was.
-            if state.navigator.purpose == crate::app::state::NavigatorPurpose::PaneTodoLink {
+            if state.navigator_purpose() == crate::app::state::NavigatorPurpose::PaneTodoLink {
                 state.close_pane_todo_link_picker();
             } else {
                 leave_modal(state);
@@ -231,37 +233,37 @@ pub(crate) fn handle_navigator_key(
             state.accept_navigator_selection_from(terminal_runtimes);
         }
         KeyCode::Char('/') => {
-            state.navigator.state_filter = None;
-            state.navigator.search_focused = true;
+            state.set_navigator_state_filter(None);
+            state.set_navigator_search_focused(true);
             state.clamp_navigator_selection_from(terminal_runtimes);
         }
-        KeyCode::Backspace if state.navigator.state_filter.is_some() => {
-            state.navigator.state_filter = None;
+        KeyCode::Backspace if state.navigator_state_filter().is_some() => {
+            state.set_navigator_state_filter(None);
             state.clamp_navigator_selection_from(terminal_runtimes);
         }
         KeyCode::Char('a') if key.modifiers.is_empty() => {
-            state.navigator.query.clear();
-            state.navigator.state_filter = None;
+            state.clear_navigator_query();
+            state.set_navigator_state_filter(None);
             state.clamp_navigator_selection_from(terminal_runtimes);
         }
         KeyCode::Char('b') if key.modifiers.is_empty() => {
-            state.navigator.query.clear();
-            state.navigator.state_filter = Some(NavigatorStateFilter::Blocked);
+            state.clear_navigator_query();
+            state.set_navigator_state_filter(Some(NavigatorStateFilter::Blocked));
             state.select_first_navigator_match_from(terminal_runtimes);
         }
         KeyCode::Char('w') if key.modifiers.is_empty() => {
-            state.navigator.query.clear();
-            state.navigator.state_filter = Some(NavigatorStateFilter::Working);
+            state.clear_navigator_query();
+            state.set_navigator_state_filter(Some(NavigatorStateFilter::Working));
             state.select_first_navigator_match_from(terminal_runtimes);
         }
         KeyCode::Char('i') if key.modifiers.is_empty() => {
-            state.navigator.query.clear();
-            state.navigator.state_filter = Some(NavigatorStateFilter::Idle);
+            state.clear_navigator_query();
+            state.set_navigator_state_filter(Some(NavigatorStateFilter::Idle));
             state.select_first_navigator_match_from(terminal_runtimes);
         }
         KeyCode::Char('d') if key.modifiers.is_empty() => {
-            state.navigator.query.clear();
-            state.navigator.state_filter = Some(NavigatorStateFilter::Done);
+            state.clear_navigator_query();
+            state.set_navigator_state_filter(Some(NavigatorStateFilter::Done));
             state.select_first_navigator_match_from(terminal_runtimes);
         }
         KeyCode::Char(' ') => state.toggle_selected_navigator_workspace_from(terminal_runtimes),
@@ -274,10 +276,11 @@ fn navigator_select_last(
     state: &mut AppState,
     terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
 ) {
-    state.navigator.selected = state
+    let last = state
         .navigator_rows_from(terminal_runtimes)
         .len()
         .saturating_sub(1);
+    state.set_navigator_selected(last);
     state.ensure_navigator_selection_visible_from(terminal_runtimes);
 }
 
@@ -304,7 +307,7 @@ fn navigator_list_chord(
             state.move_navigator_selection_by_lines_from(terminal_runtimes, half)
         }
         ListChord::First => {
-            state.navigator.selected = 0;
+            state.set_navigator_selected(0);
             state.ensure_navigator_selection_visible_from(terminal_runtimes);
         }
         ListChord::Last => navigator_select_last(state, terminal_runtimes),
@@ -316,35 +319,35 @@ pub(crate) fn insert_navigator_search_text(
     terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     text: &str,
 ) {
-    if !state.navigator.search_focused {
+    if !state.navigator_search_focused() {
         return;
     }
-    state.navigator.state_filter = None;
-    state.navigator.query.insert_str(text);
+    state.set_navigator_state_filter(None);
+    state.edit_navigator_query(|query| query.insert_str(text));
     state.select_first_navigator_match_from(terminal_runtimes);
 }
 
 pub(crate) fn insert_keybind_help_query_text(state: &mut AppState, text: &str) {
-    if !state.keybind_help.search_focused {
+    if !state.keybind_help_search_focused() {
         return;
     }
     let text: String = text.chars().filter(|ch| !ch.is_control()).collect();
-    state.keybind_help.query.insert_str(&text);
-    state.keybind_help.scroll = 0;
+    state.edit_keybind_help_query(|query| query.insert_str(&text));
+    state.set_keybind_help_scroll(0);
 }
 
 pub(super) fn keybind_help_back(state: &mut AppState) {
-    if state.keybind_help.search_focused {
-        state.keybind_help.query.clear();
-        state.keybind_help.search_focused = false;
-        state.keybind_help.scroll = 0;
+    if state.keybind_help_search_focused() {
+        state.clear_keybind_help_query();
+        state.set_keybind_help_search_focused(false);
+        state.set_keybind_help_scroll(0);
     } else {
         leave_modal(state);
     }
 }
 
 pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
-    if state.keybind_help.search_focused {
+    if state.keybind_help_search_focused() {
         let text_char = keybind_help_text_char(key.clone());
         match key.code {
             KeyCode::PageUp => state.scroll_keybind_help(-8),
@@ -355,22 +358,21 @@ pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
             // The shared editing set, fed the character the terminal actually
             // reported so a shifted or IME-composed key still types.
             _ => {
-                let mut query = std::mem::replace(
-                    &mut state.keybind_help.query,
-                    crate::app::state::search_query_field(),
-                );
                 let typed = text_char
                     .filter(|_| matches!(key.code, KeyCode::Char(_)))
                     .map(|character| KeyEvent::new(KeyCode::Char(character), KeyModifiers::empty()))
                     .unwrap_or_else(|| KeyEvent::new(key.code, key.modifiers));
-                let edited = super::text_keys::apply_text_key(
-                    &mut query,
-                    typed,
-                    super::text_keys::Shape::SingleLine,
-                );
-                state.keybind_help.query = query;
+                let edited = state
+                    .edit_keybind_help_query(|query| {
+                        super::text_keys::apply_text_key(
+                            query,
+                            typed,
+                            super::text_keys::Shape::SingleLine,
+                        )
+                    })
+                    .unwrap_or(false);
                 if edited {
-                    state.keybind_help.scroll = 0;
+                    state.set_keybind_help_scroll(0);
                 }
             }
         }
@@ -381,8 +383,8 @@ pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
         KeyCode::PageUp => state.scroll_keybind_help(-8),
         KeyCode::PageDown => state.scroll_keybind_help(8),
         _ if keybind_help_text_char(key.clone()) == Some('/') => {
-            state.keybind_help.search_focused = true;
-            state.keybind_help.scroll = 0;
+            state.set_keybind_help_search_focused(true);
+            state.set_keybind_help_scroll(0);
         }
         KeyCode::Esc => keybind_help_back(state),
         KeyCode::Enter => leave_modal(state),
@@ -410,8 +412,11 @@ fn keybind_help_list_chord(
         ListChord::Next => state.scroll_keybind_help(1),
         ListChord::HalfPageUp => state.scroll_keybind_help(-8),
         ListChord::HalfPageDown => state.scroll_keybind_help(8),
-        ListChord::First => state.keybind_help.scroll = 0,
-        ListChord::Last => state.keybind_help.scroll = state.keybind_help_max_scroll(),
+        ListChord::First => state.set_keybind_help_scroll(0),
+        ListChord::Last => {
+            let max = state.keybind_help_max_scroll();
+            state.set_keybind_help_scroll(max);
+        }
     }
     true
 }
@@ -682,7 +687,7 @@ pub(crate) fn insert_rename_input_text(state: &mut AppState, text: &str) {
 /// set. Enter is a newline here rather than a commit: a field that accepts
 /// newlines cannot also have Enter mean "done", so save moved to `ctrl+s`.
 fn handle_pane_todo_edit_text_key(state: &mut AppState, key: KeyEvent) {
-    let Some(edit) = state.pane_todo_edit.as_mut() else {
+    let Some(edit) = state.pane_todo_edit_mut() else {
         return;
     };
     super::text_keys::apply_text_key(&mut edit.text, key, super::text_keys::Shape::Multiline);
@@ -1035,11 +1040,11 @@ pub(crate) fn handle_context_menu_key(
 ) {
     match key.code {
         KeyCode::Esc => {
-            state.context_menu = None;
+            state.close_overlay(crate::app::state::OverlayKind::ContextMenu);
             leave_modal(state);
         }
         KeyCode::Enter => {
-            if let Some(menu) = state.context_menu.take() {
+            if let Some(menu) = state.take_context_menu() {
                 let idx = menu.list.selected;
                 apply_context_menu_action(state, terminal_runtimes, menu, idx);
             }
@@ -1054,7 +1059,7 @@ fn context_menu_list_chord(state: &mut AppState, key: KeyEvent) {
     let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
         return;
     };
-    if let Some(menu) = &mut state.context_menu {
+    if let Some(menu) = state.context_menu_mut() {
         let len = menu.items().len();
         chord.apply(&mut menu.list, len, len);
     }
@@ -1069,8 +1074,7 @@ fn notification_center_list_chord(state: &mut AppState, key: KeyEvent) {
     let len = state.notification_log.len();
     let visible = state.notification_center_visible_rows();
     let selected = state
-        .notification_center
-        .as_ref()
+        .notification_center()
         .map(|center| center.list.selected)
         .unwrap_or(0);
     state.notification_center_move_selection(chord.delta(selected, visible, len));
@@ -1123,15 +1127,13 @@ impl App {
                 if let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) {
                     let len = self
                         .state
-                        .pane_todos
-                        .as_ref()
+                        .pane_todos()
                         .map(|panel| self.state.pane_todos_in_display_order(panel.pane_id).len())
                         .unwrap_or(0);
                     let visible = self.state.pane_todo_panel_visible_rows();
                     let selected = self
                         .state
-                        .pane_todos
-                        .as_ref()
+                        .pane_todos()
                         .map(|panel| panel.list.selected)
                         .unwrap_or(0);
                     self.state
@@ -1145,7 +1147,7 @@ impl App {
     /// through the `todo.*` API, so the panel, the CLI, and subscribers all
     /// move the same state and `todo.changed` is emitted for free.
     pub(super) fn apply_pane_todo_action(&mut self, action: PaneTodoAction) {
-        let Some(pane_id) = self.state.pane_todos.as_ref().map(|panel| panel.pane_id) else {
+        let Some(pane_id) = self.state.pane_todos().map(|panel| panel.pane_id) else {
             return;
         };
         let Some(ws_idx) = self.state.active else {
@@ -1272,17 +1274,18 @@ impl App {
     /// Leave the modal back to the panel it was opened from, or to the
     /// terminal when it was opened straight from a keybinding.
     pub(super) fn close_pane_todo_edit_and_return(&mut self) {
+        // The panel comes back with the overlay it was suspended onto; with no
+        // panel to return to, the modal was opened from a keybinding and the
+        // way back is wherever the modal was entered from.
         self.state.close_pane_todo_edit();
-        if self.state.pane_todos.is_some() {
-            self.state.mode = Mode::PaneTodos;
-        } else {
+        if self.state.pane_todos().is_none() {
             leave_modal(&mut self.state);
         }
     }
 
     fn save_pane_todo_edit_via_api(&mut self) {
         let Some((pane_id, todo_id, text, priority, link, done)) =
-            self.state.pane_todo_edit.as_ref().map(|edit| {
+            self.state.pane_todo_edit().map(|edit| {
                 (
                     edit.pane_id,
                     edit.todo_id,
@@ -1362,7 +1365,7 @@ impl App {
         self.save_pane_todo_edit_via_api();
         // A save the store refused leaves the modal open with the reason on
         // screen; travelling anyway would carry you away from it.
-        if self.state.pane_todo_edit.is_some() {
+        if self.state.pane_todo_edit().is_some() {
             return;
         }
         self.state.close_pane_todos();
@@ -1592,11 +1595,12 @@ impl App {
     pub(crate) fn handle_context_menu_key_via_api(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                self.state.context_menu = None;
+                self.state
+                    .close_overlay(crate::app::state::OverlayKind::ContextMenu);
                 leave_modal(&mut self.state);
             }
             KeyCode::Enter => {
-                if let Some(menu) = self.state.context_menu.take() {
+                if let Some(menu) = self.state.take_context_menu() {
                     let idx = menu.list.selected;
                     self.apply_context_menu_action_via_api(menu, idx);
                 }
@@ -1882,8 +1886,7 @@ mod tests {
 
     #[test]
     fn the_notification_center_moves_on_every_shared_chord() {
-        let selected =
-            |state: &AppState| state.notification_center.as_ref().map(|c| c.list.selected);
+        let selected = |state: &AppState| state.notification_center().map(|c| c.list.selected);
         for (code, modifiers) in MOVE_DOWN_CHORDS {
             let mut state = notification_state();
             handle_notification_center_key(&mut state, KeyEvent::new(code, modifiers));
@@ -1926,7 +1929,7 @@ mod tests {
             open_global_menu(&mut state);
             handle_global_menu_key(&mut state, KeyEvent::new(code, modifiers));
             assert!(
-                state.global_menu.selected > 0,
+                state.global_menu_selected() > 0,
                 "{code:?}+{modifiers:?} should move down"
             );
         }
@@ -1937,11 +1940,11 @@ mod tests {
                 &mut state,
                 KeyEvent::new(KeyCode::End, KeyModifiers::empty()),
             );
-            let bottom = state.global_menu.selected;
+            let bottom = state.global_menu_selected();
             assert!(bottom > 0, "the menu should have more than one action");
             handle_global_menu_key(&mut state, KeyEvent::new(code, modifiers));
             assert!(
-                state.global_menu.selected < bottom,
+                state.global_menu_selected() < bottom,
                 "{code:?}+{modifiers:?} should move up"
             );
         }
@@ -1955,7 +1958,7 @@ mod tests {
             open_keybind_help(&mut state);
             handle_keybind_help_key(&mut state, TerminalKey::new(code, modifiers));
             assert!(
-                state.keybind_help.scroll > 0,
+                state.keybind_help_scroll() > 0,
                 "{code:?}+{modifiers:?} should scroll down"
             );
         }
@@ -1967,11 +1970,11 @@ mod tests {
                 &mut state,
                 TerminalKey::new(KeyCode::End, KeyModifiers::empty()),
             );
-            let bottom = state.keybind_help.scroll;
+            let bottom = state.keybind_help_scroll();
             assert!(bottom > 0, "the help panel should be longer than the frame");
             handle_keybind_help_key(&mut state, TerminalKey::new(code, modifiers));
             assert!(
-                state.keybind_help.scroll < bottom,
+                state.keybind_help_scroll() < bottom,
                 "{code:?}+{modifiers:?} should scroll up"
             );
         }
@@ -1984,20 +1987,20 @@ mod tests {
         let mut state = state_with_workspaces(&["one"]);
         state.view.terminal_area = Rect::new(0, 0, 100, 30);
         open_keybind_help(&mut state);
-        state.keybind_help.search_focused = true;
+        state.set_keybind_help_search_focused(true);
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
         );
-        assert_eq!(state.keybind_help.scroll, 1);
-        assert!(state.keybind_help.query.text().is_empty());
+        assert_eq!(state.keybind_help_scroll(), 1);
+        assert!(state.keybind_help_query().is_empty());
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty()),
         );
-        assert_eq!(state.keybind_help.query.text(), "j");
+        assert_eq!(state.keybind_help_query(), "j");
     }
 
     /// Every converted input reaches the same motions and kills, over the same
@@ -2040,8 +2043,7 @@ mod tests {
         }
         state.open_notification_center();
 
-        let selected =
-            |state: &AppState| state.notification_center.as_ref().map(|c| c.list.selected);
+        let selected = |state: &AppState| state.notification_center().map(|c| c.list.selected);
         handle_notification_center_key(&mut state, key(KeyCode::Char('j')));
         assert_eq!(selected(&state), Some(1));
         handle_notification_center_key(&mut state, key(KeyCode::Down));
@@ -2080,7 +2082,7 @@ mod tests {
             "panel stays open after clear"
         );
         assert_eq!(
-            state.notification_center.as_ref().map(|c| c.list.selected),
+            state.notification_center().map(|c| c.list.selected),
             Some(0),
             "selection resets after clear"
         );
@@ -2106,7 +2108,7 @@ mod tests {
         assert_eq!(state.active, Some(1), "target workspace focused");
         assert_eq!(state.workspaces[1].focused_pane_id(), Some(target_pane));
         assert_eq!(state.mode, Mode::Terminal);
-        assert!(state.notification_center.is_none(), "panel closed");
+        assert!(state.notification_center().is_none(), "panel closed");
         assert_eq!(
             state.notification_log.unread_count(),
             0,
@@ -2178,7 +2180,7 @@ mod tests {
         handle_notification_center_key(&mut state, key(KeyCode::Enter));
 
         assert_eq!(state.mode, Mode::NotificationCenter, "panel stays open");
-        assert!(state.notification_center.is_some());
+        assert!(state.notification_center().is_some());
         assert_eq!(state.active, Some(0));
         assert_eq!(
             state.notification_log.unread_count(),
@@ -2205,7 +2207,7 @@ mod tests {
 
             handle_notification_center_key(&mut state, key(close_key));
 
-            assert!(state.notification_center.is_none());
+            assert!(state.notification_center().is_none());
             assert_eq!(state.mode, Mode::Terminal);
             assert_eq!(state.active, Some(0), "no jump on close");
         }
@@ -2345,10 +2347,7 @@ mod tests {
 
         assert_eq!(state.mode, Mode::ReleaseNotes);
         assert_eq!(
-            state
-                .release_notes
-                .as_ref()
-                .map(|notes| notes.body.as_str()),
+            state.release_notes().map(|notes| notes.body.as_str()),
             Some("### Changed\n- Menu")
         );
 
@@ -2545,11 +2544,8 @@ mod tests {
     #[test]
     fn keybind_help_slash_focuses_filter_and_preserves_vim_scroll() {
         let mut state = state_with_workspaces(&["test"]);
-        state.keybind_help.query = crate::ui::text_field::TextField::from_text(
-            "stale",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
-        state.keybind_help.search_focused = true;
+        state.set_keybind_help_query("stale");
+        state.set_keybind_help_search_focused(true);
         state.view.terminal_area = Rect::new(0, 0, 100, 30);
 
         open_keybind_help(&mut state);
@@ -2557,34 +2553,34 @@ mod tests {
             &mut state,
             TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty()),
         );
-        assert_eq!(state.keybind_help.scroll, 1);
+        assert_eq!(state.keybind_help_scroll(), 1);
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('k'), KeyModifiers::empty()),
         );
-        assert_eq!(state.keybind_help.scroll, 0);
+        assert_eq!(state.keybind_help_scroll(), 0);
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('w'), KeyModifiers::empty()),
         );
-        assert!(state.keybind_help.query.text().is_empty());
+        assert!(state.keybind_help_query().is_empty());
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('/'), KeyModifiers::empty()),
         );
         for character in "work".chars() {
-            state.keybind_help.scroll = 2;
+            state.set_keybind_help_scroll(2);
             handle_keybind_help_key(
                 &mut state,
                 TerminalKey::new(KeyCode::Char(character), KeyModifiers::empty()),
             );
         }
 
-        assert!(state.keybind_help.search_focused);
-        assert_eq!(state.keybind_help.query.text(), "work");
-        assert_eq!(state.keybind_help.scroll, 0);
+        assert!(state.keybind_help_search_focused());
+        assert_eq!(state.keybind_help_query(), "work");
+        assert_eq!(state.keybind_help_scroll(), 0);
     }
 
     #[test]
@@ -2597,38 +2593,35 @@ mod tests {
         );
 
         insert_keybind_help_query_text(&mut state, "work\nspace");
-        assert_eq!(state.keybind_help.query.text(), "workspace");
+        assert_eq!(state.keybind_help_query(), "workspace");
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Backspace, KeyModifiers::empty()),
         );
-        assert_eq!(state.keybind_help.query.text(), "workspac");
+        assert_eq!(state.keybind_help_query(), "workspac");
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
         );
-        assert!(state.keybind_help.query.text().is_empty());
+        assert!(state.keybind_help_query().is_empty());
     }
 
     #[test]
     fn keybind_help_escape_leaves_search_before_closing() {
         let mut state = state_with_workspaces(&["test"]);
         open_keybind_help(&mut state);
-        state.keybind_help.search_focused = true;
-        state.keybind_help.query = crate::ui::text_field::TextField::from_text(
-            "work",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_keybind_help_search_focused(true);
+        state.set_keybind_help_query("work");
 
         handle_keybind_help_key(
             &mut state,
             TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()),
         );
         assert_eq!(state.mode, Mode::KeybindHelp);
-        assert!(!state.keybind_help.search_focused);
-        assert!(state.keybind_help.query.text().is_empty());
+        assert!(!state.keybind_help_search_focused());
+        assert!(state.keybind_help_query().is_empty());
 
         handle_keybind_help_key(
             &mut state,
@@ -2648,7 +2641,7 @@ mod tests {
                 .with_shifted_codepoint('/' as u32),
         );
 
-        assert!(state.keybind_help.search_focused);
+        assert!(state.keybind_help_search_focused());
     }
 
     #[test]
@@ -2675,41 +2668,47 @@ mod tests {
                 .with_shifted_codepoint('?' as u32),
         );
 
-        assert_eq!(state.keybind_help.query.text(), "?");
+        assert_eq!(state.keybind_help_query(), "?");
     }
 
     #[test]
     fn navigator_search_accepts_pasted_text_when_focused() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
-        state.navigator.search_focused = true;
-        state.navigator.state_filter = Some(NavigatorStateFilter::Working);
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
+        state.set_navigator_search_focused(true);
+        state.set_navigator_state_filter(Some(NavigatorStateFilter::Working));
 
         insert_navigator_search_text(&mut state, &terminal_runtimes, "beta");
 
-        assert_eq!(state.navigator.query.text(), "beta");
-        assert_eq!(state.navigator.state_filter, None);
+        assert_eq!(state.navigator_query(), "beta");
+        assert_eq!(state.navigator_state_filter(), None);
     }
 
     #[test]
     fn navigator_search_ignores_paste_when_search_is_not_focused() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
-        state.navigator.search_focused = false;
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
+        state.set_navigator_search_focused(false);
 
         insert_navigator_search_text(&mut state, &terminal_runtimes, "beta");
 
-        assert!(state.navigator.query.text().is_empty());
+        assert!(state.navigator_query().is_empty());
     }
 
     #[test]
     fn navigator_empty_search_escape_returns_to_commands() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
-        state.navigator.search_focused = true;
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
+        state.set_navigator_search_focused(true);
 
         handle_navigator_key(
             &mut state,
@@ -2718,8 +2717,8 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Navigator);
-        assert!(!state.navigator.search_focused);
-        assert!(state.navigator.query.text().is_empty());
+        assert!(!state.navigator_search_focused());
+        assert!(state.navigator_query().is_empty());
 
         handle_navigator_key(
             &mut state,
@@ -2728,10 +2727,10 @@ mod tests {
         );
 
         assert_eq!(
-            state.navigator.state_filter,
+            state.navigator_state_filter(),
             Some(NavigatorStateFilter::Working)
         );
-        assert!(state.navigator.query.text().is_empty());
+        assert!(state.navigator_query().is_empty());
 
         handle_navigator_key(
             &mut state,
@@ -2746,12 +2745,11 @@ mod tests {
     fn navigator_search_escape_blurs_then_next_escape_closes() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
-        state.navigator.search_focused = true;
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "a",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
+        state.set_navigator_search_focused(true);
+        state.set_navigator_query("a");
 
         handle_navigator_key(
             &mut state,
@@ -2760,8 +2758,8 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Navigator);
-        assert!(!state.navigator.search_focused);
-        assert_eq!(state.navigator.query.text(), "a");
+        assert!(!state.navigator_search_focused());
+        assert_eq!(state.navigator_query(), "a");
 
         handle_navigator_key(
             &mut state,
@@ -2769,8 +2767,8 @@ mod tests {
             KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
         );
 
-        assert_eq!(state.navigator.selected, 1);
-        assert_eq!(state.navigator.query.text(), "a");
+        assert_eq!(state.navigator_selected(), 1);
+        assert_eq!(state.navigator_query(), "a");
 
         handle_navigator_key(
             &mut state,
@@ -2779,8 +2777,8 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Navigator);
-        assert!(state.navigator.search_focused);
-        assert_eq!(state.navigator.query.text(), "a");
+        assert!(state.navigator_search_focused());
+        assert_eq!(state.navigator_query(), "a");
 
         handle_navigator_key(
             &mut state,
@@ -2788,7 +2786,7 @@ mod tests {
             KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
         );
 
-        assert_eq!(state.navigator.query.text(), "al");
+        assert_eq!(state.navigator_query(), "al");
 
         handle_navigator_key(
             &mut state,
@@ -2797,7 +2795,7 @@ mod tests {
         );
 
         assert_eq!(state.mode, Mode::Navigator);
-        assert!(!state.navigator.search_focused);
+        assert!(!state.navigator_search_focused());
 
         handle_navigator_key(
             &mut state,
@@ -2819,43 +2817,44 @@ mod tests {
         let up = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
 
         let mut state = state_with_workspaces(&["alpha", "beta"]);
-        state.mode = Mode::Navigator;
-        state.navigator.search_focused = true;
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "a",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
+        state.set_navigator_search_focused(true);
+        state.set_navigator_query("a");
 
         handle_navigator_key(&mut state, &terminal_runtimes, down);
-        assert_eq!(state.navigator.selected, 1);
+        assert_eq!(state.navigator_selected(), 1);
         assert_eq!(
-            state.navigator.query.text(),
+            state.navigator_query(),
             "a",
             "the chord moves the selection rather than typing into the search"
         );
         handle_navigator_key(&mut state, &terminal_runtimes, up);
-        assert_eq!(state.navigator.selected, 0);
-        assert_eq!(state.navigator.query.text(), "a");
+        assert_eq!(state.navigator_selected(), 0);
+        assert_eq!(state.navigator_query(), "a");
 
         // And in the list state, where they used to work only because the
         // `j` / `k` arms carried no modifier guard.
-        state.navigator.search_focused = false;
+        state.set_navigator_search_focused(false);
         handle_navigator_key(&mut state, &terminal_runtimes, down);
-        assert_eq!(state.navigator.selected, 1);
+        assert_eq!(state.navigator_selected(), 1);
         handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
         );
-        assert_eq!(state.navigator.selected, 0, "plain j/k still move too");
+        assert_eq!(state.navigator_selected(), 0, "plain j/k still move too");
     }
 
     #[test]
     fn navigator_ignores_unbound_modified_j_k_and_arrows() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
-        state.mode = Mode::Navigator;
-        state.navigator.selected = 1;
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
+        state.set_navigator_selected(1);
 
         // Upstream ignores every modified j/k here so a stray chord cannot move
         // the selection. The fork binds `ctrl+j` / `ctrl+k` on purpose (see
@@ -2874,7 +2873,8 @@ mod tests {
                     KeyEvent::new(code, modifiers),
                 );
                 assert_eq!(
-                    state.navigator.selected, 1,
+                    state.navigator_selected(),
+                    1,
                     "{modifiers:?} + {code:?} should not move the navigator"
                 );
             }
@@ -2892,7 +2892,8 @@ mod tests {
                     KeyEvent::new(code, modifiers),
                 );
                 assert_eq!(
-                    state.navigator.selected, 1,
+                    state.navigator_selected(),
+                    1,
                     "{modifiers:?} + {code:?} should not move the navigator"
                 );
             }
@@ -3235,14 +3236,15 @@ mod tests {
             .position(|item| *item == "Close pane")
             .expect("close pane item");
         menu.list.selected = close_idx;
-        app.state.context_menu = Some(menu);
+        app.state
+            .set_overlay(crate::app::state::Overlay::ContextMenu(menu));
 
         app.handle_context_menu_key_via_api(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
         assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.mode, Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
     }
 
     /// App with one workspace, one pane, and todos on it. Builds on the
@@ -3283,8 +3285,7 @@ mod tests {
     fn panel_todo_texts(app: &App) -> Vec<String> {
         let pane_id = app
             .state
-            .pane_todos
-            .as_ref()
+            .pane_todos()
             .expect("panel should be open")
             .pane_id;
         app.state
@@ -3302,20 +3303,11 @@ mod tests {
         ]);
 
         app.handle_pane_todos_key_via_api(key(KeyCode::Down));
-        assert_eq!(
-            app.state.pane_todos.as_ref().expect("panel").list.selected,
-            1
-        );
+        assert_eq!(app.state.pane_todos().expect("panel").list.selected, 1);
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('k')));
-        assert_eq!(
-            app.state.pane_todos.as_ref().expect("panel").list.selected,
-            0
-        );
+        assert_eq!(app.state.pane_todos().expect("panel").list.selected, 0);
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('j')));
-        assert_eq!(
-            app.state.pane_todos.as_ref().expect("panel").list.selected,
-            1
-        );
+        assert_eq!(app.state.pane_todos().expect("panel").list.selected, 1);
     }
 
     #[test]
@@ -3370,7 +3362,7 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('d')));
         assert!(panel_todo_texts(&app).is_empty());
         assert_eq!(
-            app.state.pane_todos.as_ref().expect("panel").list.selected,
+            app.state.pane_todos().expect("panel").list.selected,
             0,
             "the selection re-clamps once the list shrinks"
         );
@@ -3425,7 +3417,10 @@ mod tests {
             Some(sibling),
             "following the link focuses the linked pane"
         );
-        assert!(app.state.pane_todos.is_none(), "the panel closes on a jump");
+        assert!(
+            app.state.pane_todos().is_none(),
+            "the panel closes on a jump"
+        );
         assert_eq!(app.state.mode, Mode::Terminal);
     }
 
@@ -3458,7 +3453,7 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('g')));
 
         assert!(
-            app.state.pane_todos.is_some(),
+            app.state.pane_todos().is_some(),
             "a dead link changes nothing at all"
         );
         assert_eq!(app.state.mode, Mode::PaneTodos);
@@ -3473,7 +3468,7 @@ mod tests {
                 crate::terminal::todo::TodoPriority::Normal,
             )]);
             app.handle_pane_todos_key_via_api(key(code));
-            assert!(app.state.pane_todos.is_none());
+            assert!(app.state.pane_todos().is_none());
             assert_ne!(app.state.mode, Mode::PaneTodos);
         }
     }
@@ -3501,8 +3496,7 @@ mod tests {
     /// The edit buffer's text, for the tests that only care about the string.
     fn edit_text(app: &App) -> String {
         app.state
-            .pane_todo_edit
-            .as_ref()
+            .pane_todo_edit()
             .expect("edit state")
             .text
             .text()
@@ -3549,7 +3543,7 @@ mod tests {
 
         assert_eq!(edit_text(&app), "bc", "ctrl+d took the character ahead");
         assert!(
-            !app.state.pane_todo_edit.as_ref().expect("edit state").done,
+            !app.state.pane_todo_edit().expect("edit state").done,
             "and left the done state alone"
         );
     }
@@ -3682,12 +3676,7 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
         assert_eq!(app.state.mode, Mode::PaneTodoEdit);
         assert_eq!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .text
-                .text(),
+            app.state.pane_todo_edit().expect("edit state").text.text(),
             "draft",
             "the modal opens prefilled"
         );
@@ -3709,7 +3698,7 @@ mod tests {
             "created_at is preserved"
         );
         assert!(after.updated_at_unix >= before.updated_at_unix);
-        assert!(app.state.pane_todo_edit.is_none());
+        assert!(app.state.pane_todo_edit().is_none());
         assert_eq!(
             app.state.mode,
             Mode::PaneTodos,
@@ -3728,11 +3717,7 @@ mod tests {
 
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Tab));
         assert_eq!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .priority,
+            app.state.pane_todo_edit().expect("edit state").priority,
             crate::terminal::todo::TodoPriority::High
         );
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('!')));
@@ -3756,12 +3741,12 @@ mod tests {
         )]);
         app.handle_pane_todos_key_via_api(key(KeyCode::Enter));
         assert!(
-            !app.state.pane_todo_edit.as_ref().expect("edit state").done,
+            !app.state.pane_todo_edit().expect("edit state").done,
             "the modal opens carrying the todo's current done state"
         );
 
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('t')).with_control());
-        assert!(app.state.pane_todo_edit.as_ref().expect("edit state").done);
+        assert!(app.state.pane_todo_edit().expect("edit state").done);
         app.handle_pane_todo_edit_key_via_api(save_key());
 
         let todo = app
@@ -3817,8 +3802,7 @@ mod tests {
         )]);
         let pane_id = app
             .state
-            .pane_todos
-            .as_ref()
+            .pane_todos()
             .expect("panel should be open")
             .pane_id;
         app.state.open_new_pane_todo(pane_id);
@@ -3826,7 +3810,7 @@ mod tests {
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('t')).with_control());
 
         assert!(
-            !app.state.pane_todo_edit.as_ref().expect("edit state").done,
+            !app.state.pane_todo_edit().expect("edit state").done,
             "composing a new todo cannot mark it done"
         );
     }
@@ -3871,11 +3855,7 @@ mod tests {
             "the action opens the modal itself, without going through the panel"
         );
         assert_eq!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .pane_id,
+            app.state.pane_todo_edit().expect("edit state").pane_id,
             pane_id
         );
 
@@ -3888,7 +3868,7 @@ mod tests {
         assert_eq!(todos.len(), 1);
         assert_eq!(todos[0].text, "write it down");
         assert!(
-            app.state.pane_todos.is_none(),
+            app.state.pane_todos().is_none(),
             "opened without a panel, it returns to the terminal rather than opening one"
         );
     }
@@ -3918,12 +3898,7 @@ mod tests {
             "the pane is at the todo cap, so the save is refused and the modal stays open"
         );
         assert_eq!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .text
-                .text(),
+            app.state.pane_todo_edit().expect("edit state").text.text(),
             "one too many",
             "a refused save must not eat what was typed"
         );
@@ -3979,7 +3954,7 @@ mod tests {
             KeyCode::Char('l'),
             KeyModifiers::CONTROL,
         ));
-        app.state.navigator.selected = app
+        app.state.set_navigator_selected(app
             .state
             .navigator_rows_from(&app.terminal_runtimes)
             .iter()
@@ -3989,7 +3964,7 @@ mod tests {
                     crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == target
                 )
             })
-            .expect("the target pane should be offered");
+            .expect("the target pane should be offered"));
         app.state
             .accept_navigator_selection_from(&app.terminal_runtimes);
     }
@@ -4000,12 +3975,13 @@ mod tests {
             KeyCode::Char('l'),
             KeyModifiers::CONTROL,
         ));
-        app.state.navigator.selected = app
-            .state
-            .navigator_rows_from(&app.terminal_runtimes)
-            .iter()
-            .position(|row| matches!(row.target, crate::app::state::NavigatorTarget::ClearLink))
-            .expect("the clear entry should be offered");
+        app.state.set_navigator_selected(
+            app.state
+                .navigator_rows_from(&app.terminal_runtimes)
+                .iter()
+                .position(|row| matches!(row.target, crate::app::state::NavigatorTarget::ClearLink))
+                .expect("the clear entry should be offered"),
+        );
         app.state
             .accept_navigator_selection_from(&app.terminal_runtimes);
     }
@@ -4032,20 +4008,20 @@ mod tests {
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('l')).with_control());
         assert_eq!(app.state.mode, Mode::Navigator);
         assert_eq!(
-            app.state.navigator.purpose,
+            app.state.navigator_purpose(),
             crate::app::state::NavigatorPurpose::PaneTodoLink
         );
 
-        app.state.navigator.search_focused = true;
-        app.state.navigator.selected = 0;
+        app.state.set_navigator_search_focused(true);
+        app.state.set_navigator_selected(0);
         handle_navigator_key(
             &mut app.state,
             &app.terminal_runtimes,
             key(KeyCode::Char('j')).with_control(),
         );
-        assert_eq!(app.state.navigator.selected, 1);
+        assert_eq!(app.state.navigator_selected(), 1);
         assert!(
-            app.state.navigator.query.text().is_empty(),
+            app.state.navigator_query().is_empty(),
             "the chord moved the selection rather than typing into the search"
         );
         handle_navigator_key(
@@ -4053,7 +4029,7 @@ mod tests {
             &app.terminal_runtimes,
             key(KeyCode::Char('k')).with_control(),
         );
-        assert_eq!(app.state.navigator.selected, 0);
+        assert_eq!(app.state.navigator_selected(), 0);
     }
 
     /// Spec: "the row shows that pane's public identifier as well as its
@@ -4113,7 +4089,7 @@ mod tests {
             "focus moved to the linked pane"
         );
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.pane_todo_edit.is_none(), "the modal closed");
+        assert!(app.state.pane_todo_edit().is_none(), "the modal closed");
         let saved = stored_todo(&app, pane_id);
         assert_eq!(
             saved.text, "rerun the deploy!",
@@ -4220,22 +4196,23 @@ mod tests {
             KeyModifiers::CONTROL,
         ));
         assert_eq!(app.state.mode, Mode::Navigator);
-        app.state.navigator.selected = app
-            .state
-            .navigator_rows_from(&app.terminal_runtimes)
-            .iter()
-            .position(|row| {
-                matches!(
-                    row.target,
-                    crate::app::state::NavigatorTarget::Pane { pane_id: candidate, .. }
-                        if candidate == candidates[0]
-                )
-            })
-            .expect("the sibling pane should be offered");
+        app.state.set_navigator_selected(
+            app.state
+                .navigator_rows_from(&app.terminal_runtimes)
+                .iter()
+                .position(|row| {
+                    matches!(
+                        row.target,
+                        crate::app::state::NavigatorTarget::Pane { pane_id: candidate, .. }
+                            if candidate == candidates[0]
+                    )
+                })
+                .expect("the sibling pane should be offered"),
+        );
         app.state
             .accept_navigator_selection_from(&app.terminal_runtimes);
         assert_eq!(
-            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            app.state.pane_todo_edit().expect("edit state").link,
             crate::app::state::PaneTodoEditLink::Set(candidates[0]),
         );
 
@@ -4259,7 +4236,7 @@ mod tests {
             "the link captures a label identifying its target"
         );
         assert!(
-            app.state.pane_todo_edit.is_none(),
+            app.state.pane_todo_edit().is_none(),
             "saving closes the modal"
         );
     }
@@ -4276,7 +4253,7 @@ mod tests {
         app.handle_pane_todos_key_via_api(key(KeyCode::Char('a')));
 
         assert_eq!(app.state.mode, Mode::PaneTodoEdit);
-        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        let edit = app.state.pane_todo_edit().expect("edit state");
         assert_eq!(edit.pane_id, pane_id);
         assert!(edit.todo_id.is_none(), "a new todo, not an existing one");
 
@@ -4317,11 +4294,7 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::PaneTodoEdit);
         assert_eq!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .pane_id,
+            app.state.pane_todo_edit().expect("edit state").pane_id,
             pane_id
         );
     }
@@ -4359,7 +4332,7 @@ mod tests {
 
         let todo_id = stored_todo(&app, pane_id).id;
         app.state.open_pane_todo_edit(pane_id, todo_id);
-        app.state.pane_todo_edit.as_mut().expect("edit state").link =
+        app.state.pane_todo_edit_mut().expect("edit state").link =
             crate::app::state::PaneTodoEditLink::Set(target);
 
         app.handle_pane_todo_edit_key_via_api(save_key());
@@ -4397,7 +4370,7 @@ mod tests {
         app.state.open_pane_todo_edit(pane_id, todo_id);
         choose_clear_link(&mut app);
         assert_eq!(
-            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            app.state.pane_todo_edit().expect("edit state").link,
             crate::app::state::PaneTodoEditLink::Clear,
         );
         app.handle_pane_todo_edit_key_via_api(save_key());
@@ -4423,7 +4396,7 @@ mod tests {
         app.state.open_pane_todo_edit(pane_id, todo_id);
         app.handle_pane_todo_edit_key_via_api(key(KeyCode::Char('!')));
         assert_eq!(
-            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            app.state.pane_todo_edit().expect("edit state").link,
             crate::app::state::PaneTodoEditLink::Keep,
         );
         app.handle_pane_todo_edit_key_via_api(save_key());

@@ -109,18 +109,21 @@ impl App {
         self.state.selected = ws_idx;
         self.state.set_name_input(branch.clone());
         self.state.name_input_replace_on_type = true;
-        self.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id,
-            source_checkout_path,
-            source_existing_membership: existing_membership,
-            source_repo_root: space.repo_root,
-            repo_key: space.key,
-            repo_name,
-            branch,
-            checkout_path,
-            error: None,
-            creating: false,
-        });
+        self.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id,
+                    source_checkout_path,
+                    source_existing_membership: existing_membership,
+                    source_repo_root: space.repo_root,
+                    repo_key: space.key,
+                    repo_name,
+                    branch,
+                    checkout_path,
+                    error: None,
+                    creating: false,
+                },
+            ));
         self.state.mode = Mode::NewLinkedWorktree;
     }
 
@@ -140,14 +143,17 @@ impl App {
             return;
         };
         self.state.selected = ws_idx;
-        self.state.worktree_remove = Some(WorktreeRemoveState {
-            workspace_id: ws.id.clone(),
-            repo_root: space.repo_root,
-            path: space.checkout_path,
-            error: None,
-            removing: false,
-            force_confirmation: false,
-        });
+        self.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                WorktreeRemoveState {
+                    workspace_id: ws.id.clone(),
+                    repo_root: space.repo_root,
+                    path: space.checkout_path,
+                    error: None,
+                    removing: false,
+                    force_confirmation: false,
+                },
+            ));
         self.state.mode = Mode::ConfirmRemoveWorktree;
     }
 
@@ -217,19 +223,22 @@ impl App {
         }
 
         self.state.selected = ws_idx;
-        self.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id,
-            source_existing_membership: existing_membership,
-            source_checkout_path,
-            source_repo_root: space.repo_root,
-            repo_key: space.key,
-            repo_name: space.repo_name,
-            entries,
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+        self.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id,
+                    source_existing_membership: existing_membership,
+                    source_checkout_path,
+                    source_repo_root: space.repo_root,
+                    repo_key: space.key,
+                    repo_name: space.repo_name,
+                    entries,
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
+                },
+            ));
         self.state.mode = Mode::OpenExistingWorktree;
     }
 
@@ -238,8 +247,7 @@ impl App {
             KeyCode::Esc => {
                 if self
                     .state
-                    .worktree_create
-                    .as_ref()
+                    .worktree_create()
                     .is_some_and(|create| create.creating)
                 {
                     return;
@@ -279,7 +287,8 @@ impl App {
     pub(crate) fn handle_worktree_open_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                self.state.worktree_open = None;
+                self.state
+                    .close_overlay(crate::app::state::OverlayKind::OpenExistingWorktree);
                 self.state.mode = if self.state.active.is_some() {
                     Mode::Terminal
                 } else {
@@ -287,17 +296,17 @@ impl App {
                 };
             }
             KeyCode::Up => {
-                if let Some(open) = &mut self.state.worktree_open {
+                if let Some(open) = self.state.worktree_open_mut() {
                     open.select_previous_filtered();
                 }
             }
             KeyCode::Down => {
-                if let Some(open) = &mut self.state.worktree_open {
+                if let Some(open) = self.state.worktree_open_mut() {
                     open.select_next_filtered();
                 }
             }
             KeyCode::Char('/') => {
-                if let Some(open) = &mut self.state.worktree_open {
+                if let Some(open) = self.state.worktree_open_mut() {
                     if open.search_focused {
                         open.query.push('/');
                         open.normalize_selection();
@@ -309,8 +318,7 @@ impl App {
             KeyCode::Char(ch)
                 if self
                     .state
-                    .worktree_open
-                    .as_ref()
+                    .worktree_open()
                     .is_some_and(|open| open.search_focused)
                     && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
                     && !ch.is_control() =>
@@ -320,11 +328,10 @@ impl App {
             KeyCode::Backspace
                 if self
                     .state
-                    .worktree_open
-                    .as_ref()
+                    .worktree_open()
                     .is_some_and(|open| open.search_focused) =>
             {
-                if let Some(open) = &mut self.state.worktree_open {
+                if let Some(open) = self.state.worktree_open_mut() {
                     open.query.pop();
                     open.normalize_selection();
                 }
@@ -335,7 +342,7 @@ impl App {
     }
 
     pub(crate) fn insert_worktree_open_search_text(&mut self, text: &str) {
-        let Some(open) = &mut self.state.worktree_open else {
+        let Some(open) = self.state.worktree_open_mut() else {
             return;
         };
         if !open.search_focused {
@@ -347,7 +354,7 @@ impl App {
 
     #[cfg(test)]
     pub(crate) fn open_selected_existing_worktree(&mut self) {
-        let Some(open) = self.state.worktree_open.as_ref() else {
+        let Some(open) = self.state.worktree_open() else {
             return;
         };
         let Some(entry_idx) = open.selected_entry_index() else {
@@ -362,7 +369,8 @@ impl App {
         let source_repo_root = open.source_repo_root.clone();
         let repo_key = open.repo_key.clone();
         let repo_name = open.repo_name.clone();
-        self.state.worktree_open = None;
+        self.state
+            .close_overlay(crate::app::state::OverlayKind::OpenExistingWorktree);
 
         if let Some(ws_idx) = self.open_workspace_idx_for_checkout(&entry.path) {
             self.mark_opened_existing_worktree_membership(
@@ -417,19 +425,22 @@ impl App {
                 self.emit_worktree_opened_for_workspace(new_ws_idx, false);
             }
             Err(err) => {
-                self.state.worktree_open = Some(WorktreeOpenState {
-                    source_workspace_id,
-                    source_existing_membership,
-                    source_checkout_path,
-                    source_repo_root,
-                    repo_key,
-                    repo_name,
-                    entries: vec![entry],
-                    selected: 0,
-                    query: String::new(),
-                    search_focused: false,
-                    error: Some(format!("failed to open worktree: {err}")),
-                });
+                self.state
+                    .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                        WorktreeOpenState {
+                            source_workspace_id,
+                            source_existing_membership,
+                            source_checkout_path,
+                            source_repo_root,
+                            repo_key,
+                            repo_name,
+                            entries: vec![entry],
+                            selected: 0,
+                            query: String::new(),
+                            search_focused: false,
+                            error: Some(format!("failed to open worktree: {err}")),
+                        },
+                    ));
                 self.state.mode = Mode::OpenExistingWorktree;
             }
         }
@@ -481,7 +492,8 @@ impl App {
     }
 
     fn close_worktree_create_dialog(&mut self) {
-        self.state.worktree_create = None;
+        self.state
+            .close_overlay(crate::app::state::OverlayKind::NewLinkedWorktree);
         self.state.name_input.clear();
         self.state.name_input_replace_on_type = false;
         self.state.mode = if self.state.active.is_some() {
@@ -492,12 +504,17 @@ impl App {
     }
 
     fn sync_worktree_branch_from_input(&mut self) {
-        let Some(create) = &mut self.state.worktree_create else {
+        // Read the state the branch is derived from before taking the
+        // overlay's mutable borrow: one overlay value means the borrow covers
+        // the whole of `AppState`, not one field of it.
+        let branch = self.state.name_input.text().to_string();
+        let worktree_directory = self.state.worktree_directory.clone();
+        let Some(create) = self.state.worktree_create_mut() else {
             return;
         };
-        create.branch = self.state.name_input.text().to_string();
+        create.branch = branch;
         create.checkout_path = crate::worktree::default_checkout_path(
-            &self.state.worktree_directory,
+            &worktree_directory,
             &create.repo_name,
             &create.branch,
         );
@@ -507,7 +524,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn start_worktree_add(&mut self) {
         self.sync_worktree_branch_from_input();
-        let Some(create) = &mut self.state.worktree_create else {
+        let Some(create) = self.state.worktree_create_mut() else {
             return;
         };
         let branch = create.branch.trim().to_string();
@@ -519,17 +536,18 @@ impl App {
             return;
         }
 
-        create.branch = branch.clone();
         let name = crate::ui::text_field::TextField::from_text(
             &branch,
             crate::app::state::NAME_INPUT_MAX_CHARS,
         );
+        let worktree_directory = self.state.worktree_directory.clone();
         self.state.name_input = name;
-        create.checkout_path = crate::worktree::default_checkout_path(
-            &self.state.worktree_directory,
-            &create.repo_name,
-            &branch,
-        );
+        let Some(create) = self.state.worktree_create_mut() else {
+            return;
+        };
+        create.branch = branch.clone();
+        create.checkout_path =
+            crate::worktree::default_checkout_path(&worktree_directory, &create.repo_name, &branch);
         create.creating = true;
         create.error = None;
 
@@ -573,7 +591,7 @@ impl App {
 
     pub(crate) fn submit_worktree_create_via_api(&mut self) {
         self.sync_worktree_branch_from_input();
-        let Some(create) = &mut self.state.worktree_create else {
+        let Some(create) = self.state.worktree_create_mut() else {
             return;
         };
         let branch = create.branch.trim().to_string();
@@ -585,17 +603,18 @@ impl App {
             return;
         }
 
-        create.branch = branch.clone();
         let name = crate::ui::text_field::TextField::from_text(
             &branch,
             crate::app::state::NAME_INPUT_MAX_CHARS,
         );
+        let worktree_directory = self.state.worktree_directory.clone();
         self.state.name_input = name;
-        create.checkout_path = crate::worktree::default_checkout_path(
-            &self.state.worktree_directory,
-            &create.repo_name,
-            &branch,
-        );
+        let Some(create) = self.state.worktree_create_mut() else {
+            return;
+        };
+        create.branch = branch.clone();
+        create.checkout_path =
+            crate::worktree::default_checkout_path(&worktree_directory, &create.repo_name, &branch);
         create.creating = true;
         create.error = None;
         let workspace_id = create.source_workspace_id.clone();
@@ -614,7 +633,7 @@ impl App {
             },
         );
         if let Some(message) = immediate_api_error_message(immediate_response.as_deref()) {
-            if let Some(create) = &mut self.state.worktree_create {
+            if let Some(create) = self.state.worktree_create_mut() {
                 create.creating = false;
                 create.error = Some(message);
             }
@@ -626,13 +645,13 @@ impl App {
             KeyCode::Esc => {
                 if self
                     .state
-                    .worktree_remove
-                    .as_ref()
+                    .worktree_remove()
                     .is_some_and(|remove| remove.removing)
                 {
                     return;
                 }
-                self.state.worktree_remove = None;
+                self.state
+                    .close_overlay(crate::app::state::OverlayKind::ConfirmRemoveWorktree);
                 self.state.mode = if self.state.active.is_some() {
                     Mode::Terminal
                 } else {
@@ -647,7 +666,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn start_worktree_remove(&mut self) {
         let Some((workspace_id, repo_root, path, force)) =
-            self.state.worktree_remove.as_mut().and_then(|remove| {
+            self.state.worktree_remove_mut().and_then(|remove| {
                 if remove.removing {
                     return None;
                 }
@@ -720,7 +739,7 @@ impl App {
     }
 
     pub(crate) fn submit_worktree_open_via_api(&mut self) {
-        let Some(open) = self.state.worktree_open.as_ref() else {
+        let Some(open) = self.state.worktree_open() else {
             return;
         };
         let Some(entry_idx) = open.selected_entry_index() else {
@@ -743,19 +762,20 @@ impl App {
             },
         );
         if serde_json::from_str::<crate::api::schema::SuccessResponse>(&response).is_ok() {
-            self.state.worktree_open = None;
+            self.state
+                .close_overlay(crate::app::state::OverlayKind::OpenExistingWorktree);
             self.state.mode = Mode::Terminal;
         } else if let Ok(error) =
             serde_json::from_str::<crate::api::schema::ErrorResponse>(&response)
         {
-            if let Some(open) = &mut self.state.worktree_open {
+            if let Some(open) = self.state.worktree_open_mut() {
                 open.error = Some(error.error.message);
             }
         }
     }
 
     pub(crate) fn submit_worktree_remove_via_api(&mut self) {
-        let Some(remove) = self.state.worktree_remove.as_mut() else {
+        let Some(remove) = self.state.worktree_remove_mut() else {
             return;
         };
         if remove.removing {
@@ -782,7 +802,7 @@ impl App {
             },
         );
         if let Some(message) = immediate_api_error_message(immediate_response.as_deref()) {
-            if let Some(remove) = &mut self.state.worktree_remove {
+            if let Some(remove) = self.state.worktree_remove_mut() {
                 remove.removing = false;
                 remove.error = Some(message);
             }
@@ -794,7 +814,7 @@ impl App {
             self.handle_api_worktree_add_finished(result);
             return;
         }
-        let Some(create) = &mut self.state.worktree_create else {
+        let Some(create) = self.state.worktree_create_mut() else {
             return;
         };
         if create.checkout_path != result.path {
@@ -811,7 +831,8 @@ impl App {
                 let repo_key = create.repo_key.clone();
                 let repo_name = create.repo_name.clone();
                 let source_repo_root = create.source_repo_root.clone();
-                self.state.worktree_create = None;
+                self.state
+                    .close_overlay(crate::app::state::OverlayKind::NewLinkedWorktree);
                 self.state.name_input.clear();
                 self.state.name_input_replace_on_type = false;
                 let source_membership = source_existing_membership.unwrap_or(
@@ -892,7 +913,7 @@ impl App {
             self.handle_api_worktree_remove_finished(result);
             return;
         }
-        let Some(remove) = &mut self.state.worktree_remove else {
+        let Some(remove) = self.state.worktree_remove_mut() else {
             return;
         };
         if remove.workspace_id != result.workspace_id || remove.path != result.path {
@@ -903,7 +924,8 @@ impl App {
             Ok(()) => {
                 tracing::info!(workspace_id = %result.workspace_id, path = %result.path.display(), "git worktree remove completed");
                 let forced = result.forced;
-                self.state.worktree_remove = None;
+                self.state
+                    .close_overlay(crate::app::state::OverlayKind::ConfirmRemoveWorktree);
                 let mut workspace_id = result.workspace_id.clone();
                 let mut workspace_snapshot = result.workspace.as_deref().cloned();
                 let mut worktree = result.worktree.as_deref().cloned();
@@ -1149,18 +1171,21 @@ mod tests {
         let mut app = app_for_worktree_tests();
         app.state.set_name_input("generated-branch");
         app.state.name_input_replace_on_type = true;
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: "/repo/herdr".into(),
-            source_existing_membership: None,
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: "generated-branch".into(),
-            checkout_path: "/repo/herdr-generated-branch".into(),
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_existing_membership: None,
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: "generated-branch".into(),
+                    checkout_path: "/repo/herdr-generated-branch".into(),
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.insert_worktree_create_text("feature/linear-302");
 
@@ -1168,8 +1193,7 @@ mod tests {
         assert!(!app.state.name_input_replace_on_type);
         assert_eq!(
             app.state
-                .worktree_create
-                .as_ref()
+                .worktree_create()
                 .map(|create| create.branch.as_str()),
             Some("feature/linear-302")
         );
@@ -1178,36 +1202,39 @@ mod tests {
     #[test]
     fn worktree_open_search_accepts_pasted_text_when_focused() {
         let mut app = app_for_worktree_tests();
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id: "source".into(),
-            source_existing_membership: None,
-            source_checkout_path: "/repo/herdr".into(),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: vec![
-                WorktreeOpenEntry {
-                    path: "/repo/herdr-main".into(),
-                    branch: Some("main".into()),
-                    is_linked_worktree: false,
-                    already_open_ws_idx: None,
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id: "source".into(),
+                    source_existing_membership: None,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: vec![
+                        WorktreeOpenEntry {
+                            path: "/repo/herdr-main".into(),
+                            branch: Some("main".into()),
+                            is_linked_worktree: false,
+                            already_open_ws_idx: None,
+                        },
+                        WorktreeOpenEntry {
+                            path: "/repo/feature-linear-302".into(),
+                            branch: Some("feature/linear-302".into()),
+                            is_linked_worktree: true,
+                            already_open_ws_idx: None,
+                        },
+                    ],
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: true,
+                    error: None,
                 },
-                WorktreeOpenEntry {
-                    path: "/repo/feature-linear-302".into(),
-                    branch: Some("feature/linear-302".into()),
-                    is_linked_worktree: true,
-                    already_open_ws_idx: None,
-                },
-            ],
-            selected: 0,
-            query: String::new(),
-            search_focused: true,
-            error: None,
-        });
+            ));
 
         app.insert_worktree_open_search_text("linear-302");
 
-        let open = app.state.worktree_open.as_ref().unwrap();
+        let open = app.state.worktree_open().unwrap();
         assert_eq!(open.query, "linear-302");
         assert_eq!(open.selected_entry_index(), Some(1));
     }
@@ -1215,27 +1242,27 @@ mod tests {
     #[test]
     fn worktree_open_search_ignores_paste_when_search_is_not_focused() {
         let mut app = app_for_worktree_tests();
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id: "source".into(),
-            source_existing_membership: None,
-            source_checkout_path: "/repo/herdr".into(),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: Vec::new(),
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id: "source".into(),
+                    source_existing_membership: None,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: Vec::new(),
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
+                },
+            ));
 
         app.insert_worktree_open_search_text("linear-302");
 
         assert_eq!(
-            app.state
-                .worktree_open
-                .as_ref()
-                .map(|open| open.query.as_str()),
+            app.state.worktree_open().map(|open| open.query.as_str()),
             Some("")
         );
     }
@@ -1250,30 +1277,33 @@ mod tests {
         app.state.workspaces[1].identity_cwd = "/repo/herdr-issue".into();
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id: app.state.workspaces[0].id.clone(),
-            source_existing_membership: None,
-            source_checkout_path: "/repo/herdr".into(),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: vec![WorktreeOpenEntry {
-                path: "/repo/herdr-issue".into(),
-                branch: Some("worktree/issue".into()),
-                is_linked_worktree: true,
-                already_open_ws_idx: Some(1),
-            }],
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id: app.state.workspaces[0].id.clone(),
+                    source_existing_membership: None,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: vec![WorktreeOpenEntry {
+                        path: "/repo/herdr-issue".into(),
+                        branch: Some("worktree/issue".into()),
+                        is_linked_worktree: true,
+                        already_open_ws_idx: Some(1),
+                    }],
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
+                },
+            ));
 
         app.open_selected_existing_worktree();
 
         assert_eq!(app.state.active, Some(1));
         assert_eq!(app.state.selected, 1);
-        assert!(app.state.worktree_open.is_none());
+        assert!(app.state.worktree_open().is_none());
         assert!(app.state.workspaces[0].worktree_space().is_some());
         let target_membership = app.state.workspaces[1].worktree_space().unwrap();
         assert_eq!(target_membership.key, "repo-key");
@@ -1300,24 +1330,27 @@ mod tests {
             is_linked_worktree: false,
         };
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id,
-            source_existing_membership: Some(source_membership),
-            source_checkout_path: "/repo/herdr".into(),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: vec![WorktreeOpenEntry {
-                path: checkout.clone(),
-                branch: Some("worktree/open-event".into()),
-                is_linked_worktree: true,
-                already_open_ws_idx: None,
-            }],
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id,
+                    source_existing_membership: Some(source_membership),
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: vec![WorktreeOpenEntry {
+                        path: checkout.clone(),
+                        branch: Some("worktree/open-event".into()),
+                        is_linked_worktree: true,
+                        already_open_ws_idx: None,
+                    }],
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
+                },
+            ));
 
         app.open_selected_existing_worktree();
 
@@ -1346,24 +1379,27 @@ mod tests {
             crate::workspace::Workspace::test_new("other"),
         ];
         let source_workspace_id = app.state.workspaces[0].id.clone();
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id,
-            source_existing_membership: None,
-            source_checkout_path: "/repo/herdr".into(),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: vec![WorktreeOpenEntry {
-                path: checkout.clone(),
-                branch: Some("worktree/stale-open".into()),
-                is_linked_worktree: true,
-                already_open_ws_idx: Some(1),
-            }],
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id,
+                    source_existing_membership: None,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: vec![WorktreeOpenEntry {
+                        path: checkout.clone(),
+                        branch: Some("worktree/stale-open".into()),
+                        is_linked_worktree: true,
+                        already_open_ws_idx: Some(1),
+                    }],
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
+                },
+            ));
 
         app.open_selected_existing_worktree();
 
@@ -1397,38 +1433,41 @@ mod tests {
     #[test]
     fn worktree_open_search_filters_entries() {
         let mut app = app_for_worktree_tests();
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id: "source".into(),
-            source_existing_membership: None,
-            source_checkout_path: "/repo/herdr".into(),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: vec![
-                WorktreeOpenEntry {
-                    path: "/repo/herdr".into(),
-                    branch: Some("main".into()),
-                    is_linked_worktree: false,
-                    already_open_ws_idx: Some(0),
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id: "source".into(),
+                    source_existing_membership: None,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: vec![
+                        WorktreeOpenEntry {
+                            path: "/repo/herdr".into(),
+                            branch: Some("main".into()),
+                            is_linked_worktree: false,
+                            already_open_ws_idx: Some(0),
+                        },
+                        WorktreeOpenEntry {
+                            path: "/repo/fd-cleanup".into(),
+                            branch: Some("fd-cleanup".into()),
+                            is_linked_worktree: true,
+                            already_open_ws_idx: None,
+                        },
+                        WorktreeOpenEntry {
+                            path: "/repo/bell-forward-macos-bounce".into(),
+                            branch: Some("bell-forward-macos-bounce".into()),
+                            is_linked_worktree: true,
+                            already_open_ws_idx: None,
+                        },
+                    ],
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
                 },
-                WorktreeOpenEntry {
-                    path: "/repo/fd-cleanup".into(),
-                    branch: Some("fd-cleanup".into()),
-                    is_linked_worktree: true,
-                    already_open_ws_idx: None,
-                },
-                WorktreeOpenEntry {
-                    path: "/repo/bell-forward-macos-bounce".into(),
-                    branch: Some("bell-forward-macos-bounce".into()),
-                    is_linked_worktree: true,
-                    already_open_ws_idx: None,
-                },
-            ],
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+            ));
 
         app.handle_worktree_open_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('/'),
@@ -1455,7 +1494,7 @@ mod tests {
             crossterm::event::KeyModifiers::empty(),
         ));
 
-        let open = app.state.worktree_open.as_ref().unwrap();
+        let open = app.state.worktree_open().unwrap();
         assert_eq!(open.query, "fd-cl");
         assert_eq!(open.filtered_indices(), vec![1]);
         assert_eq!(open.selected_entry_index(), Some(1));
@@ -1490,7 +1529,7 @@ mod tests {
 
         app.open_existing_worktree_dialog(0);
 
-        let open = app.state.worktree_open.as_ref().unwrap();
+        let open = app.state.worktree_open().unwrap();
         let checkout = crate::worktree::canonical_or_original(&checkout);
         let entry = open
             .entries
@@ -1516,7 +1555,7 @@ mod tests {
         app.open_new_linked_worktree_dialog(0);
 
         assert_eq!(app.state.mode, Mode::Navigate);
-        assert!(app.state.worktree_create.is_none());
+        assert!(app.state.worktree_create().is_none());
         assert_eq!(
             app.state.config_diagnostic.as_deref(),
             Some("New and open worktree actions start from the repo parent workspace.")
@@ -1525,7 +1564,7 @@ mod tests {
         app.state.config_diagnostic = None;
         app.open_existing_worktree_dialog(0);
 
-        assert!(app.state.worktree_open.is_none());
+        assert!(app.state.worktree_open().is_none());
         assert_eq!(
             app.state.config_diagnostic.as_deref(),
             Some("New and open worktree actions start from the repo parent workspace.")
@@ -1537,22 +1576,25 @@ mod tests {
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = std::path::PathBuf::from("/w");
         app.state.set_name_input("issue/137");
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: std::path::PathBuf::from("/repo/herdr"),
-            source_existing_membership: None,
-            source_repo_root: std::path::PathBuf::from("/repo/herdr"),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: "old".into(),
-            checkout_path: std::path::PathBuf::from("/old"),
-            error: Some("old error".into()),
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: std::path::PathBuf::from("/repo/herdr"),
+                    source_existing_membership: None,
+                    source_repo_root: std::path::PathBuf::from("/repo/herdr"),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: "old".into(),
+                    checkout_path: std::path::PathBuf::from("/old"),
+                    error: Some("old error".into()),
+                    creating: false,
+                },
+            ));
 
         app.sync_worktree_branch_from_input();
 
-        let create = app.state.worktree_create.unwrap();
+        let create = app.state.take_worktree_create().expect("overlay open");
         assert_eq!(create.branch, "issue/137");
         assert_eq!(
             create.checkout_path,
@@ -1582,22 +1624,25 @@ mod tests {
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
         app.state.mode = Mode::NewLinkedWorktree;
         app.state.set_name_input(branch);
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id,
-            source_checkout_path: "/repo/herdr".into(),
-            source_existing_membership: Some(source_membership),
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: branch.into(),
-            checkout_path,
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_existing_membership: Some(source_membership),
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: branch.into(),
+                    checkout_path,
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.handle_worktree_create_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        let create = app.state.worktree_create.as_ref().unwrap();
+        let create = app.state.worktree_create().unwrap();
         assert!(!create.creating);
         assert_eq!(
             create.error.as_deref(),
@@ -1635,28 +1680,31 @@ mod tests {
         };
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
         app.state.mode = Mode::OpenExistingWorktree;
-        app.state.worktree_open = Some(WorktreeOpenState {
-            source_workspace_id,
-            source_existing_membership: Some(source_membership),
-            source_checkout_path: repo.clone(),
-            source_repo_root: repo.clone(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            entries: vec![WorktreeOpenEntry {
-                path: checkout.clone(),
-                branch: Some("worktree/open-enter".into()),
-                is_linked_worktree: true,
-                already_open_ws_idx: None,
-            }],
-            selected: 0,
-            query: String::new(),
-            search_focused: false,
-            error: None,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                WorktreeOpenState {
+                    source_workspace_id,
+                    source_existing_membership: Some(source_membership),
+                    source_checkout_path: repo.clone(),
+                    source_repo_root: repo.clone(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    entries: vec![WorktreeOpenEntry {
+                        path: checkout.clone(),
+                        branch: Some("worktree/open-enter".into()),
+                        is_linked_worktree: true,
+                        already_open_ws_idx: None,
+                    }],
+                    selected: 0,
+                    query: String::new(),
+                    search_focused: false,
+                    error: None,
+                },
+            ));
 
         app.handle_worktree_open_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        assert!(app.state.worktree_open.is_none());
+        assert!(app.state.worktree_open().is_none());
         assert_eq!(
             event_kinds(&event_hub),
             vec![
@@ -1693,7 +1741,7 @@ mod tests {
 
         app.handle_worktree_remove_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-        let remove = app.state.worktree_remove.as_ref().unwrap();
+        let remove = app.state.worktree_remove().unwrap();
         assert_eq!(remove.workspace_id, workspace_id);
         assert!(!remove.removing);
         assert_eq!(
@@ -1733,18 +1781,21 @@ mod tests {
             is_linked_worktree: false,
         };
         app.state.workspaces[0].worktree_space = Some(source_membership.clone());
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id,
-            source_checkout_path: repo.clone(),
-            source_existing_membership: Some(source_membership),
-            source_repo_root: repo.clone(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: branch.into(),
-            checkout_path: checkout.clone(),
-            error: None,
-            creating: true,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id,
+                    source_checkout_path: repo.clone(),
+                    source_existing_membership: Some(source_membership),
+                    source_repo_root: repo.clone(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: branch.into(),
+                    checkout_path: checkout.clone(),
+                    error: None,
+                    creating: true,
+                },
+            ));
         let plugin_root = unique_temp_path("app-worktree-create-plugin");
         std::fs::create_dir_all(&plugin_root).unwrap();
         let manifest_path = plugin_root.join("herdr-plugin.toml");
@@ -1858,18 +1909,21 @@ mod tests {
         ];
         let source_workspace_id = app.state.workspaces[0].id.clone();
         app.state.workspaces[1].identity_cwd = checkout.clone();
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id,
-            source_checkout_path: "/repo/herdr".into(),
-            source_existing_membership: None,
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: "worktree/create-race".into(),
-            checkout_path: checkout.clone(),
-            error: None,
-            creating: true,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id,
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_existing_membership: None,
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: "worktree/create-race".into(),
+                    checkout_path: checkout.clone(),
+                    error: None,
+                    creating: true,
+                },
+            ));
 
         app.handle_worktree_add_finished(WorktreeAddResult {
             path: checkout.clone(),
@@ -1906,25 +1960,27 @@ mod tests {
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = worktree_root.clone();
         app.state.set_name_input(branch);
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: repo.clone(),
-            source_existing_membership: None,
-            source_repo_root: repo.clone(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: branch.into(),
-            checkout_path: checkout.clone(),
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: repo.clone(),
+                    source_existing_membership: None,
+                    source_repo_root: repo.clone(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: branch.into(),
+                    checkout_path: checkout.clone(),
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.start_worktree_add();
 
         assert!(app
             .state
-            .worktree_create
-            .as_ref()
+            .worktree_create()
             .is_some_and(|create| create.creating));
         let event = wait_for_worktree_event(&mut app);
         match event {
@@ -1953,25 +2009,27 @@ mod tests {
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = worktree_root.clone();
         app.state.set_name_input(branch);
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: repo.clone(),
-            source_existing_membership: None,
-            source_repo_root: repo.clone(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: branch.into(),
-            checkout_path: checkout.clone(),
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: repo.clone(),
+                    source_existing_membership: None,
+                    source_repo_root: repo.clone(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: branch.into(),
+                    checkout_path: checkout.clone(),
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.start_worktree_add();
 
         assert!(app
             .state
-            .worktree_create
-            .as_ref()
+            .worktree_create()
             .is_some_and(|create| create.creating));
         let event = wait_for_worktree_event(&mut app);
         match event {
@@ -2021,7 +2079,7 @@ mod tests {
 
         assert_eq!(app.state.mode, Mode::NewLinkedWorktree);
         assert!(app.state.config_diagnostic.is_none());
-        let create = app.state.worktree_create.as_ref().unwrap();
+        let create = app.state.worktree_create().unwrap();
         assert_eq!(create.source_checkout_path, bare);
         assert_eq!(create.source_repo_root, create.source_checkout_path);
         let source_checkout_path = create.source_checkout_path.clone();
@@ -2078,18 +2136,21 @@ mod tests {
         let mut app = app_for_worktree_tests();
         app.state.worktree_directory = worktree_root.clone();
         app.state.set_name_input(branch);
-        app.state.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: source_checkout.clone(),
-            source_existing_membership: None,
-            source_repo_root: repo.clone(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: branch.into(),
-            checkout_path: checkout.clone(),
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: source_checkout.clone(),
+                    source_existing_membership: None,
+                    source_repo_root: repo.clone(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: branch.into(),
+                    checkout_path: checkout.clone(),
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.start_worktree_add();
 
@@ -2117,14 +2178,17 @@ mod tests {
     fn dirty_worktree_remove_failure_requests_force_confirmation() {
         let path = std::path::PathBuf::from("/w/herdr/dirty");
         let mut app = app_for_worktree_tests();
-        app.state.worktree_remove = Some(WorktreeRemoveState {
-            workspace_id: "ws".into(),
-            repo_root: std::path::PathBuf::from("/repo/herdr"),
-            path: path.clone(),
-            error: None,
-            removing: true,
-            force_confirmation: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                WorktreeRemoveState {
+                    workspace_id: "ws".into(),
+                    repo_root: std::path::PathBuf::from("/repo/herdr"),
+                    path: path.clone(),
+                    error: None,
+                    removing: true,
+                    force_confirmation: false,
+                },
+            ));
 
         app.handle_worktree_remove_finished(WorktreeRemoveResult {
             workspace_id: "ws".into(),
@@ -2139,7 +2203,7 @@ mod tests {
             ),
         });
 
-        let remove = app.state.worktree_remove.unwrap();
+        let remove = app.state.take_worktree_remove().expect("overlay open");
         assert!(!remove.removing);
         assert!(remove.force_confirmation);
         assert_eq!(remove.error, None);
@@ -2149,14 +2213,17 @@ mod tests {
     fn non_dirty_worktree_remove_failure_keeps_error_message() {
         let path = std::path::PathBuf::from("/w/herdr/missing");
         let mut app = app_for_worktree_tests();
-        app.state.worktree_remove = Some(WorktreeRemoveState {
-            workspace_id: "ws".into(),
-            repo_root: std::path::PathBuf::from("/repo/herdr"),
-            path: path.clone(),
-            error: None,
-            removing: true,
-            force_confirmation: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                WorktreeRemoveState {
+                    workspace_id: "ws".into(),
+                    repo_root: std::path::PathBuf::from("/repo/herdr"),
+                    path: path.clone(),
+                    error: None,
+                    removing: true,
+                    force_confirmation: false,
+                },
+            ));
 
         app.handle_worktree_remove_finished(WorktreeRemoveResult {
             workspace_id: "ws".into(),
@@ -2168,7 +2235,7 @@ mod tests {
             result: Err("fatal: '/w/herdr/missing' is not a working tree".into()),
         });
 
-        let remove = app.state.worktree_remove.unwrap();
+        let remove = app.state.take_worktree_remove().expect("overlay open");
         assert!(!remove.removing);
         assert!(!remove.force_confirmation);
         assert_eq!(
@@ -2211,14 +2278,17 @@ mod tests {
         let parent_id = app.state.workspaces[0].id.clone();
         app.state.active = Some(1);
         app.state.selected = 1;
-        app.state.worktree_remove = Some(WorktreeRemoveState {
-            workspace_id: child_id.clone(),
-            repo_root: std::path::PathBuf::from("/repo/herdr"),
-            path: checkout.clone(),
-            error: None,
-            removing: true,
-            force_confirmation: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                WorktreeRemoveState {
+                    workspace_id: child_id.clone(),
+                    repo_root: std::path::PathBuf::from("/repo/herdr"),
+                    path: checkout.clone(),
+                    error: None,
+                    removing: true,
+                    force_confirmation: false,
+                },
+            ));
 
         app.handle_worktree_remove_finished(WorktreeRemoveResult {
             workspace_id: child_id,
@@ -2235,7 +2305,7 @@ mod tests {
         assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.workspaces[0].id, parent_id);
         assert_eq!(app.state.workspaces[1].display_name(), "sibling");
-        assert!(app.state.worktree_remove.is_none());
+        assert!(app.state.worktree_remove().is_none());
     }
 
     #[test]
@@ -2263,14 +2333,17 @@ mod tests {
             open_workspace_id: None,
             label: "herdr".into(),
         };
-        app.state.worktree_remove = Some(WorktreeRemoveState {
-            workspace_id: internal_workspace_id.clone(),
-            repo_root: "/repo/herdr".into(),
-            path: checkout.clone(),
-            error: None,
-            removing: true,
-            force_confirmation: true,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                WorktreeRemoveState {
+                    workspace_id: internal_workspace_id.clone(),
+                    repo_root: "/repo/herdr".into(),
+                    path: checkout.clone(),
+                    error: None,
+                    removing: true,
+                    force_confirmation: true,
+                },
+            ));
         app.state.workspaces.clear();
 
         app.handle_worktree_remove_finished(WorktreeRemoveResult {
@@ -2353,7 +2426,7 @@ mod tests {
             }
         }
 
-        let remove = app.state.worktree_remove.as_ref().unwrap();
+        let remove = app.state.worktree_remove().unwrap();
         assert!(!remove.removing);
         assert!(remove.force_confirmation);
         assert!(checkout.exists());
@@ -2372,7 +2445,7 @@ mod tests {
         }
 
         assert!(!checkout.exists());
-        assert!(app.state.worktree_remove.is_none());
+        assert!(app.state.worktree_remove().is_none());
         assert!(app.state.workspaces.is_empty());
         assert_eq!(
             event_kinds(&event_hub),

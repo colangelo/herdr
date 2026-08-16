@@ -355,21 +355,18 @@ impl AppState {
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        self.navigator.query.clear();
-        self.navigator.search_focused = false;
-        self.navigator.state_filter = None;
-        self.navigator.scroll = 0;
-        self.navigator.purpose = NavigatorPurpose::Goto;
-        self.navigator.expanded_workspaces.clear();
-
+        let mut navigator = crate::app::state::NavigatorState::default();
         for ws in &self.workspaces {
-            self.navigator.expanded_workspaces.insert(ws.id.clone());
+            navigator.expanded_workspaces.insert(ws.id.clone());
         }
+        self.open_overlay(crate::app::state::Overlay::Navigator(navigator));
 
-        self.mode = Mode::Navigator;
-        self.navigator.selected = self
+        let selected = self
             .current_navigator_row_index_from(terminal_runtimes)
             .unwrap_or(0);
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.selected = selected;
+        }
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
@@ -380,15 +377,23 @@ impl AppState {
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        if self.pane_todo_edit.is_none() {
+        // The edit is suspended onto the picker rather than left behind in a
+        // field that outlives its mode.
+        let Some(edit) = self.take_pane_todo_edit() else {
             return;
-        }
+        };
         self.open_navigator_from(terminal_runtimes);
-        self.navigator.purpose = NavigatorPurpose::PaneTodoLink;
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.purpose = NavigatorPurpose::PaneTodoLink;
+            navigator.suspended_pane_todo_edit = Some(edit);
+        }
         // Start below the clear entry so a mis-keyed Enter cannot wipe an
         // existing link, while it stays visible at the top of the list.
         let rows = self.navigator_rows_from(terminal_runtimes);
-        self.navigator.selected = usize::from(rows.len() > 1);
+        let selected = usize::from(rows.len() > 1);
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.selected = selected;
+        }
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
@@ -396,12 +401,17 @@ impl AppState {
     /// dismissing come through here; dismissal just stages nothing first,
     /// which is what leaves the previous link as it was.
     pub(crate) fn close_pane_todo_link_picker(&mut self) {
-        self.navigator.purpose = NavigatorPurpose::Goto;
-        self.mode = if self.pane_todo_edit.is_some() {
-            Mode::PaneTodoEdit
-        } else {
-            Mode::Terminal
-        };
+        let suspended = self.navigator_mut().and_then(|navigator| {
+            navigator.purpose = NavigatorPurpose::Goto;
+            navigator.suspended_pane_todo_edit.take()
+        });
+        match suspended {
+            Some(edit) => self.open_overlay(crate::app::state::Overlay::PaneTodoEdit(edit)),
+            None => {
+                self.close_any_overlay();
+                self.mode = Mode::Terminal;
+            }
+        }
     }
 
     #[cfg(test)]
@@ -414,8 +424,8 @@ impl AppState {
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) -> Vec<NavigatorRow> {
-        let query = self.navigator.query.text().trim().to_lowercase();
-        let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
+        let query = self.navigator_query().trim().to_lowercase();
+        let query_kind = navigator_query_kind(&query, self.navigator_state_filter());
         let mut rows = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
@@ -437,7 +447,7 @@ impl AppState {
             }
 
             let expanded = !matches!(query_kind, NavigatorQueryKind::Empty)
-                || self.navigator.expanded_workspaces.contains(&ws.id);
+                || self.navigator_workspace_expanded(&ws.id);
             let (state, seen) = ws.display_state(&self.terminals);
             let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
             rows.push(NavigatorRow {
@@ -459,11 +469,11 @@ impl AppState {
                 rows.extend(child_rows);
             }
         }
-        if self.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+        if self.navigator_purpose() == NavigatorPurpose::PaneTodoLink {
             // A todo linking to its own pane says nothing, so its pane is not
             // offered; the clear entry leads because it is the one row that is
             // not a place to go.
-            if let Some(own) = self.pane_todo_edit.as_ref().map(|edit| edit.pane_id) {
+            if let Some(own) = self.editing_pane_todo().map(|edit| edit.pane_id) {
                 rows.retain(
                     |row| !matches!(row.target, NavigatorTarget::Pane { pane_id, .. } if pane_id == own),
                 );
@@ -662,22 +672,22 @@ impl AppState {
         let body = self.navigator_body_rect();
         let viewport = body.height as usize;
         if viewport == 0 {
-            self.navigator.scroll = 0;
+            self.set_navigator_scroll(0);
             return;
         }
         let lines = navigator_display_lines(&self.navigator_rows_from(terminal_runtimes));
         let selected_line =
-            navigator_display_index_of_row(&lines, self.navigator.selected).unwrap_or(0);
+            navigator_display_index_of_row(&lines, self.navigator_selected()).unwrap_or(0);
         // The kit's nearest-edge reveal, called with a display-line index
         // rather than a row index: the navigator scrolls in line space while
         // its selection is a row, so it borrows the arithmetic without
         // borrowing `ListCursor`, which would conflate the two spaces.
-        self.navigator.scroll = crate::ui::overlay::reveal_scroll(
-            self.navigator.scroll,
+        self.set_navigator_scroll(crate::ui::overlay::reveal_scroll(
+            self.navigator_scroll(),
             selected_line,
             viewport,
             lines.len(),
-        );
+        ));
     }
 
     pub(crate) fn navigator_max_scroll_from(
@@ -700,8 +710,8 @@ impl AppState {
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
         let lines = navigator_display_lines(&self.navigator_rows_from(terminal_runtimes));
-        if let Some(row_idx) = navigator_first_row_at_or_after(&lines, self.navigator.scroll) {
-            self.navigator.selected = row_idx;
+        if let Some(row_idx) = navigator_first_row_at_or_after(&lines, self.navigator_scroll()) {
+            self.set_navigator_selected(row_idx);
         }
         self.clamp_navigator_selection_from(terminal_runtimes);
     }
@@ -713,12 +723,12 @@ impl AppState {
     ) {
         let count = self.navigator_rows_from(terminal_runtimes).len();
         if count == 0 {
-            self.navigator.selected = 0;
-            self.navigator.scroll = 0;
+            self.set_navigator_selected(0);
+            self.set_navigator_scroll(0);
             return;
         }
-        let current = self.navigator.selected.min(count - 1) as isize;
-        self.navigator.selected = (current + delta).clamp(0, count as isize - 1) as usize;
+        let current = self.navigator_selected().min(count - 1) as isize;
+        self.set_navigator_selected((current + delta).clamp(0, count as isize - 1) as usize);
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
@@ -732,13 +742,13 @@ impl AppState {
     ) {
         let rows = self.navigator_rows_from(terminal_runtimes);
         if rows.is_empty() {
-            self.navigator.selected = 0;
-            self.navigator.scroll = 0;
+            self.set_navigator_selected(0);
+            self.set_navigator_scroll(0);
             return;
         }
         let lines = navigator_display_lines(&rows);
         let current_line =
-            navigator_display_index_of_row(&lines, self.navigator.selected.min(rows.len() - 1))
+            navigator_display_index_of_row(&lines, self.navigator_selected().min(rows.len() - 1))
                 .unwrap_or(0);
         let target_line =
             (current_line as isize + delta_lines).clamp(0, lines.len() as isize - 1) as usize;
@@ -754,7 +764,7 @@ impl AppState {
                 })
         };
         if let Some(row_idx) = row_idx {
-            self.navigator.selected = row_idx;
+            self.set_navigator_selected(row_idx);
         }
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
@@ -766,8 +776,8 @@ impl AppState {
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        let query = self.navigator.query.text().trim().to_lowercase();
-        let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
+        let query = self.navigator_query().trim().to_lowercase();
+        let query_kind = navigator_query_kind(&query, self.navigator_state_filter());
         if !matches!(query_kind, NavigatorQueryKind::Empty) {
             let rows = self.navigator_rows_from(terminal_runtimes);
             let idx = if matches!(query_kind, NavigatorQueryKind::State(_)) {
@@ -780,7 +790,7 @@ impl AppState {
                 rows.iter().position(|row| row.matched)
             };
             if let Some(idx) = idx {
-                self.navigator.selected = idx;
+                self.set_navigator_selected(idx);
             }
         }
         self.clamp_navigator_selection_from(terminal_runtimes);
@@ -791,7 +801,7 @@ impl AppState {
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
         let count = self.navigator_rows_from(terminal_runtimes).len();
-        self.navigator.selected = self.navigator.selected.min(count.saturating_sub(1));
+        self.set_navigator_selected(self.navigator_selected().min(count.saturating_sub(1)));
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
@@ -801,7 +811,7 @@ impl AppState {
     ) {
         let Some(row) = self
             .navigator_rows_from(terminal_runtimes)
-            .get(self.navigator.selected)
+            .get(self.navigator_selected())
             .cloned()
         else {
             return;
@@ -812,11 +822,7 @@ impl AppState {
         let Some(workspace_id) = self.workspaces.get(ws_idx).map(|ws| ws.id.clone()) else {
             return;
         };
-        if self.navigator.expanded_workspaces.contains(&workspace_id) {
-            self.navigator.expanded_workspaces.remove(&workspace_id);
-        } else {
-            self.navigator.expanded_workspaces.insert(workspace_id);
-        }
+        self.toggle_navigator_workspace_expanded(workspace_id);
         self.clamp_navigator_selection_from(terminal_runtimes);
     }
 
@@ -832,12 +838,12 @@ impl AppState {
     ) -> bool {
         let Some(row) = self
             .navigator_rows_from(terminal_runtimes)
-            .get(self.navigator.selected)
+            .get(self.navigator_selected())
             .cloned()
         else {
             return false;
         };
-        if self.navigator.purpose == NavigatorPurpose::PaneTodoLink {
+        if self.navigator_purpose() == NavigatorPurpose::PaneTodoLink {
             return self.resolve_pane_todo_link_selection(row.target, terminal_runtimes);
         }
         self.focus_navigator_target(row.target)
@@ -869,7 +875,10 @@ impl AppState {
     }
 
     fn stage_pane_todo_link(&mut self, link: PaneTodoEditLink) {
-        if let Some(edit) = self.pane_todo_edit.as_mut() {
+        if let Some(edit) = self
+            .navigator_mut()
+            .and_then(|navigator| navigator.suspended_pane_todo_edit.as_mut())
+        {
             edit.link = link;
         }
         self.close_pane_todo_link_picker();
@@ -3935,10 +3944,7 @@ mod tests {
         state.ensure_test_terminals();
 
         state.open_navigator();
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "foo",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("foo");
         assert!(state.navigator_rows().iter().any(|row| {
             row.matched
                 && matches!(
@@ -3950,14 +3956,11 @@ mod tests {
                 )
         }));
 
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "baz",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("baz");
         state.select_first_navigator_match_from(&crate::terminal::TerminalRuntimeRegistry::new());
         let rows = state.navigator_rows();
         assert!(rows
-            .get(state.navigator.selected)
+            .get(state.navigator_selected())
             .is_some_and(|row| matches!(
                 row.target,
                 crate::app::state::NavigatorTarget::Tab {
@@ -4029,10 +4032,7 @@ mod tests {
         let mut runtime_registry = crate::terminal::TerminalRuntimeRegistry::new();
         runtime_registry.insert(terminal_id, runtime);
         state.open_navigator_from(&runtime_registry);
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "herdr",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("herdr");
         let rows = state.navigator_rows_from(&runtime_registry);
 
         for (_, runtime) in runtime_registry.drain() {
@@ -4084,17 +4084,11 @@ mod tests {
             .set_detected_state(Some(Agent::Codex), AgentState::Blocked);
 
         state.open_navigator();
-        let selected = state.navigator_rows()[state.navigator.selected].clone();
+        let selected = state.navigator_rows()[state.navigator_selected()].clone();
 
         assert!(selected.is_current);
-        assert!(state
-            .navigator
-            .expanded_workspaces
-            .contains(&state.workspaces[0].id));
-        assert!(state
-            .navigator
-            .expanded_workspaces
-            .contains(&state.workspaces[1].id));
+        assert!(state.navigator_workspace_expanded(&state.workspaces[0].id));
+        assert!(state.navigator_workspace_expanded(&state.workspaces[1].id));
     }
 
     #[test]
@@ -4102,11 +4096,8 @@ mod tests {
         let mut state = app_with_workspaces(&["one", "two"]);
         let target = state.workspaces[1].tabs[0].root_pane;
         state.open_navigator();
-        state
-            .navigator
-            .expanded_workspaces
-            .insert(state.workspaces[1].id.clone());
-        state.navigator.selected = state
+        state.expand_navigator_workspace(state.workspaces[1].id.clone());
+        let selected = state
             .navigator_rows()
             .iter()
             .position(|row| {
@@ -4116,6 +4107,7 @@ mod tests {
                 )
             })
             .unwrap();
+        state.set_navigator_selected(selected);
 
         assert!(state.accept_navigator_selection());
 
@@ -4139,10 +4131,7 @@ mod tests {
             .set_detected_state(Some(Agent::Claude), AgentState::Idle);
 
         state.open_navigator();
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "idle",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("idle");
         let rows = state.navigator_rows();
 
         assert!(rows.iter().any(|row| matches!(
@@ -4161,10 +4150,7 @@ mod tests {
         state.workspaces[0].identity_cwd = "/tmp/herdr-worktrees/issue-work".into();
 
         state.open_navigator();
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "work",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("work");
 
         assert!(state.navigator_rows().is_empty());
     }
@@ -4190,7 +4176,7 @@ mod tests {
             .set_detected_state(Some(Agent::Codex), AgentState::Working);
 
         state.open_navigator();
-        state.navigator.state_filter = Some(NavigatorStateFilter::Working);
+        state.set_navigator_state_filter(Some(NavigatorStateFilter::Working));
         let state_rows = state.navigator_rows();
 
         assert!(state_rows.iter().any(|row| matches!(
@@ -4202,11 +4188,8 @@ mod tests {
             crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == shell
         )));
 
-        state.navigator.state_filter = None;
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "w",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_state_filter(None);
+        state.set_navigator_query("w");
         let text_rows = state.navigator_rows();
 
         assert!(text_rows.iter().any(|row| matches!(
@@ -4233,10 +4216,7 @@ mod tests {
             .unwrap()
             .set_manual_label("weekly review".into());
         state.open_navigator();
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "weekly",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("weekly");
 
         let rows = state.navigator_rows();
 
@@ -4262,10 +4242,7 @@ mod tests {
         }
 
         state.open_navigator();
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "one",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("one");
         let rows = state.navigator_rows();
 
         // Both panes cascade in even though only the workspace label matched,
@@ -4291,14 +4268,11 @@ mod tests {
 
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.open_navigator_from(&terminal_runtimes);
-        state.navigator.query = crate::ui::text_field::TextField::from_text(
-            "ui",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        state.set_navigator_query("ui");
         state.select_first_navigator_match_from(&terminal_runtimes);
 
         let rows = state.navigator_rows_from(&terminal_runtimes);
-        let selected = &rows[state.navigator.selected];
+        let selected = &rows[state.navigator_selected()];
         assert!(matches!(
             selected.target,
             crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == pane
@@ -4319,11 +4293,11 @@ mod tests {
 
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.open_navigator_from(&terminal_runtimes);
-        state.navigator.state_filter = Some(NavigatorStateFilter::Working);
+        state.set_navigator_state_filter(Some(NavigatorStateFilter::Working));
         state.select_first_navigator_match_from(&terminal_runtimes);
 
         let rows = state.navigator_rows_from(&terminal_runtimes);
-        let selected = &rows[state.navigator.selected];
+        let selected = &rows[state.navigator_selected()];
         assert!(matches!(
             selected.target,
             crate::app::state::NavigatorTarget::Pane { pane_id, .. } if pane_id == working

@@ -110,8 +110,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
         return;
     };
     let selected = app
-        .notification_center
-        .as_ref()
+        .notification_center()
         .map(|center| center.list.selected)
         .unwrap_or(0);
     let now_unix = std::time::SystemTime::now()
@@ -191,8 +190,7 @@ pub(super) fn render_notification_center(app: &AppState, frame: &mut Frame) {
 
     if let Some(buttons) = app.notification_center_buttons() {
         let hovered = app
-            .notification_center
-            .as_ref()
+            .notification_center()
             .and_then(|center| center.hovered_button);
         // Same button language as the settings action buttons: filled boxes
         // with the shortcut hint inside, secondary (surface) at rest and

@@ -159,7 +159,9 @@ impl AppState {
             let hovered = self
                 .global_menu_item_at(mouse.column, mouse.row)
                 .and_then(|action| actions.iter().position(|item| *item == action));
-            self.global_menu.hover(hovered);
+            if let Some(menu) = self.global_menu_mut() {
+                menu.hover(hovered);
+            }
             return None;
         }
 
@@ -235,11 +237,11 @@ impl AppState {
                         .notification_center_buttons()
                         .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
                     if let Some(idx) = self.notification_center_row_at(mouse.column, mouse.row) {
-                        if let Some(center) = self.notification_center.as_mut() {
+                        if let Some(center) = self.notification_center_mut() {
                             center.list.selected = idx;
                         }
                     }
-                    if let Some(center) = self.notification_center.as_mut() {
+                    if let Some(center) = self.notification_center_mut() {
                         center.hovered_button = over_button;
                     }
                 }
@@ -286,11 +288,11 @@ impl AppState {
                         .pane_todo_panel_buttons()
                         .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
                     if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
-                        if let Some(panel) = self.pane_todos.as_mut() {
+                        if let Some(panel) = self.pane_todos_mut() {
                             panel.list.selected = idx;
                         }
                     }
-                    if let Some(panel) = self.pane_todos.as_mut() {
+                    if let Some(panel) = self.pane_todos_mut() {
                         panel.hovered_button = over_button;
                     }
                 }
@@ -299,7 +301,7 @@ impl AppState {
                 MouseEventKind::Down(MouseButton::Left) => {
                     if let Some(idx) = self.pane_todo_panel_row_at(mouse.column, mouse.row) {
                         let on_chip = self.pane_todo_link_chip_at(mouse.column, mouse.row);
-                        if let Some(panel) = self.pane_todos.as_mut() {
+                        if let Some(panel) = self.pane_todos_mut() {
                             panel.list.selected = idx;
                         }
                         return Some(MouseAction::PaneTodo(if on_chip {
@@ -347,7 +349,7 @@ impl AppState {
         }
 
         if self.mode == Mode::PaneMoveTargetPicker {
-            let Some(picker) = self.pane_move_target_picker.as_ref() else {
+            let Some(picker) = self.pane_move_target_picker() else {
                 leave_modal(self);
                 return None;
             };
@@ -375,24 +377,24 @@ impl AppState {
             match mouse.kind {
                 MouseEventKind::Moved => {
                     if let (Some(idx), Some(picker)) =
-                        (hovered_entry, self.pane_move_target_picker.as_mut())
+                        (hovered_entry, self.pane_move_target_picker_mut())
                     {
                         picker.select_destination(idx);
                     }
                 }
                 MouseEventKind::ScrollUp => {
-                    if let Some(picker) = self.pane_move_target_picker.as_mut() {
+                    if let Some(picker) = self.pane_move_target_picker_mut() {
                         picker.select_prev();
                     }
                 }
                 MouseEventKind::ScrollDown => {
-                    if let Some(picker) = self.pane_move_target_picker.as_mut() {
+                    if let Some(picker) = self.pane_move_target_picker_mut() {
                         picker.select_next();
                     }
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     if let Some(idx) = hovered_entry {
-                        if let Some(picker) = self.pane_move_target_picker.as_mut() {
+                        if let Some(picker) = self.pane_move_target_picker_mut() {
                             picker.select_destination(idx);
                         }
                         return Some(MouseAction::SubmitPaneMoveTarget);
@@ -416,7 +418,9 @@ impl AppState {
                             return Some(MouseAction::SubmitPaneMoveTarget);
                         }
                         Some(ModalAction::Cancel) | None => {
-                            self.pane_move_target_picker = None;
+                            self.close_overlay(
+                                crate::app::state::OverlayKind::PaneMoveTargetPicker,
+                            );
                             leave_modal(self);
                         }
                         _ => {}
@@ -448,13 +452,13 @@ impl AppState {
         if self.mode == Mode::OpenExistingWorktree {
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
-                    if let Some(open) = &mut self.worktree_open {
+                    if let Some(open) = self.worktree_open_mut() {
                         open.select_previous_filtered();
                     }
                     return None;
                 }
                 MouseEventKind::ScrollDown => {
-                    if let Some(open) = &mut self.worktree_open {
+                    if let Some(open) = self.worktree_open_mut() {
                         open.select_next_filtered();
                     }
                     return None;
@@ -521,11 +525,12 @@ impl AppState {
                             }
                             Some(ModalAction::Cancel)
                                 if !self
-                                    .worktree_create
-                                    .as_ref()
+                                    .worktree_create()
                                     .is_some_and(|create| create.creating) =>
                             {
-                                self.worktree_create = None;
+                                self.close_overlay(
+                                    crate::app::state::OverlayKind::NewLinkedWorktree,
+                                );
                                 self.name_input.clear();
                                 self.name_input_replace_on_type = false;
                                 leave_modal(self);
@@ -537,7 +542,7 @@ impl AppState {
                 }
 
                 if self.mode == Mode::OpenExistingWorktree {
-                    if let Some(open) = self.worktree_open.as_ref() {
+                    if let Some(open) = self.worktree_open() {
                         if let Some(inner) = crate::ui::open_existing_worktree_inner_rect(
                             self.screen_rect(),
                             open.entries.len(),
@@ -551,7 +556,7 @@ impl AppState {
                                 && mouse.column >= inner.x
                                 && mouse.column < inner.x.saturating_add(inner.width)
                             {
-                                if let Some(open) = &mut self.worktree_open {
+                                if let Some(open) = self.worktree_open_mut() {
                                     open.search_focused = true;
                                 }
                                 return None;
@@ -568,7 +573,7 @@ impl AppState {
                                 None
                             };
                             if let Some(entry_idx) = row_idx {
-                                if let Some(open) = &mut self.worktree_open {
+                                if let Some(open) = self.worktree_open_mut() {
                                     open.selected = entry_idx;
                                 }
                                 self.request_submit_worktree_open = true;
@@ -589,7 +594,9 @@ impl AppState {
                                     self.request_submit_worktree_open = true;
                                 }
                                 Some(ModalAction::Cancel) => {
-                                    self.worktree_open = None;
+                                    self.close_overlay(
+                                        crate::app::state::OverlayKind::OpenExistingWorktree,
+                                    );
                                     leave_modal(self);
                                 }
                                 _ => {}
@@ -608,8 +615,7 @@ impl AppState {
                             popup.height.saturating_sub(2),
                         );
                         let force_confirmation = self
-                            .worktree_remove
-                            .as_ref()
+                            .worktree_remove()
                             .is_some_and(|remove| remove.force_confirmation);
                         let (remove, cancel) =
                             crate::ui::remove_worktree_button_rects(inner, force_confirmation);
@@ -626,11 +632,12 @@ impl AppState {
                             }
                             Some(ModalAction::Cancel)
                                 if !self
-                                    .worktree_remove
-                                    .as_ref()
+                                    .worktree_remove()
                                     .is_some_and(|remove| remove.removing) =>
                             {
-                                self.worktree_remove = None;
+                                self.close_overlay(
+                                    crate::app::state::OverlayKind::ConfirmRemoveWorktree,
+                                );
                                 leave_modal(self);
                             }
                             _ => {}
@@ -699,7 +706,7 @@ impl AppState {
 
                 if self.mode == Mode::ContextMenu {
                     let item_idx = self.context_menu_item_at(mouse.column, mouse.row);
-                    if let Some(menu) = self.context_menu.take() {
+                    if let Some(menu) = self.take_context_menu() {
                         if let Some(idx) = item_idx {
                             return Some(MouseAction::ContextMenu { menu, idx });
                         } else {
@@ -1298,7 +1305,7 @@ impl AppState {
 
             MouseEventKind::Moved if self.mode == Mode::ContextMenu => {
                 let hovered = self.context_menu_item_at(mouse.column, mouse.row);
-                if let Some(menu) = &mut self.context_menu {
+                if let Some(menu) = self.context_menu_mut() {
                     menu.list.hover(hovered);
                 }
             }
@@ -1352,13 +1359,12 @@ impl AppState {
                             })
                         })
                         .unwrap_or(ContextMenuKind::Workspace { ws_idx: idx });
-                    self.context_menu = Some(ContextMenuState {
+                    self.open_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
                         kind,
                         x: mouse.column,
                         y: mouse.row,
                         list: ListCursor::new(0),
-                    });
-                    self.mode = Mode::ContextMenu;
+                    }));
                 }
             }
 
@@ -1369,13 +1375,12 @@ impl AppState {
                 if let (Some(ws_idx), Some(tab_idx)) =
                     (self.active, self.tab_at(mouse.column, mouse.row))
                 {
-                    self.context_menu = Some(ContextMenuState {
+                    self.open_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
                         kind: ContextMenuKind::Tab { ws_idx, tab_idx },
                         x: mouse.column,
                         y: mouse.row,
                         list: ListCursor::new(0),
-                    });
-                    self.mode = Mode::ContextMenu;
+                    }));
                 }
             }
 
@@ -1402,7 +1407,7 @@ impl AppState {
                         .is_some();
                     let right_click_passthrough =
                         pane_state.is_some_and(|pane| pane.right_click_passthrough);
-                    self.context_menu = Some(ContextMenuState {
+                    self.open_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
                         kind: ContextMenuKind::Pane {
                             ws_idx,
                             tab_idx,
@@ -1414,8 +1419,7 @@ impl AppState {
                         x: mouse.column,
                         y: mouse.row,
                         list: ListCursor::new(0),
-                    });
-                    self.mode = Mode::ContextMenu;
+                    }));
                 }
             }
 
@@ -1524,7 +1528,7 @@ impl AppState {
     /// places. Anchored under the tab bar's right edge, or the screen's
     /// top-right when the tab bar is hidden.
     fn notification_center_geometry(&self) -> Option<crate::ui::overlay::PanelGeometry> {
-        self.notification_center.as_ref()?;
+        self.notification_center()?;
         let screen = self.screen_rect();
         let anchor = if self.view.tab_bar_rect.width > 0 {
             self.view.tab_bar_rect
@@ -1600,7 +1604,7 @@ impl AppState {
     /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn notification_center_list_window(&self) -> Option<(Rect, usize)> {
         let list = self.notification_center_geometry()?.list;
-        let cursor = self.notification_center.as_ref()?.list;
+        let cursor = self.notification_center()?.list;
         let (start, _) = cursor.window(list, self.notification_log.len());
         Some((list, start))
     }
@@ -1617,7 +1621,7 @@ impl AppState {
     /// it. `None` unless the panel is open, so render and hit-test go quiet
     /// together.
     fn pane_todo_panel_geometry(&self) -> Option<crate::ui::overlay::PanelGeometry> {
-        let panel = self.pane_todos.as_ref()?;
+        let panel = self.pane_todos()?;
         // A panel whose pane has gone renders nothing and hit-tests to
         // nothing; the next Esc closes it.
         self.pane_terminal(panel.pane_id)?;
@@ -1685,7 +1689,7 @@ impl AppState {
     pub(crate) fn pane_todo_panel_buttons(
         &self,
     ) -> Option<crate::ui::overlay::ButtonRow<PaneTodoPanelButton>> {
-        let panel = self.pane_todos.as_ref()?;
+        let panel = self.pane_todos()?;
         let has_todos = !self.pane_todos_in_display_order(panel.pane_id).is_empty();
         // `go` follows the *selected* todo's link, so it is offered only while
         // that todo has one that still resolves — a dead link is inert, and a
@@ -1711,7 +1715,7 @@ impl AppState {
     /// same scroll helpers the renderer draws with — so the cursor lands under
     /// the pointer whatever the field is scrolled to.
     pub(crate) fn place_pane_todo_edit_cursor(&mut self, input: Rect, col: u16, row: u16) {
-        let Some(edit) = self.pane_todo_edit.as_mut() else {
+        let Some(edit) = self.pane_todo_edit_mut() else {
             return;
         };
         let text_area = crate::ui::pane_todo_edit_text_area(input);
@@ -1727,7 +1731,7 @@ impl AppState {
     /// where, and it stops one row short of the buttons — see
     /// [`crate::ui::FOOTER_ROWS`].
     pub(crate) fn pane_todo_panel_list_window(&self) -> Option<(Rect, usize)> {
-        let panel = self.pane_todos.as_ref()?;
+        let panel = self.pane_todos()?;
         let list = self.pane_todo_panel_geometry()?.list;
         let len = self.pane_todos_in_display_order(panel.pane_id).len();
         let (start, _) = panel.list.window(list, len);
@@ -1742,7 +1746,7 @@ impl AppState {
     }
 
     fn pane_todo_panel_row_at(&self, col: u16, row: u16) -> Option<usize> {
-        let panel = self.pane_todos.as_ref()?;
+        let panel = self.pane_todos()?;
         let list = self.pane_todo_panel_geometry()?.list;
         let len = self.pane_todos_in_display_order(panel.pane_id).len();
         panel.list.row_at(list, col, row, len)
@@ -1754,7 +1758,7 @@ impl AppState {
         let Some(idx) = self.pane_todo_panel_row_at(col, row) else {
             return false;
         };
-        let Some(panel) = self.pane_todos.as_ref() else {
+        let Some(panel) = self.pane_todos() else {
             return false;
         };
         let Some((list, _)) = self.pane_todo_panel_list_window() else {
@@ -1778,12 +1782,12 @@ impl AppState {
 
     fn notification_center_row_at(&self, col: u16, row: u16) -> Option<usize> {
         let list = self.notification_center_geometry()?.list;
-        let cursor = self.notification_center.as_ref()?.list;
+        let cursor = self.notification_center()?.list;
         cursor.row_at(list, col, row, self.notification_log.len())
     }
 
     pub(crate) fn context_menu_rect(&self) -> Option<Rect> {
-        let menu = self.context_menu.as_ref()?;
+        let menu = self.context_menu()?;
         let screen = self.screen_rect();
         let max_item_w = menu
             .items()
@@ -1809,8 +1813,7 @@ impl AppState {
         let inner_w = menu_rect.width.saturating_sub(2);
         let inner_h = menu_rect.height.saturating_sub(2);
         let item_count = self
-            .context_menu
-            .as_ref()
+            .context_menu()
             .map(|menu| menu.items().len() as u16)
             .unwrap_or(0);
         if col >= inner_x
@@ -2163,7 +2166,7 @@ impl AppState {
         self.workspace_press = None;
         self.tab_press = None;
         self.drag = None;
-        self.context_menu = None;
+        self.close_overlay(crate::app::state::OverlayKind::ContextMenu);
         self.right_click_passthrough = Some(RightClickPassthroughGesture {
             pane_info: info,
             modifiers,
@@ -2678,7 +2681,7 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), col, row));
 
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
         assert_eq!(
             passthrough_input.try_recv().unwrap(),
             Bytes::from_static(b"\x1b[<2;3;4M")
@@ -2692,7 +2695,7 @@ mod tests {
 
         assert!(default_input.try_recv().is_err());
         assert!(matches!(
-            app.state.context_menu.as_ref().map(|menu| &menu.kind),
+            app.state.context_menu().map(|menu| &menu.kind),
             Some(ContextMenuKind::Pane { pane_id, .. }) if *pane_id == default_pane
         ));
     }
@@ -2725,7 +2728,7 @@ mod tests {
         ));
 
         assert_eq!(app.state.mode, Mode::ContextMenu);
-        assert!(app.state.context_menu.is_some());
+        assert!(app.state.context_menu().is_some());
     }
 
     #[tokio::test]
@@ -2768,7 +2771,7 @@ mod tests {
         });
 
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
         assert!(app.state.right_click_passthrough.is_none());
         assert_eq!(
             input_rx.try_recv().expect("forwarded right mouse down"),
@@ -3084,7 +3087,7 @@ mod tests {
         });
 
         assert_eq!(app.state.mode, Mode::ContextMenu);
-        assert!(app.state.context_menu.is_some());
+        assert!(app.state.context_menu().is_some());
         assert!(app.state.right_click_passthrough.is_none());
         assert!(input_rx.try_recv().is_err());
     }
@@ -3126,7 +3129,7 @@ mod tests {
         ));
 
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
-        let menu = app.state.context_menu.as_mut().expect("pane context menu");
+        let menu = app.state.context_menu_mut().expect("pane context menu");
         assert!(matches!(
             menu.kind,
             ContextMenuKind::Pane {
@@ -3207,7 +3210,7 @@ mod tests {
 
         assert!(input_rx.try_recv().is_err());
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
-        let menu = app.state.context_menu.as_mut().expect("pane context menu");
+        let menu = app.state.context_menu_mut().expect("pane context menu");
         assert!(matches!(
             menu.kind,
             ContextMenuKind::Pane {
@@ -3252,7 +3255,7 @@ mod tests {
         });
 
         assert_eq!(app.state.mode, Mode::ContextMenu);
-        assert!(app.state.context_menu.is_some());
+        assert!(app.state.context_menu().is_some());
         assert!(app.state.right_click_passthrough.is_none());
         assert!(input_rx.try_recv().is_err());
     }
@@ -3307,7 +3310,7 @@ mod tests {
         });
 
         assert_eq!(app.state.mode, Mode::ContextMenu);
-        assert!(app.state.context_menu.is_some());
+        assert!(app.state.context_menu().is_some());
         assert!(app.state.right_click_passthrough.is_none());
         assert!(input_rx.try_recv().is_err());
     }
@@ -3344,18 +3347,26 @@ mod tests {
     #[test]
     fn hovering_context_menu_updates_highlight() {
         let mut app = app_for_mouse_test();
-        app.state.context_menu = Some(ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 0 },
-            x: 2,
-            y: 2,
-            list: ListCursor::new(0),
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
+                kind: ContextMenuKind::Workspace { ws_idx: 0 },
+                x: 2,
+                y: 2,
+                list: ListCursor::new(0),
+            }));
         app.state.mode = Mode::ContextMenu;
 
         let menu = app.state.context_menu_rect().unwrap();
         app.handle_mouse(mouse(MouseEventKind::Moved, menu.x + 2, menu.y + 2));
 
-        assert_eq!(app.state.context_menu.unwrap().list.selected, 1);
+        assert_eq!(
+            app.state
+                .take_context_menu()
+                .expect("overlay open")
+                .list
+                .selected,
+            1
+        );
     }
 
     #[test]
@@ -3509,7 +3520,10 @@ mod tests {
     fn clicking_open_worktree_row_selects_and_requests_open() {
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::OpenExistingWorktree;
-        app.state.worktree_open = Some(sample_worktree_open_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                sample_worktree_open_state(),
+            ));
         let inner =
             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
 
@@ -3519,7 +3533,7 @@ mod tests {
             inner.y + 5,
         ));
 
-        assert_eq!(app.state.worktree_open.as_ref().unwrap().selected, 1);
+        assert_eq!(app.state.worktree_open().unwrap().selected, 1);
         assert!(app.state.request_submit_worktree_open);
     }
 
@@ -3527,7 +3541,10 @@ mod tests {
     fn clicking_open_worktree_buttons_requests_open_or_cancels() {
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::OpenExistingWorktree;
-        app.state.worktree_open = Some(sample_worktree_open_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                sample_worktree_open_state(),
+            ));
         let inner =
             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
         let (open, _) = crate::ui::open_existing_worktree_button_rects(inner);
@@ -3538,12 +3555,15 @@ mod tests {
             open.y,
         ));
 
-        assert!(app.state.worktree_open.is_some());
+        assert!(app.state.worktree_open().is_some());
         assert!(app.state.request_submit_worktree_open);
 
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::OpenExistingWorktree;
-        app.state.worktree_open = Some(sample_worktree_open_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                sample_worktree_open_state(),
+            ));
         let inner =
             crate::ui::open_existing_worktree_inner_rect(app.state.screen_rect(), 2).unwrap();
         let (_, cancel) = crate::ui::open_existing_worktree_button_rects(inner);
@@ -3554,7 +3574,7 @@ mod tests {
             cancel.y,
         ));
 
-        assert!(app.state.worktree_open.is_none());
+        assert!(app.state.worktree_open().is_none());
         assert_eq!(app.state.mode, Mode::Navigate);
     }
 
@@ -3571,24 +3591,26 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::PaneMoveTargetPicker;
-        app.state.pane_move_target_picker =
-            Some(crate::app::state::PaneMoveTargetPickerState::new(
-                source_pane_id,
-                vec![
-                    crate::app::state::PaneMoveTargetItem::SpaceHeading {
-                        label: "main".into(),
-                    },
-                    crate::app::state::PaneMoveTargetItem::Destination(
-                        crate::app::state::PaneMoveTargetEntry {
-                            workspace_id: Some(app.state.workspaces[0].id.clone()),
-                            number: 2,
-                            label: "target".into(),
-                            target: crate::app::state::PaneMoveTarget::Tab {
-                                tab_id: target_tab_id,
-                            },
+        app.state
+            .set_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(
+                crate::app::state::PaneMoveTargetPickerState::new(
+                    source_pane_id,
+                    vec![
+                        crate::app::state::PaneMoveTargetItem::SpaceHeading {
+                            label: "main".into(),
                         },
-                    ),
-                ],
+                        crate::app::state::PaneMoveTargetItem::Destination(
+                            crate::app::state::PaneMoveTargetEntry {
+                                workspace_id: Some(app.state.workspaces[0].id.clone()),
+                                number: 2,
+                                label: "target".into(),
+                                target: crate::app::state::PaneMoveTarget::Tab {
+                                    tab_id: target_tab_id,
+                                },
+                            },
+                        ),
+                    ],
+                ),
             ));
         let inner = crate::ui::pane_move_target_inner_rect(app.state.screen_rect(), 2)
             .expect("picker rect");
@@ -3601,7 +3623,7 @@ mod tests {
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
-        assert!(app.state.pane_move_target_picker.is_none());
+        assert!(app.state.pane_move_target_picker().is_none());
         assert_eq!(app.state.mode, Mode::Terminal);
     }
 
@@ -3618,24 +3640,26 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::PaneMoveTargetPicker;
-        app.state.pane_move_target_picker =
-            Some(crate::app::state::PaneMoveTargetPickerState::new(
-                source_pane_id,
-                vec![
-                    crate::app::state::PaneMoveTargetItem::SpaceHeading {
-                        label: "main".into(),
-                    },
-                    crate::app::state::PaneMoveTargetItem::Destination(
-                        crate::app::state::PaneMoveTargetEntry {
-                            workspace_id: Some(app.state.workspaces[0].id.clone()),
-                            number: 2,
-                            label: "target".into(),
-                            target: crate::app::state::PaneMoveTarget::Tab {
-                                tab_id: target_tab_id,
-                            },
+        app.state
+            .set_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(
+                crate::app::state::PaneMoveTargetPickerState::new(
+                    source_pane_id,
+                    vec![
+                        crate::app::state::PaneMoveTargetItem::SpaceHeading {
+                            label: "main".into(),
                         },
-                    ),
-                ],
+                        crate::app::state::PaneMoveTargetItem::Destination(
+                            crate::app::state::PaneMoveTargetEntry {
+                                workspace_id: Some(app.state.workspaces[0].id.clone()),
+                                number: 2,
+                                label: "target".into(),
+                                target: crate::app::state::PaneMoveTarget::Tab {
+                                    tab_id: target_tab_id,
+                                },
+                            },
+                        ),
+                    ],
+                ),
             ));
         let inner = crate::ui::pane_move_target_inner_rect(app.state.screen_rect(), 2)
             .expect("picker rect");
@@ -3643,8 +3667,7 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::Moved, inner.x + 1, inner.y + 2));
         assert_eq!(
             app.state
-                .pane_move_target_picker
-                .as_ref()
+                .pane_move_target_picker()
                 .map(|picker| picker.list.selected),
             Some(1)
         );
@@ -3656,7 +3679,7 @@ mod tests {
         ));
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 2);
-        assert!(app.state.pane_move_target_picker.is_some());
+        assert!(app.state.pane_move_target_picker().is_some());
         assert_eq!(app.state.mode, Mode::PaneMoveTargetPicker);
     }
 
@@ -3664,27 +3687,33 @@ mod tests {
     fn scrolling_open_worktree_picker_moves_selection() {
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::OpenExistingWorktree;
-        app.state.worktree_open = Some(sample_worktree_open_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::OpenExistingWorktree(
+                sample_worktree_open_state(),
+            ));
 
         app.handle_mouse(mouse(MouseEventKind::ScrollDown, 1, 1));
-        assert_eq!(app.state.worktree_open.as_ref().unwrap().selected, 1);
+        assert_eq!(app.state.worktree_open().unwrap().selected, 1);
 
         app.handle_mouse(mouse(MouseEventKind::ScrollUp, 1, 1));
-        assert_eq!(app.state.worktree_open.as_ref().unwrap().selected, 0);
+        assert_eq!(app.state.worktree_open().unwrap().selected, 0);
     }
 
     #[test]
     fn clicking_remove_worktree_buttons_requests_remove_or_cancels() {
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::ConfirmRemoveWorktree;
-        app.state.worktree_remove = Some(crate::app::state::WorktreeRemoveState {
-            workspace_id: "issue".into(),
-            repo_root: "/repo/herdr".into(),
-            path: "/repo/herdr-issue".into(),
-            error: None,
-            removing: false,
-            force_confirmation: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                crate::app::state::WorktreeRemoveState {
+                    workspace_id: "issue".into(),
+                    repo_root: "/repo/herdr".into(),
+                    path: "/repo/herdr-issue".into(),
+                    error: None,
+                    removing: false,
+                    force_confirmation: false,
+                },
+            ));
         let popup = crate::ui::remove_worktree_popup_rect(app.state.screen_rect()).unwrap();
         let inner = Rect::new(
             popup.x + 1,
@@ -3700,19 +3729,22 @@ mod tests {
             remove.y,
         ));
 
-        assert!(app.state.worktree_remove.is_some());
+        assert!(app.state.worktree_remove().is_some());
         assert!(app.state.request_submit_worktree_remove);
 
         let mut app = app_for_mouse_test();
         app.state.mode = Mode::ConfirmRemoveWorktree;
-        app.state.worktree_remove = Some(crate::app::state::WorktreeRemoveState {
-            workspace_id: "issue".into(),
-            repo_root: "/repo/herdr".into(),
-            path: "/repo/herdr-issue".into(),
-            error: None,
-            removing: false,
-            force_confirmation: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ConfirmRemoveWorktree(
+                crate::app::state::WorktreeRemoveState {
+                    workspace_id: "issue".into(),
+                    repo_root: "/repo/herdr".into(),
+                    path: "/repo/herdr-issue".into(),
+                    error: None,
+                    removing: false,
+                    force_confirmation: false,
+                },
+            ));
         let popup = crate::ui::remove_worktree_popup_rect(app.state.screen_rect()).unwrap();
         let inner = Rect::new(
             popup.x + 1,
@@ -3728,7 +3760,7 @@ mod tests {
             cancel.y,
         ));
 
-        assert!(app.state.worktree_remove.is_none());
+        assert!(app.state.worktree_remove().is_none());
         assert_eq!(app.state.mode, Mode::Navigate);
     }
 
@@ -3740,12 +3772,13 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
 
-        app.state.context_menu = Some(ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 1 },
-            x: 2,
-            y: 2,
-            list: ListCursor::new(1),
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
+                kind: ContextMenuKind::Workspace { ws_idx: 1 },
+                x: 2,
+                y: 2,
+                list: ListCursor::new(1),
+            }));
         app.state.mode = Mode::ContextMenu;
         handle_context_menu_key(
             &mut app.state,
@@ -3780,12 +3813,13 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.confirm_close = false;
-        app.state.context_menu = Some(ContextMenuState {
-            kind: ContextMenuKind::Workspace { ws_idx: 1 },
-            x: 2,
-            y: 2,
-            list: ListCursor::new(1),
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
+                kind: ContextMenuKind::Workspace { ws_idx: 1 },
+                x: 2,
+                y: 2,
+                list: ListCursor::new(1),
+            }));
         app.state.mode = Mode::ContextMenu;
 
         let menu = app.state.context_menu_rect().unwrap();
@@ -3827,19 +3861,20 @@ mod tests {
         app.state.selected = 0;
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let runtime_count = app.terminal_runtimes.len();
-        app.state.context_menu = Some(ContextMenuState {
-            kind: ContextMenuKind::Pane {
-                ws_idx: 0,
-                tab_idx: 0,
-                pane_id,
-                source_pane_id: None,
-                has_manual_label: false,
-                right_click_passthrough: false,
-            },
-            x: 2,
-            y: 2,
-            list: ListCursor::new(1),
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
+                kind: ContextMenuKind::Pane {
+                    ws_idx: 0,
+                    tab_idx: 0,
+                    pane_id,
+                    source_pane_id: None,
+                    has_manual_label: false,
+                    right_click_passthrough: false,
+                },
+                x: 2,
+                y: 2,
+                list: ListCursor::new(1),
+            }));
         app.state.mode = Mode::ContextMenu;
 
         handle_context_menu_key(
@@ -4332,7 +4367,7 @@ mod tests {
 
         assert_eq!(app.state.workspaces[0].active_tab, 0);
         assert_eq!(app.state.workspaces[0].tabs.len(), 2);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
         assert!(app.state.tab_press.is_none());
         assert!(app.state.drag.is_none());
     }
@@ -4357,7 +4392,7 @@ mod tests {
         ));
 
         assert_eq!(app.state.workspaces[0].active_tab, 0);
-        let menu = app.state.context_menu.as_ref().expect("tab context menu");
+        let menu = app.state.context_menu().expect("tab context menu");
         assert_eq!(
             menu.kind,
             ContextMenuKind::Tab {
@@ -4399,7 +4434,7 @@ mod tests {
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
         assert_eq!(app.state.workspaces[0].display_name(), "one");
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
         assert_eq!(app.state.mode, Mode::Terminal);
         assert!(app
             .event_hub
@@ -4436,7 +4471,7 @@ mod tests {
             first_info.inner_rect.y + 1,
         ));
 
-        let menu_state = app.state.context_menu.as_ref().expect("pane context menu");
+        let menu_state = app.state.context_menu().expect("pane context menu");
         let close_idx = menu_state
             .items()
             .iter()
@@ -4453,7 +4488,7 @@ mod tests {
         ));
 
         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
         assert_eq!(app.state.mode, Mode::Terminal);
         assert!(app.event_hub.events_after(0).iter().any(|(_, event)| {
             matches!(event.event, crate::api::schema::EventKind::PaneClosed)
@@ -4489,7 +4524,7 @@ mod tests {
             pane_info.inner_rect.y + 1,
         ));
 
-        let menu_state = app.state.context_menu.as_ref().expect("pane context menu");
+        let menu_state = app.state.context_menu().expect("pane context menu");
         let close_idx = menu_state
             .items()
             .iter()
@@ -4508,7 +4543,7 @@ mod tests {
         assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.mode, Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
     }
 
     #[test]
@@ -4856,7 +4891,7 @@ mod tests {
         ));
 
         assert_eq!(app.state.mode, Mode::Navigate);
-        assert!(app.state.context_menu.is_none());
+        assert!(app.state.context_menu().is_none());
     }
 
     #[test]
@@ -5012,25 +5047,16 @@ mod tests {
             )
         };
 
-        let before = app
-            .state
-            .pane_todo_edit
-            .as_ref()
-            .expect("edit state")
-            .priority;
+        let before = app.state.pane_todo_edit().expect("edit state").priority;
         let action = click(&mut app, rects.priority);
         assert!(action.is_none(), "the priority row is handled in place");
         assert_ne!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .priority,
+            app.state.pane_todo_edit().expect("edit state").priority,
             before,
             "clicking the priority row must cycle the priority"
         );
 
-        let before = app.state.pane_todo_edit.as_ref().expect("edit state").link;
+        let before = app.state.pane_todo_edit().expect("edit state").link;
         let action = click(&mut app, rects.link);
         assert!(action.is_none(), "the link row is handled in place");
         assert_eq!(
@@ -5039,11 +5065,11 @@ mod tests {
             "clicking the link row opens the picker"
         );
         assert_eq!(
-            app.state.navigator.purpose,
+            app.state.navigator_purpose(),
             crate::app::state::NavigatorPurpose::PaneTodoLink
         );
         assert_eq!(
-            app.state.pane_todo_edit.as_ref().expect("edit state").link,
+            app.state.editing_pane_todo().expect("edit state").link,
             before,
             "opening the picker stages nothing on its own"
         );
@@ -5073,7 +5099,7 @@ mod tests {
     #[test]
     fn clicking_the_edit_modals_text_places_the_cursor_instead_of_cancelling() {
         let (mut app, _pane_id) = app_with_pane_todo_edit_open();
-        if let Some(edit) = app.state.pane_todo_edit.as_mut() {
+        if let Some(edit) = app.state.pane_todo_edit_mut() {
             edit.text = crate::ui::text_field::TextField::from_text(
                 "first\nsecond",
                 crate::terminal::todo::MAX_TODO_TEXT_LEN,
@@ -5100,7 +5126,7 @@ mod tests {
             Mode::PaneTodoEdit,
             "clicking the text must not cancel the edit"
         );
-        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        let edit = app.state.pane_todo_edit().expect("edit state");
         assert_eq!(edit.text.cursor_line(), 0);
         assert_eq!(edit.text.cursor_column(), 2);
 
@@ -5114,7 +5140,7 @@ mod tests {
                 text_area.y + 1,
             ),
         );
-        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        let edit = app.state.pane_todo_edit().expect("edit state");
         assert_eq!(edit.text.cursor_line(), 1);
         assert_eq!(edit.text.cursor_column(), "second".len());
     }
@@ -5194,7 +5220,7 @@ mod tests {
                 ),
             );
             assert!(
-                app.state.pane_todos.is_none(),
+                app.state.pane_todos().is_none(),
                 "a second click on the indicator closes it"
             );
         }
@@ -5347,7 +5373,7 @@ mod tests {
             "the indicator's early return must leave the split drag alone"
         );
         assert!(
-            app.state.pane_todos.is_none(),
+            app.state.pane_todos().is_none(),
             "only the drawn cells open the panel"
         );
     }
@@ -5383,7 +5409,7 @@ mod tests {
             "the drawn panel row wins over the covered indicator"
         );
         assert_eq!(
-            app.state.pane_todos.as_ref().map(|panel| panel.pane_id),
+            app.state.pane_todos().map(|panel| panel.pane_id),
             Some(upper),
             "a covered indicator must not dismiss the panel"
         );
@@ -5411,7 +5437,7 @@ mod tests {
         );
 
         assert!(
-            app.state.pane_todos.is_none(),
+            app.state.pane_todos().is_none(),
             "an uncovered indicator closes the panel it opened"
         );
     }
@@ -5530,7 +5556,7 @@ mod tests {
 
         assert!(action.is_none(), "a near-miss triggers no action at all");
         assert!(
-            app.state.pane_todos.is_some(),
+            app.state.pane_todos().is_some(),
             "missing a footer button must not dismiss the panel"
         );
     }
