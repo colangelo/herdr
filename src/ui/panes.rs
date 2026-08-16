@@ -1890,7 +1890,7 @@ mod tests {
     }
 
     fn row_text(buffer: &ratatui::buffer::Buffer, row: u16, width: u16) -> String {
-        (0..width).map(|x| buffer[(x, row)].symbol()).collect()
+        crate::ui::test_support::row_text(buffer, Rect::new(0, row, width, 1))
     }
 
     #[test]

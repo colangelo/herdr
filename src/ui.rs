@@ -21,6 +21,8 @@ mod sidebar;
 mod status;
 mod tab_surface;
 mod tabs;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod todo_panel;
 // pub(crate): the CLI reuses text helpers (e.g. relative_time_label).
 pub(crate) mod text;

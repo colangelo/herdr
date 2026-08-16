@@ -2194,11 +2194,7 @@ mod tests {
     use ratatui::{backend::TestBackend, layout::Direction, Terminal};
 
     fn row_text(buffer: &ratatui::buffer::Buffer, row: u16, width: u16) -> String {
-        (0..width)
-            .map(|x| buffer[(x, row)].symbol())
-            .collect::<String>()
-            .trim_end()
-            .to_string()
+        crate::ui::test_support::row_text_trimmed(buffer, Rect::new(0, row, width, 1))
     }
 
     fn find_symbol_x(buffer: &ratatui::buffer::Buffer, row: u16, width: u16, symbol: &str) -> u16 {
