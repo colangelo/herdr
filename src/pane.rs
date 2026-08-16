@@ -363,19 +363,40 @@ fn foreground_member_cwd_different_from_shell(
     None
 }
 
-/// Directory of the foreground job running one PTY below `pid`, when a wrapper
-/// process owns a nested PTY. `None` for the ordinary case where the pane's own
-/// child holds the terminal, so the caller keeps its existing answer.
+/// The directory of the shell a pane's user is interacting with.
+///
+/// The pane's own child answers this only when it *is* that shell. A wrapper -
+/// `atuin`, a container shim, an agent runner - re-runs the shell inside a PTY
+/// of its own and then never leaves the directory it was launched in, so the
+/// nested job is consulted first and the direct child is the fallback.
+///
+/// Takes its lookups so the ordering is testable without a real process tree.
+fn resolved_pane_cwd(
+    child_pid: u32,
+    nested_job: impl FnOnce(u32) -> Option<crate::platform::ForegroundJob>,
+    mut cwd_of: impl FnMut(u32) -> Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if child_pid == 0 {
+        return None;
+    }
+    nested_job(child_pid)
+        .and_then(|job| foreground_job_cwd(&job, &mut cwd_of))
+        .or_else(|| cwd_of(child_pid))
+}
+
+/// `resolved_pane_cwd` against the real process table.
 #[cfg(unix)]
-fn nested_foreground_job_cwd(pid: u32) -> Option<std::path::PathBuf> {
-    let job = crate::platform::nested_foreground_job(pid)?;
-    foreground_job_cwd(&job, usable_process_cwd)
+fn resolved_pane_cwd_now(child_pid: u32) -> Option<std::path::PathBuf> {
+    resolved_pane_cwd(
+        child_pid,
+        crate::platform::nested_foreground_job,
+        usable_process_cwd,
+    )
 }
 
 /// The job's directory: its leader's, falling back to any member that can
 /// answer. The leader is the process the user is actually sitting in front of,
 /// so a member that merely inherited a different directory must not win.
-#[cfg(unix)]
 fn foreground_job_cwd(
     job: &crate::platform::ForegroundJob,
     mut cwd_of: impl FnMut(u32) -> Option<std::path::PathBuf>,
@@ -3160,7 +3181,7 @@ impl PaneRuntime {
 
         let pid = self.child_pid.load(Ordering::Acquire);
         #[cfg(unix)]
-        if let Some(cwd) = nested_foreground_job_cwd(pid) {
+        if let Some(cwd) = resolved_pane_cwd_now(pid) {
             return Some(cwd);
         }
         crate::platform::process_cwd(pid)
@@ -3319,7 +3340,6 @@ mod tests {
         assert!(cmd.get_env("CODEX_THREAD_ID").is_none());
     }
 
-    #[cfg(unix)]
     fn test_foreground_job(process_group_id: u32, pids: &[u32]) -> crate::platform::ForegroundJob {
         crate::platform::ForegroundJob {
             process_group_id,
@@ -3336,7 +3356,55 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    fn test_cwd(pid: u32) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from(format!("/p{pid}")))
+    }
+
+    #[test]
+    fn resolved_pane_cwd_prefers_the_shell_below_a_nested_pty() {
+        let cwd = resolved_pane_cwd(7, |_| Some(test_foreground_job(20, &[20])), test_cwd);
+
+        assert_eq!(
+            cwd,
+            Some(std::path::PathBuf::from("/p20")),
+            "a wrapper's own directory must not outrank the shell it re-runs"
+        );
+    }
+
+    #[test]
+    fn resolved_pane_cwd_uses_the_direct_child_without_a_nested_pty() {
+        let cwd = resolved_pane_cwd(7, |_| None, test_cwd);
+
+        assert_eq!(cwd, Some(std::path::PathBuf::from("/p7")));
+    }
+
+    #[test]
+    fn resolved_pane_cwd_falls_back_to_the_child_when_the_nested_job_cannot_answer() {
+        let cwd = resolved_pane_cwd(
+            7,
+            |_| Some(test_foreground_job(20, &[20])),
+            |pid| (pid == 7).then(|| std::path::PathBuf::from("/p7")),
+        );
+
+        assert_eq!(cwd, Some(std::path::PathBuf::from("/p7")));
+    }
+
+    #[test]
+    fn resolved_pane_cwd_is_none_without_a_child_process() {
+        let cwd = resolved_pane_cwd(
+            0,
+            |_| panic!("a pane with no child must not be probed"),
+            test_cwd,
+        );
+
+        assert_eq!(cwd, None);
+    }
+
+    #[test]
+    fn resolved_pane_cwd_is_none_when_nothing_can_answer() {
+        assert_eq!(resolved_pane_cwd(7, |_| None, |_| None), None);
+    }
+
     #[test]
     fn foreground_job_cwd_prefers_the_leader_over_an_earlier_member() {
         let job = test_foreground_job(20, &[10, 20]);
@@ -3348,7 +3416,6 @@ mod tests {
         assert_eq!(cwd, Some(std::path::PathBuf::from("/p20")));
     }
 
-    #[cfg(unix)]
     #[test]
     fn foreground_job_cwd_falls_back_to_a_member_when_the_leader_cannot_answer() {
         let job = test_foreground_job(20, &[10, 20]);
@@ -3360,7 +3427,6 @@ mod tests {
         assert_eq!(cwd, Some(std::path::PathBuf::from("/p10")));
     }
 
-    #[cfg(unix)]
     #[test]
     fn foreground_job_cwd_is_none_when_nothing_can_answer() {
         let job = test_foreground_job(20, &[10, 20]);
