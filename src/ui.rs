@@ -1267,14 +1267,16 @@ mod tests {
         app.active = Some(0);
         app.selected = 0;
         app.mode = Mode::ProductAnnouncement;
-        app.product_announcement = Some(crate::app::state::ProductAnnouncementState {
-            version: "0.6.0".into(),
-            id: "keybinding-v2".into(),
-            title: "Keybinding syntax changed".into(),
-            body: "### Update\n- Body".into(),
-            scroll: 0,
-            preview: false,
-        });
+        app.set_overlay(crate::app::state::Overlay::ProductAnnouncement(
+            crate::app::state::ProductAnnouncementState {
+                version: "0.6.0".into(),
+                id: "keybinding-v2".into(),
+                title: "Keybinding syntax changed".into(),
+                body: "### Update\n- Body".into(),
+                scroll: 0,
+                preview: false,
+            },
+        ));
         app.config_diagnostic = Some(
             "unsafe direct keybinding: keys.new_workspace = \"n\"\nunsafe direct keybinding: keys.new_tab = \"c\""
                 .into(),

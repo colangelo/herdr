@@ -131,7 +131,9 @@ impl App {
                         mouse.column,
                         mouse.row,
                     ) {
-                        self.state.navigator.selected = idx;
+                        if let Some(nav) = self.state.navigator_mut() {
+                            nav.selected = idx;
+                        }
                         self.state
                             .ensure_navigator_selection_visible_from(&self.terminal_runtimes);
                     }
@@ -141,13 +143,17 @@ impl App {
                         .state
                         .navigator_search_contains(mouse.column, mouse.row)
                     {
-                        self.state.navigator.search_focused = true;
+                        if let Some(nav) = self.state.navigator_mut() {
+                            nav.search_focused = true;
+                        }
                     } else if let Some(idx) = self.state.navigator_row_index_at_from(
                         &self.terminal_runtimes,
                         mouse.column,
                         mouse.row,
                     ) {
-                        self.state.navigator.selected = idx;
+                        if let Some(nav) = self.state.navigator_mut() {
+                            nav.selected = idx;
+                        }
                         let target = self
                             .state
                             .navigator_rows_from(&self.terminal_runtimes)
@@ -171,7 +177,9 @@ impl App {
                     }
                 }
                 MouseEventKind::ScrollUp => {
-                    self.state.navigator.scroll = self.state.navigator.scroll.saturating_sub(3);
+                    if let Some(nav) = self.state.navigator_mut() {
+                        nav.scroll = nav.scroll.saturating_sub(3);
+                    }
                     self.state
                         .align_navigator_selection_to_scroll_from(&self.terminal_runtimes);
                 }
@@ -180,8 +188,9 @@ impl App {
                     let max = self
                         .state
                         .navigator_max_scroll_from(&self.terminal_runtimes, viewport);
-                    self.state.navigator.scroll =
-                        self.state.navigator.scroll.saturating_add(3).min(max);
+                    if let Some(nav) = self.state.navigator_mut() {
+                        nav.scroll = nav.scroll.saturating_add(3).min(max);
+                    }
                     self.state
                         .align_navigator_selection_to_scroll_from(&self.terminal_runtimes);
                 }
@@ -336,7 +345,7 @@ impl AppState {
             return None;
         }
         let line_idx = self
-            .navigator
+            .navigator()?
             .scroll
             .saturating_add(row.saturating_sub(body.y) as usize);
         let lines = crate::app::state::navigator_display_lines(
@@ -415,7 +424,7 @@ impl AppState {
     }
 
     fn release_notes_scroll_metrics(&self) -> Option<crate::pane::ScrollMetrics> {
-        let notes = self.release_notes.as_ref()?;
+        let notes = self.release_notes()?;
         let body = self.release_notes_body_rect()?;
         let viewport_rows = body.height.max(1) as usize;
         let lines = crate::ui::release_notes_display_lines(
@@ -489,7 +498,7 @@ impl AppState {
 
     fn set_release_notes_offset_from_bottom(&mut self, offset_from_bottom: usize) {
         let max_scroll = self.release_notes_max_scroll() as usize;
-        if let Some(notes) = &mut self.release_notes {
+        if let Some(notes) = self.release_notes_mut() {
             notes.scroll = max_scroll.saturating_sub(offset_from_bottom) as u16;
         }
     }
@@ -518,7 +527,7 @@ impl AppState {
     }
 
     fn product_announcement_scroll_metrics(&self) -> Option<crate::pane::ScrollMetrics> {
-        let announcement = self.product_announcement.as_ref()?;
+        let announcement = self.product_announcement()?;
         let body = self.product_announcement_body_rect()?;
         let viewport_rows = body.height.max(1) as usize;
         let lines = crate::ui::product_announcement_display_lines(announcement, &self.palette);
@@ -592,7 +601,7 @@ impl AppState {
 
     fn set_product_announcement_offset_from_bottom(&mut self, offset_from_bottom: usize) {
         let max_scroll = self.product_announcement_max_scroll() as usize;
-        if let Some(announcement) = &mut self.product_announcement {
+        if let Some(announcement) = self.product_announcement_mut() {
             announcement.scroll = max_scroll.saturating_sub(offset_from_bottom) as u16;
         }
     }
@@ -658,7 +667,7 @@ impl AppState {
         let max_offset_from_bottom = total_rows.saturating_sub(viewport_rows);
         Some(crate::pane::ScrollMetrics {
             offset_from_bottom: max_offset_from_bottom
-                .saturating_sub(self.keybind_help.scroll as usize),
+                .saturating_sub(self.keybind_help()?.scroll as usize),
             max_offset_from_bottom,
             viewport_rows,
         })
@@ -704,13 +713,17 @@ impl AppState {
 
     fn set_keybind_help_offset_from_bottom(&mut self, offset_from_bottom: usize) {
         let max_scroll = self.keybind_help_max_scroll() as usize;
-        self.keybind_help.scroll = max_scroll.saturating_sub(offset_from_bottom) as u16;
+        if let Some(help) = self.keybind_help_mut() {
+            help.scroll = max_scroll.saturating_sub(offset_from_bottom) as u16;
+        }
     }
 
     pub(super) fn scroll_keybind_help(&mut self, delta: i16) {
         let max_scroll = self.keybind_help_max_scroll();
-        let current = self.keybind_help.scroll as i16;
-        self.keybind_help.scroll = current.saturating_add(delta).clamp(0, max_scroll as i16) as u16;
+        if let Some(help) = self.keybind_help_mut() {
+            let current = help.scroll as i16;
+            help.scroll = current.saturating_add(delta).clamp(0, max_scroll as i16) as u16;
+        }
     }
 }
 
@@ -748,12 +761,17 @@ mod tests {
     #[test]
     fn clicking_keybind_help_back_button_leaves_help_open() {
         let mut app = app_for_mouse_test();
-        app.state.mode = Mode::KeybindHelp;
-        app.state.keybind_help.search_focused = true;
-        app.state.keybind_help.query = crate::ui::text_field::TextField::from_text(
-            "work",
-            crate::app::state::SEARCH_QUERY_MAX_CHARS,
-        );
+        app.state
+            .open_overlay(crate::app::state::Overlay::KeybindHelp(
+                crate::app::state::KeybindHelpState {
+                    scroll: 0,
+                    query: crate::ui::text_field::TextField::from_text(
+                        "work",
+                        crate::app::state::SEARCH_QUERY_MAX_CHARS,
+                    ),
+                    search_focused: true,
+                },
+            ));
 
         let rect = app.state.keybind_help_popup_rect();
         let inner = Rect::new(
@@ -771,8 +789,9 @@ mod tests {
         ));
 
         assert_eq!(app.state.mode, Mode::KeybindHelp);
-        assert!(!app.state.keybind_help.search_focused);
-        assert!(app.state.keybind_help.query.text().is_empty());
+        let help = app.state.keybind_help().expect("help stays open");
+        assert!(!help.search_focused);
+        assert!(help.query.text().is_empty());
     }
 
     #[test]
@@ -811,13 +830,13 @@ mod tests {
         let mut app = app_for_mouse_test();
         app.state.view.sidebar_rect = Rect::new(0, 0, 24, 16);
         app.state.view.terminal_area = Rect::new(24, 0, 96, 16);
-        app.state.release_notes = Some(crate::app::state::ReleaseNotesState {
+        app.state.set_overlay(crate::app::state::Overlay::ReleaseNotes(crate::app::state::ReleaseNotesState {
             version: "9.9.9".into(),
             body: "### Added\n- Custom command keybindings now accept an optional description field.\n\n### Fixed\n- Sidebar Git status refresh now deduplicates workspaces.\n- Large restored sessions no longer leave panes without shells after startup.\n- Pane shutdown no longer warns after the direct child has already exited.\n- Closing the last pane or tab in a parent worktree workspace now shows the existing confirmation before closing the whole worktree group.\n- Update prompts, toasts, and docs now distinguish installing a new binary from stopping or reattaching a running Herdr session to use it."
                 .into(),
             scroll: 0,
             preview: true,
-        });
+        }));
         app.state.update_install_command = "brew update && brew upgrade herdr".into();
 
         let inner = app.state.release_notes_modal_inner().unwrap();

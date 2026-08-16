@@ -4410,7 +4410,7 @@ impl HeadlessServer {
             && self.app.state.popup_pane.is_none()
             && self.app.state.selection.is_none()
             && self.app.state.copy_mode.is_none()
-            && self.app.state.context_menu.is_none()
+            && self.app.state.context_menu().is_none()
             && self.app.state.toast.is_none()
             && self.app.state.copy_feedback.is_none()
             && !self.app.full_redraw_pending
@@ -6420,8 +6420,17 @@ next_tab = ""
             writer,
         }));
         server.app.state.mode = crate::app::Mode::Settings;
-        server.app.state.settings.section = crate::app::state::SettingsSection::Toast;
-        server.app.state.settings.list.selected = 1;
+        server
+            .app
+            .state
+            .open_overlay(crate::app::state::Overlay::Settings(
+                crate::app::state::SettingsState {
+                    section: crate::app::state::SettingsSection::Toast,
+                    list: crate::app::state::ListCursor::new(1),
+                    original_palette: None,
+                    original_theme: None,
+                },
+            ));
 
         assert!(server.handle_server_event(ServerEvent::ClientInput {
             client_id: 1,
@@ -6496,8 +6505,17 @@ next_tab = ""
             writer: writer_a,
         }));
         server.app.state.mode = crate::app::Mode::Settings;
-        server.app.state.settings.section = crate::app::state::SettingsSection::Toast;
-        server.app.state.settings.list.selected = 1;
+        server
+            .app
+            .state
+            .open_overlay(crate::app::state::Overlay::Settings(
+                crate::app::state::SettingsState {
+                    section: crate::app::state::SettingsSection::Toast,
+                    list: crate::app::state::ListCursor::new(1),
+                    original_palette: None,
+                    original_theme: None,
+                },
+            ));
 
         assert!(server.handle_server_event(ServerEvent::ClientInput {
             client_id: 1,
@@ -8907,15 +8925,20 @@ next_tab = ""
 
         assert_eq!(server.app.state.mode, crate::app::Mode::Settings);
         assert_eq!(
-            server.app.state.settings.section,
-            crate::app::state::SettingsSection::Integrations
+            server.app.state.settings().map(|settings| settings.section),
+            Some(crate::app::state::SettingsSection::Integrations)
         );
     }
 
     #[test]
     fn semantic_client_escape_closes_keybind_help() {
         let mut server = test_headless_server();
-        server.app.state.mode = crate::app::Mode::KeybindHelp;
+        server
+            .app
+            .state
+            .open_overlay(crate::app::state::Overlay::KeybindHelp(
+                crate::app::state::KeybindHelpState::default(),
+            ));
         server.clients.insert(
             1,
             ClientConnection::new(
@@ -8951,7 +8974,12 @@ next_tab = ""
     #[test]
     fn semantic_client_down_scrolls_keybind_help() {
         let mut server = test_headless_server();
-        server.app.state.mode = crate::app::Mode::KeybindHelp;
+        server
+            .app
+            .state
+            .open_overlay(crate::app::state::Overlay::KeybindHelp(
+                crate::app::state::KeybindHelpState::default(),
+            ));
         server.clients.insert(
             1,
             ClientConnection::new(
@@ -8983,7 +9011,10 @@ next_tab = ""
         }));
 
         assert_eq!(server.app.state.mode, crate::app::Mode::KeybindHelp);
-        assert_eq!(server.app.state.keybind_help.scroll, 1);
+        assert_eq!(
+            server.app.state.keybind_help().map(|help| help.scroll),
+            Some(1)
+        );
     }
 
     #[tokio::test]

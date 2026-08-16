@@ -227,7 +227,7 @@ impl App {
                 true
             }
             Mode::PaneTodoEdit => {
-                let Some(edit) = self.state.pane_todo_edit.as_mut() else {
+                let Some(edit) = self.state.pane_todo_edit_mut() else {
                     return false;
                 };
                 // Newlines survive — a todo may hold more than one line — but
@@ -244,8 +244,7 @@ impl App {
             Mode::OpenExistingWorktree => {
                 if !self
                     .state
-                    .worktree_open
-                    .as_ref()
+                    .worktree_open()
                     .is_some_and(|open| open.search_focused)
                 {
                     return false;
@@ -254,14 +253,18 @@ impl App {
                 true
             }
             Mode::Navigator => {
-                if !self.state.navigator.search_focused {
+                if !self.state.navigator().is_some_and(|nav| nav.search_focused) {
                     return false;
                 }
                 insert_navigator_search_text(&mut self.state, &self.terminal_runtimes, text);
                 true
             }
             Mode::KeybindHelp => {
-                if !self.state.keybind_help.search_focused {
+                if !self
+                    .state
+                    .keybind_help()
+                    .is_some_and(|help| help.search_focused)
+                {
                     return false;
                 }
                 insert_keybind_help_query_text(&mut self.state, text);
@@ -305,13 +308,13 @@ impl App {
             KeyCode::PageUp => self.scroll_release_notes(-8),
             KeyCode::PageDown => self.scroll_release_notes(8),
             KeyCode::Home => {
-                if let Some(notes) = &mut self.state.release_notes {
+                if let Some(notes) = self.state.release_notes_mut() {
                     notes.scroll = 0;
                 }
             }
             KeyCode::End => {
                 let max_scroll = self.state.release_notes_max_scroll();
-                if let Some(notes) = &mut self.state.release_notes {
+                if let Some(notes) = self.state.release_notes_mut() {
                     notes.scroll = max_scroll;
                 }
             }
@@ -331,13 +334,13 @@ impl App {
             KeyCode::PageUp => self.scroll_product_announcement(-8),
             KeyCode::PageDown => self.scroll_product_announcement(8),
             KeyCode::Home => {
-                if let Some(announcement) = &mut self.state.product_announcement {
+                if let Some(announcement) = self.state.product_announcement_mut() {
                     announcement.scroll = 0;
                 }
             }
             KeyCode::End => {
                 let max_scroll = self.state.product_announcement_max_scroll();
-                if let Some(announcement) = &mut self.state.product_announcement {
+                if let Some(announcement) = self.state.product_announcement_mut() {
                     announcement.scroll = max_scroll;
                 }
             }
@@ -414,7 +417,7 @@ impl App {
         }
 
         let previous_agent_panel_sort = self.state.agent_panel_sort;
-        let previous_settings_section = self.state.settings.section;
+        let previous_settings_section = self.state.settings().map(|settings| settings.section);
         if !handled_pane_double_click {
             if let Some(action) =
                 self.state
@@ -491,8 +494,9 @@ impl App {
                 self.selection_highlight_clear_deadline = None;
             }
         }
-        if previous_settings_section != crate::app::state::SettingsSection::Integrations
-            && self.state.settings.section == crate::app::state::SettingsSection::Integrations
+        let settings_section = self.state.settings().map(|settings| settings.section);
+        if previous_settings_section != Some(crate::app::state::SettingsSection::Integrations)
+            && settings_section == Some(crate::app::state::SettingsSection::Integrations)
         {
             self.refresh_integration_recommendations();
         }
@@ -772,12 +776,11 @@ pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
         | Mode::NewLinkedWorktree
         | Mode::PaneTodoEdit => true,
         Mode::OpenExistingWorktree => state
-            .worktree_open
-            .as_ref()
+            .worktree_open()
             .is_some_and(|open| open.search_focused),
         Mode::PaneMoveTargetPicker => false,
-        Mode::Navigator => state.navigator.search_focused,
-        Mode::KeybindHelp => state.keybind_help.search_focused,
+        Mode::Navigator => state.navigator().is_some_and(|nav| nav.search_focused),
+        Mode::KeybindHelp => state.keybind_help().is_some_and(|help| help.search_focused),
         Mode::Copy => state
             .copy_mode
             .as_ref()
@@ -998,16 +1001,25 @@ mod tests {
     #[tokio::test]
     async fn paste_routes_to_keybind_help_query_only_when_searching() {
         let mut app = test_app();
-        app.state.mode = Mode::KeybindHelp;
+        app.state
+            .open_overlay(crate::app::state::Overlay::KeybindHelp(
+                crate::app::state::KeybindHelpState::default(),
+            ));
         app.handle_paste("ignored".into()).await;
-        assert!(app.state.keybind_help.query.text().is_empty());
+        assert!(app
+            .state
+            .keybind_help()
+            .is_some_and(|help| help.query.text().is_empty()));
 
-        app.state.keybind_help.search_focused = true;
-        app.state.keybind_help.scroll = 3;
+        if let Some(help) = app.state.keybind_help_mut() {
+            help.search_focused = true;
+            help.scroll = 3;
+        }
         app.handle_paste("work\nspace".into()).await;
 
-        assert_eq!(app.state.keybind_help.query.text(), "workspace");
-        assert_eq!(app.state.keybind_help.scroll, 0);
+        let help = app.state.keybind_help().expect("help stays open");
+        assert_eq!(help.query.text(), "workspace");
+        assert_eq!(help.scroll, 0);
     }
 
     #[tokio::test]
@@ -1016,26 +1028,28 @@ mod tests {
         app.state.mode = Mode::NewLinkedWorktree;
         app.state.set_name_input("generated-branch");
         app.state.name_input_replace_on_type = true;
-        app.state.worktree_create = Some(crate::app::state::WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: "/repo/herdr".into(),
-            source_existing_membership: None,
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: "generated-branch".into(),
-            checkout_path: "/repo/herdr-generated-branch".into(),
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                crate::app::state::WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_existing_membership: None,
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: "generated-branch".into(),
+                    checkout_path: "/repo/herdr-generated-branch".into(),
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.handle_paste("feature/linear-302".into()).await;
 
         assert_eq!(app.state.name_input.text(), "feature/linear-302");
         assert_eq!(
             app.state
-                .worktree_create
-                .as_ref()
+                .worktree_create()
                 .map(|create| create.branch.as_str()),
             Some("feature/linear-302")
         );
@@ -1077,12 +1091,7 @@ mod tests {
         assert!(app.paste_into_active_text_input("first\nse\x1bcond\ttab"));
 
         assert_eq!(
-            app.state
-                .pane_todo_edit
-                .as_ref()
-                .expect("edit state")
-                .text
-                .text(),
+            app.state.pane_todo_edit().expect("edit state").text.text(),
             "first\nsecondtab"
         );
     }
@@ -1103,8 +1112,7 @@ mod tests {
 
         assert_eq!(
             app.state
-                .pane_todo_edit
-                .as_ref()
+                .pane_todo_edit()
                 .expect("edit state")
                 .text
                 .text()
@@ -1121,16 +1129,22 @@ mod tests {
         state.mode = Mode::RenameTab;
         assert!(modal_paste_target_active(&state));
 
-        state.mode = Mode::Navigator;
-        state.navigator.search_focused = false;
+        state.open_overlay(crate::app::state::Overlay::Navigator(
+            crate::app::state::NavigatorState::default(),
+        ));
         assert!(!modal_paste_target_active(&state));
-        state.navigator.search_focused = true;
+        if let Some(nav) = state.navigator_mut() {
+            nav.search_focused = true;
+        }
         assert!(modal_paste_target_active(&state));
 
-        state.mode = Mode::KeybindHelp;
-        state.keybind_help.search_focused = false;
+        state.open_overlay(crate::app::state::Overlay::KeybindHelp(
+            crate::app::state::KeybindHelpState::default(),
+        ));
         assert!(!modal_paste_target_active(&state));
-        state.keybind_help.search_focused = true;
+        if let Some(help) = state.keybind_help_mut() {
+            help.search_focused = true;
+        }
         assert!(modal_paste_target_active(&state));
 
         state.mode = Mode::ConfirmClose;

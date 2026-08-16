@@ -23,7 +23,7 @@ pub(super) enum SettingsAction {
 
 impl App {
     pub(crate) fn handle_settings_key(&mut self, key: KeyEvent) {
-        let previous_section = self.state.settings.section;
+        let previous_section = self.state.settings_section();
         if let Some(action) = update_settings_state(&mut self.state, key) {
             match action {
                 SettingsAction::SaveTheme(name) => self.save_theme(&name),
@@ -39,7 +39,7 @@ impl App {
             }
         }
         if previous_section != SettingsSection::Integrations
-            && self.state.settings.section == SettingsSection::Integrations
+            && self.state.settings_section() == SettingsSection::Integrations
         {
             self.refresh_integration_recommendations();
         }
@@ -94,7 +94,7 @@ fn toast_delivery_for_index(idx: usize) -> ToastDelivery {
 fn preview_selected_theme(state: &mut AppState) {
     use crate::app::state::Palette;
 
-    let name = THEME_NAMES[state.settings.list.selected];
+    let name = THEME_NAMES[state.settings_list().selected];
     if let Some(mut palette) = Palette::from_name(name) {
         if let Some(custom) = &state.theme_runtime.custom {
             palette = palette.with_overrides(custom);
@@ -108,11 +108,21 @@ fn preview_selected_theme(state: &mut AppState) {
 }
 
 fn cancel_settings(state: &mut AppState) {
-    if let Some(palette) = state.settings.original_palette.take() {
-        state.palette = palette;
-    }
-    if let Some(theme_name) = state.settings.original_theme.take() {
-        state.theme_name = theme_name;
+    // Restore before the overlay goes away: the originals live on its state,
+    // and `leave_modal` is what drops it.
+    let restored = state.settings_mut().map(|settings| {
+        (
+            settings.original_palette.take(),
+            settings.original_theme.take(),
+        )
+    });
+    if let Some((palette, theme_name)) = restored {
+        if let Some(palette) = palette {
+            state.palette = palette;
+        }
+        if let Some(theme_name) = theme_name {
+            state.theme_name = theme_name;
+        }
     }
     super::modal::leave_modal(state);
 }
@@ -125,11 +135,13 @@ fn integrations_need_install(state: &AppState) -> bool {
 }
 
 fn apply_settings(state: &mut AppState) -> Option<SettingsAction> {
-    match state.settings.section {
+    match state.settings_section() {
         SettingsSection::Theme => {
             let theme_name = state.theme_name.clone();
-            state.settings.original_palette = None;
-            state.settings.original_theme = None;
+            if let Some(settings) = state.settings_mut() {
+                settings.original_palette = None;
+                settings.original_theme = None;
+            }
             super::modal::leave_modal(state);
             Some(SettingsAction::SaveTheme(theme_name))
         }
@@ -155,34 +167,36 @@ fn settings_list_chord(state: &mut AppState, key: KeyEvent, len: usize) -> bool 
     let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
         return false;
     };
-    chord.apply(&mut state.settings.list, len, len);
+    let mut list = state.settings_list();
+    chord.apply(&mut list, len, len);
+    state.set_settings_list(list);
     true
 }
 
 /// The theme list previews as it moves, so the section wraps the shared chords
 /// rather than using them bare.
 fn settings_theme_chord(state: &mut AppState, key: KeyEvent) -> bool {
-    let before = state.settings.list.selected;
+    let before = state.settings_list().selected;
     if !settings_list_chord(state, key, THEME_NAMES.len()) {
         return false;
     }
-    if state.settings.list.selected != before {
+    if state.settings_list().selected != before {
         preview_selected_theme(state);
     }
     true
 }
 
 pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Option<SettingsAction> {
-    match state.settings.section {
+    match state.settings_section() {
         SettingsSection::Theme => match key.code {
             _ if settings_theme_chord(state, key) => {}
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Indicators;
-                state.settings.list.selected = status_indicator_index(state.status_indicators);
+                state.set_settings_section(SettingsSection::Indicators);
+                state.set_settings_selected(status_indicator_index(state.status_indicators));
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Integrations;
-                state.settings.list.selected = 0;
+                state.set_settings_section(SettingsSection::Integrations);
+                state.set_settings_selected(0);
             }
             _ => match super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS) {
                 Some(super::modal::ModalAction::Apply) => return apply_settings(state),
@@ -193,16 +207,16 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
         SettingsSection::Indicators => match key.code {
             _ if settings_list_chord(state, key, 2) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
-                let style = status_indicator_for_index(state.settings.list.selected);
+                let style = status_indicator_for_index(state.settings_list().selected);
                 return Some(SettingsAction::SaveStatusIndicators(style));
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Theme;
-                state.settings.list.selected = current_theme_index(&state.theme_name);
+                state.set_settings_section(SettingsSection::Theme);
+                state.set_settings_selected(current_theme_index(&state.theme_name));
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Sound;
-                state.settings.list.selected = usize::from(!state.sound_enabled());
+                state.set_settings_section(SettingsSection::Sound);
+                state.set_settings_selected(usize::from(!state.sound_enabled()));
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -215,16 +229,16 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
         SettingsSection::Sound => match key.code {
             _ if settings_list_chord(state, key, 2) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
-                let enabled = state.settings.list.selected == 0;
+                let enabled = state.settings_list().selected == 0;
                 return Some(SettingsAction::SaveSound(enabled));
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Toast;
-                state.settings.list.selected = toast_delivery_index(state.toast_delivery());
+                state.set_settings_section(SettingsSection::Toast);
+                state.set_settings_selected(toast_delivery_index(state.toast_delivery()));
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Indicators;
-                state.settings.list.selected = status_indicator_index(state.status_indicators);
+                state.set_settings_section(SettingsSection::Indicators);
+                state.set_settings_selected(status_indicator_index(state.status_indicators));
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -237,16 +251,16 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
         SettingsSection::Toast => match key.code {
             _ if settings_list_chord(state, key, 4) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
-                let delivery = toast_delivery_for_index(state.settings.list.selected);
+                let delivery = toast_delivery_for_index(state.settings_list().selected);
                 return Some(SettingsAction::SaveToastDelivery(delivery));
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Sound;
-                state.settings.list.selected = usize::from(!state.sound_enabled());
+                state.set_settings_section(SettingsSection::Sound);
+                state.set_settings_selected(usize::from(!state.sound_enabled()));
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::PaneLabels;
-                state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                state.set_settings_section(SettingsSection::PaneLabels);
+                state.set_settings_selected(usize::from(!state.agent_border_labels_enabled()));
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -259,16 +273,16 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
         SettingsSection::PaneLabels => match key.code {
             _ if settings_list_chord(state, key, 2) => {}
             KeyCode::Enter | KeyCode::Char(' ') => {
-                let enabled = state.settings.list.selected == 0;
+                let enabled = state.settings_list().selected == 0;
                 return Some(SettingsAction::SaveAgentBorderLabels(enabled));
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::Toast;
-                state.settings.list.selected = toast_delivery_index(state.toast_delivery());
+                state.set_settings_section(SettingsSection::Toast);
+                state.set_settings_selected(toast_delivery_index(state.toast_delivery()));
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Integrations;
-                state.settings.list.selected = 0;
+                state.set_settings_section(SettingsSection::Integrations);
+                state.set_settings_selected(0);
             }
             _ => {
                 if let Some(super::modal::ModalAction::Close) =
@@ -283,12 +297,12 @@ pub(super) fn update_settings_state(state: &mut AppState, key: KeyEvent) -> Opti
                 return Some(SettingsAction::InstallRecommendedIntegrations);
             }
             KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
-                state.settings.section = SettingsSection::PaneLabels;
-                state.settings.list.selected = usize::from(!state.agent_border_labels_enabled());
+                state.set_settings_section(SettingsSection::PaneLabels);
+                state.set_settings_selected(usize::from(!state.agent_border_labels_enabled()));
             }
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
-                state.settings.section = SettingsSection::Theme;
-                state.settings.list.selected = current_theme_index(&state.theme_name);
+                state.set_settings_section(SettingsSection::Theme);
+                state.set_settings_selected(current_theme_index(&state.theme_name));
             }
             _ => match super::modal::modal_action_from_key(&key, super::modal::SETTINGS_ACTIONS) {
                 Some(super::modal::ModalAction::Apply) => return apply_settings(state),
@@ -307,17 +321,22 @@ pub(crate) fn open_settings(state: &mut AppState) {
 
 pub(crate) fn open_settings_at(state: &mut AppState, section: SettingsSection) {
     state.integration_install_messages.clear();
-    state.settings.original_palette = Some(state.palette.clone());
-    state.settings.original_theme = Some(state.theme_name.clone());
-    state.settings.section = section;
-    state.settings.list.selected = match section {
+    state.open_overlay(crate::app::state::Overlay::Settings(
+        crate::app::state::SettingsState {
+            section,
+            list: crate::app::state::ListCursor::new(0),
+            original_palette: Some(state.palette.clone()),
+            original_theme: Some(state.theme_name.clone()),
+        },
+    ));
+    state.set_settings_selected(match section {
         SettingsSection::Theme => current_theme_index(&state.theme_name),
         SettingsSection::Indicators => status_indicator_index(state.status_indicators),
         SettingsSection::Sound => usize::from(!state.sound_enabled()),
         SettingsSection::Toast => toast_delivery_index(state.toast_delivery()),
         SettingsSection::PaneLabels => usize::from(!state.agent_border_labels_enabled()),
         SettingsSection::Integrations => 0,
-    };
+    });
     state.mode = Mode::Settings;
 }
 
@@ -375,11 +394,12 @@ impl AppState {
             return None;
         }
 
-        match self.settings.section {
+        match self.settings_section() {
             SettingsSection::Theme => {
                 let max_visible = area.height as usize;
-                let scroll = if self.settings.list.selected >= max_visible {
-                    self.settings.list.selected - max_visible + 1
+                let selected = self.settings_list().selected;
+                let scroll = if selected >= max_visible {
+                    selected - max_visible + 1
                 } else {
                     0
                 };
@@ -418,8 +438,8 @@ impl AppState {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(section) = self.settings_tab_at(mouse.column, mouse.row) {
-                    self.settings.section = section;
-                    self.settings.list.select(match section {
+                    self.set_settings_section(section);
+                    self.set_settings_selected(match section {
                         SettingsSection::Theme => current_theme_index(&self.theme_name),
                         SettingsSection::Indicators => {
                             status_indicator_index(self.status_indicators)
@@ -434,8 +454,8 @@ impl AppState {
                     return None;
                 }
                 if let Some(idx) = self.settings_list_index_at(mouse.column, mouse.row) {
-                    self.settings.list.select(idx);
-                    return match self.settings.section {
+                    self.set_settings_selected(idx);
+                    return match self.settings_section() {
                         SettingsSection::Theme => {
                             preview_selected_theme(self);
                             None
@@ -462,7 +482,7 @@ impl AppState {
                 let inner = self.settings_inner_rect();
                 let show_primary = crate::ui::settings_show_primary_action(self);
                 let (apply, close) =
-                    crate::ui::settings_button_rects(inner, self.settings.section, show_primary);
+                    crate::ui::settings_button_rects(inner, self.settings_section(), show_primary);
                 let mut buttons = vec![(close, super::modal::ModalAction::Close)];
                 if let Some(apply) = apply {
                     buttons.insert(0, (apply, super::modal::ModalAction::Apply));
@@ -509,7 +529,7 @@ mod tests {
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
         );
         assert_eq!(
-            state.settings.section,
+            state.settings_section(),
             crate::app::state::SettingsSection::Indicators
         );
 
@@ -528,7 +548,7 @@ mod tests {
     fn settings_indicator_choice_returns_save_action() {
         let mut state = state_with_workspaces(&["test"]);
         open_settings_at(&mut state, SettingsSection::Indicators);
-        state.settings.list.selected = 1;
+        state.set_settings_selected(1);
 
         let action = update_settings_state(
             &mut state,
@@ -549,8 +569,8 @@ mod tests {
     fn settings_sound_toggle_returns_save_action() {
         let mut state = state_with_workspaces(&["test"]);
         open_settings(&mut state);
-        state.settings.section = crate::app::state::SettingsSection::Sound;
-        state.settings.list.selected = 0;
+        state.set_settings_section(crate::app::state::SettingsSection::Sound);
+        state.set_settings_selected(0);
 
         let action = update_settings_state(
             &mut state,
@@ -571,25 +591,25 @@ mod tests {
             &mut state,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
         );
-        assert_eq!(state.settings.section, SettingsSection::Integrations);
+        assert_eq!(state.settings_section(), SettingsSection::Integrations);
 
         update_settings_state(
             &mut state,
             KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()),
         );
-        assert_eq!(state.settings.section, SettingsSection::Theme);
+        assert_eq!(state.settings_section(), SettingsSection::Theme);
 
         update_settings_state(
             &mut state,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
         );
-        assert_eq!(state.settings.section, SettingsSection::Integrations);
+        assert_eq!(state.settings_section(), SettingsSection::Integrations);
 
         update_settings_state(
             &mut state,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::empty()),
         );
-        assert_eq!(state.settings.section, SettingsSection::PaneLabels);
+        assert_eq!(state.settings_section(), SettingsSection::PaneLabels);
     }
 
     #[test]
@@ -614,12 +634,12 @@ mod tests {
     fn settings_hover_does_not_change_selection() {
         let mut app = app_for_mouse_test();
         open_settings(&mut app.state);
-        app.state.settings.list.select(0);
+        app.state.set_settings_selected(0);
 
         let area = app.state.settings_content_rect();
         app.handle_mouse(mouse(MouseEventKind::Moved, area.x + 2, area.y + 2));
 
-        assert_eq!(app.state.settings.list.selected, 0);
+        assert_eq!(app.state.settings_list().selected, 0);
     }
 
     #[test]

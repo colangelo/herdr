@@ -20,7 +20,7 @@ pub(crate) const RELEASE_NOTES_MODAL_SIZE: (u16, u16) = (80, 24);
 pub(crate) const PRODUCT_ANNOUNCEMENT_MODAL_SIZE: (u16, u16) = (88, 24);
 
 pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(notes) = &app.release_notes else {
+    let Some(notes) = app.release_notes() else {
         return;
     };
 
@@ -137,7 +137,7 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
 }
 
 pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(announcement) = &app.product_announcement else {
+    let Some(announcement) = app.product_announcement() else {
         return;
     };
 
@@ -564,13 +564,14 @@ mod tests {
     #[test]
     fn snapshot_release_notes() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
-            app.release_notes = Some(crate::app::state::ReleaseNotesState {
-                version: "0.9.9".to_string(),
-                body: "- one thing changed\n- another thing changed".to_string(),
-                scroll: 0,
-                preview: false,
-            });
-            app.mode = crate::app::state::Mode::ReleaseNotes;
+            app.open_overlay(crate::app::state::Overlay::ReleaseNotes(
+                crate::app::state::ReleaseNotesState {
+                    version: "0.9.9".to_string(),
+                    body: "- one thing changed\n- another thing changed".to_string(),
+                    scroll: 0,
+                    preview: false,
+                },
+            ));
         })
         .assert(
             Rect::new(2, 1, 76, 23),

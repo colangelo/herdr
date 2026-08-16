@@ -615,7 +615,21 @@ impl App {
         let theme_runtime = theme_runtime_config(config, true);
         let (theme_palette, theme_name) = resolve_effective_theme(&theme_runtime, None);
 
+        // The announcement is the one overlay that can be open before the
+        // first frame, so it is built with the state rather than opened later.
+        let overlay = startup_product_announcement.map(|announcement| {
+            state::Overlay::ProductAnnouncement(state::ProductAnnouncementState {
+                version: announcement.version,
+                id: announcement.id,
+                title: announcement.title,
+                body: announcement.body,
+                scroll: 0,
+                preview: announcement.preview,
+            })
+        });
+
         let mut state = AppState {
+            overlay,
             terminals: std::collections::HashMap::new(),
             direct_attach_resize_locks: std::collections::HashSet::new(),
             pane_id_aliases: std::collections::HashMap::new(),
@@ -647,10 +661,6 @@ impl App {
             rename_pane_target: None,
             confirm_close_pane: None,
             confirm_respawn_pane: None,
-            worktree_create: None,
-            worktree_open: None,
-            pane_move_target_picker: None,
-            worktree_remove: None,
             worktree_directory,
             collapsed_space_keys,
             request_complete_onboarding: false,
@@ -658,19 +668,6 @@ impl App {
                 crate::app::state::NAME_INPUT_MAX_CHARS,
             ),
             name_input_replace_on_type: false,
-            release_notes: None,
-            product_announcement: startup_product_announcement.map(|announcement| {
-                state::ProductAnnouncementState {
-                    version: announcement.version,
-                    id: announcement.id,
-                    title: announcement.title,
-                    body: announcement.body,
-                    scroll: 0,
-                    preview: announcement.preview,
-                }
-            }),
-            keybind_help: state::KeybindHelpState::default(),
-            navigator: state::NavigatorState::default(),
             copy_mode: None,
             app_scroll: None,
             workspace_scroll: 0,
@@ -704,7 +701,6 @@ impl App {
             tab_presses: HashMap::new(),
             selection: None,
             selection_autoscroll: None,
-            context_menu: None,
             update_available,
             update_install_command,
             latest_release_notes_available,
@@ -712,9 +708,6 @@ impl App {
             config_diagnostic,
             toast: None,
             notification_log: state::NotificationLog::default(),
-            notification_center: None,
-            pane_todos: None,
-            pane_todo_edit: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -851,12 +844,6 @@ impl App {
             theme_runtime,
             host_terminal_appearance: None,
             host_terminal_appearance_explicit: false,
-            settings: state::SettingsState {
-                section: state::SettingsSection::Theme,
-                list: state::ListCursor::new(0),
-                original_palette: None,
-                original_theme: None,
-            },
             integration_recommendations: crate::integration::integration_recommendations(),
             agent_manifest_summaries,
             agent_manifest_update_status: crate::detect::manifest_update::load_status(),
@@ -867,7 +854,6 @@ impl App {
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
-            global_menu: state::ListCursor::new(0),
             host_terminal_theme: crate::terminal_theme::TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             host_mouse_pixels: None,
@@ -1434,11 +1420,11 @@ impl App {
     pub(crate) fn dismiss_release_notes(&mut self) {
         let preview = self
             .state
-            .release_notes
-            .as_ref()
+            .release_notes()
             .is_some_and(|notes| notes.preview);
 
-        self.state.release_notes = None;
+        self.state
+            .close_overlay(crate::app::state::OverlayKind::ReleaseNotes);
         if !preview {
             if let Err(err) = crate::release_notes::mark_current_version_seen() {
                 self.state.config_diagnostic =
@@ -1447,7 +1433,7 @@ impl App {
             }
         }
 
-        if self.state.product_announcement.is_some() {
+        if self.state.product_announcement().is_some() {
             self.state.mode = Mode::ProductAnnouncement;
         } else {
             self.state.mode = if self.state.active.is_some() {
@@ -1459,7 +1445,7 @@ impl App {
     }
 
     pub(crate) fn dismiss_product_announcement(&mut self) {
-        if let Some(announcement) = self.state.product_announcement.take() {
+        if let Some(announcement) = self.state.take_product_announcement() {
             if !announcement.preview {
                 if let Err(err) =
                     crate::product_announcements::mark_seen(&announcement.version, &announcement.id)
@@ -1480,7 +1466,7 @@ impl App {
 
     pub(crate) fn scroll_release_notes(&mut self, delta: i16) {
         let max_scroll = self.state.release_notes_max_scroll();
-        if let Some(notes) = &mut self.state.release_notes {
+        if let Some(notes) = self.state.release_notes_mut() {
             notes.scroll = if delta.is_negative() {
                 notes.scroll.saturating_sub(delta.unsigned_abs())
             } else {
@@ -1492,7 +1478,7 @@ impl App {
 
     pub(crate) fn scroll_product_announcement(&mut self, delta: i16) {
         let max_scroll = self.state.product_announcement_max_scroll();
-        if let Some(announcement) = &mut self.state.product_announcement {
+        if let Some(announcement) = self.state.product_announcement_mut() {
             announcement.scroll = if delta.is_negative() {
                 announcement.scroll.saturating_sub(delta.unsigned_abs())
             } else {
@@ -3509,7 +3495,7 @@ mod tests {
         let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
 
         assert_eq!(app.state.mode, Mode::Navigate);
-        assert!(app.state.release_notes.is_none());
+        assert!(app.state.release_notes().is_none());
         assert!(app.state.latest_release_notes_available);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
@@ -3548,12 +3534,11 @@ mod tests {
         assert_eq!(app.state.mode, Mode::ProductAnnouncement);
         assert_eq!(
             app.state
-                .product_announcement
-                .as_ref()
+                .product_announcement()
                 .map(|announcement| announcement.id.as_str()),
             Some("startup-announcement")
         );
-        assert!(app.state.release_notes.is_none());
+        assert!(app.state.release_notes().is_none());
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         restore_xdg_state_home(original_xdg_state_home);
@@ -4545,7 +4530,10 @@ mod tests {
     async fn repeat_key_events_are_ignored_outside_terminal_mode() {
         let mut app = test_app();
         app.state.mode = Mode::ReleaseNotes;
-        app.state.release_notes = Some(release_notes_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::ReleaseNotes(
+                release_notes_state(),
+            ));
 
         let handled = app
             .handle_raw_input_event(raw_key(
@@ -4557,7 +4545,7 @@ mod tests {
 
         assert!(!handled);
         assert_eq!(app.state.mode, Mode::ReleaseNotes);
-        assert!(app.state.release_notes.is_some());
+        assert!(app.state.release_notes().is_some());
     }
 
     #[tokio::test]
@@ -4626,7 +4614,10 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::ReleaseNotes;
-        app.state.release_notes = Some(release_notes_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::ReleaseNotes(
+                release_notes_state(),
+            ));
 
         let press_handled = app
             .handle_raw_input_event(raw_key(
@@ -6791,8 +6782,8 @@ last_pane = "prefix+tab"
 
         assert_eq!(app.state.mode, Mode::Settings);
         assert_eq!(
-            app.state.settings.section,
-            state::SettingsSection::Integrations
+            app.state.settings().map(|settings| settings.section),
+            Some(state::SettingsSection::Integrations)
         );
     }
 
@@ -6836,12 +6827,15 @@ last_pane = "prefix+tab"
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.confirm_close = false;
-        app.state.context_menu = Some(state::ContextMenuState {
-            kind: state::ContextMenuKind::Workspace { ws_idx: 1 },
-            x: 2,
-            y: 2,
-            list: state::ListCursor::new(1),
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::ContextMenu(
+                state::ContextMenuState {
+                    kind: state::ContextMenuKind::Workspace { ws_idx: 1 },
+                    x: 2,
+                    y: 2,
+                    list: state::ListCursor::new(1),
+                },
+            ));
         app.state.mode = Mode::ContextMenu;
 
         app.route_client_input(b"\r".to_vec());
@@ -6869,18 +6863,21 @@ last_pane = "prefix+tab"
         app.state.mode = Mode::NewLinkedWorktree;
         app.state.set_name_input("generated-branch");
         app.state.name_input_replace_on_type = true;
-        app.state.worktree_create = Some(state::WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: "/repo/herdr".into(),
-            source_existing_membership: None,
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: "generated-branch".into(),
-            checkout_path: "/repo/herdr-generated-branch".into(),
-            error: None,
-            creating: false,
-        });
+        app.state
+            .set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+                state::WorktreeCreateState {
+                    source_workspace_id: "source".into(),
+                    source_checkout_path: "/repo/herdr".into(),
+                    source_existing_membership: None,
+                    source_repo_root: "/repo/herdr".into(),
+                    repo_key: "repo-key".into(),
+                    repo_name: "herdr".into(),
+                    branch: "generated-branch".into(),
+                    checkout_path: "/repo/herdr-generated-branch".into(),
+                    error: None,
+                    creating: false,
+                },
+            ));
 
         app.route_client_events(
             vec![crate::raw_input::RawInputEvent::Paste(
@@ -6892,8 +6889,7 @@ last_pane = "prefix+tab"
         assert_eq!(app.state.name_input.text(), "feature/linear-302");
         assert_eq!(
             app.state
-                .worktree_create
-                .as_ref()
+                .worktree_create()
                 .map(|create| create.branch.as_str()),
             Some("feature/linear-302")
         );
@@ -7107,12 +7103,15 @@ last_pane = "prefix+tab"
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::ReleaseNotes;
-        app.state.release_notes = Some(release_notes_state());
+        app.state
+            .set_overlay(crate::app::state::Overlay::ReleaseNotes(
+                release_notes_state(),
+            ));
 
         app.route_client_input(b"\x1b".to_vec());
 
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.release_notes.is_none());
+        assert!(app.state.release_notes().is_none());
     }
 
     #[test]
@@ -7121,9 +7120,15 @@ last_pane = "prefix+tab"
         app.state.workspaces = vec![Workspace::test_new("test")];
         app.state.active = Some(0);
         app.state.selected = 0;
-        app.state.mode = Mode::Settings;
-        app.state.settings.original_theme = Some(app.state.theme_name.clone());
-        app.state.settings.original_palette = Some(app.state.palette.clone());
+        let original_theme = app.state.theme_name.clone();
+        let original_palette = app.state.palette.clone();
+        app.state
+            .open_overlay(state::Overlay::Settings(state::SettingsState {
+                section: state::SettingsSection::Theme,
+                list: state::ListCursor::new(0),
+                original_palette: Some(original_palette),
+                original_theme: Some(original_theme),
+            }));
 
         app.route_client_input(b"\x1b".to_vec());
 

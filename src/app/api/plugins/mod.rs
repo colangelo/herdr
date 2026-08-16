@@ -1426,14 +1426,22 @@ platforms = ["linux", "macos"]
             })
         };
 
-        app.state.mode = crate::app::Mode::Settings;
-        app.state.settings.original_theme = Some("settings-theme".into());
+        app.state.open_overlay(crate::app::state::Overlay::Settings(
+            crate::app::state::SettingsState {
+                section: crate::app::state::SettingsSection::Theme,
+                list: crate::app::state::ListCursor::new(0),
+                original_palette: None,
+                original_theme: Some("settings-theme".into()),
+            },
+        ));
         let settings_response = open_popup(&mut app, "settings-popup");
         let settings_error: serde_json::Value = serde_json::from_str(&settings_response).unwrap();
         assert_eq!(settings_error["error"]["code"], "ui_busy");
         assert_eq!(app.state.mode, crate::app::Mode::Settings);
         assert_eq!(
-            app.state.settings.original_theme.as_deref(),
+            app.state
+                .settings()
+                .and_then(|settings| settings.original_theme.as_deref()),
             Some("settings-theme")
         );
         assert!(app.state.popup_pane.is_none());

@@ -941,11 +941,13 @@ impl Mode {
     }
 
     /// Whether keys in this mode are commands/navigation (an ASCII input source is wanted) rather
-    /// than free text. This is an explicit **allowlist** of the prefix command/navigation realm:
-    /// any mode NOT listed defaults to leaving the user's IME alone (the safe default), so adding a
-    /// new text-entry or overlay mode can never silently force ASCII. Used by
-    /// `sync_prefix_input_source` (gated by `switch_ascii_input_source_in_prefix`) so multi-level
-    /// prefix commands keep ASCII until they return to the terminal.
+    /// than free text. Used by `sync_prefix_input_source` (gated by
+    /// `switch_ascii_input_source_in_prefix`) so multi-level prefix commands keep ASCII until they
+    /// return to the terminal.
+    ///
+    /// Only the non-overlay modes are listed here. Every overlay's answer is declared beside its
+    /// variant in the `overlays!` list and derived through [`OverlayKind::mode`], so a new overlay
+    /// cannot silently fall off an allowlist it never knew about.
     ///
     /// Known limitation: the search boxes in `Navigator` and `KeybindHelp` are also held on ASCII,
     /// since this `Mode`-level predicate can't see `search_focused` (non-ASCII filtering there
@@ -953,20 +955,10 @@ impl Mode {
     pub(crate) fn wants_ascii_input(self) -> bool {
         matches!(
             self,
-            Mode::Prefix
-                | Mode::Navigate
-                | Mode::Navigator
-                | Mode::Copy
-                | Mode::Resize
-                | Mode::ConfirmClose
-                | Mode::ConfirmRemoveWorktree
-                | Mode::PaneMoveTargetPicker
-                | Mode::ContextMenu
-                | Mode::GlobalMenu
-                | Mode::KeybindHelp
-                | Mode::NotificationCenter
-                | Mode::PaneTodos
-        )
+            Mode::Prefix | Mode::Navigate | Mode::Copy | Mode::Resize | Mode::ConfirmClose
+        ) || OverlayKind::ALL
+            .iter()
+            .any(|kind| kind.mode() == self && kind.wants_ascii_input())
     }
 }
 
@@ -1078,6 +1070,13 @@ pub(crate) struct NavigatorState {
     /// Consulted at activation only, never threaded through rendering of the
     /// rows themselves.
     pub purpose: NavigatorPurpose,
+    /// The todo edit this picker was opened from, suspended here for the
+    /// duration and handed back when the picker closes.
+    ///
+    /// It used to live in a parallel field that outlived its own mode, which
+    /// is what made "two overlays open at once" representable. Carrying it on
+    /// the overlay that suspended it makes the return path explicit instead.
+    pub suspended_pane_todo_edit: Option<PaneTodoEditState>,
 }
 
 impl Default for NavigatorState {
@@ -1090,6 +1089,7 @@ impl Default for NavigatorState {
             state_filter: None,
             expanded_workspaces: std::collections::HashSet::new(),
             purpose: NavigatorPurpose::default(),
+            suspended_pane_todo_edit: None,
         }
     }
 }
@@ -1691,6 +1691,11 @@ pub struct PaneTodoEditState {
     /// Only meaningful while editing an existing todo; a todo being composed
     /// is never already done, and `todo.add` has no `done` to carry it.
     pub done: bool,
+    /// The todo panel this edit was opened from, suspended here for the
+    /// duration and handed back when the modal closes. `None` when the modal
+    /// was opened straight from a keybinding, which is what "return to the
+    /// terminal instead" is read from.
+    pub suspended_panel: Option<PaneTodoPanelState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1779,6 +1784,413 @@ pub enum TabBarStatusSegment {
     Text(Option<String>),
 }
 
+// ---------------------------------------------------------------------------
+// The open overlay
+// ---------------------------------------------------------------------------
+
+/// Declares the one open overlay, and the accessors every call site reaches it
+/// through.
+///
+/// One list is the point: a variant, the state it carries, the mode it puts the
+/// app in, and whether its keys are commands rather than free text. Adding an
+/// overlay means adding a line here, and the behaviour that used to be restated
+/// in a separate allowlist per concern comes with it.
+macro_rules! overlays {
+    ($(
+        $(#[$meta:meta])*
+        $variant:ident($state:ty) => mode $mode:ident, ascii $ascii:literal,
+            $get:ident / $get_mut:ident / $take:ident;
+    )+) => {
+        /// The overlay that is open, if any. One value rather than a mode plus
+        /// ten-plus parallel `Option<XState>` fields paired by convention: it
+        /// is not representable for the active mode to name one overlay while
+        /// a different overlay's state is present, nor for two to be present
+        /// at once.
+        pub enum Overlay {
+            $( $(#[$meta])* $variant($state), )+
+        }
+
+        /// An overlay with its state left out, so the set can be enumerated.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum OverlayKind {
+            $( $variant, )+
+        }
+
+        impl Overlay {
+            /// The mode this overlay puts the app in. Input dispatch stays
+            /// keyed on `Mode`; the variant supplies it rather than replacing
+            /// it.
+            pub(crate) fn mode(&self) -> Mode {
+                match self {
+                    $( Self::$variant(_) => Mode::$mode, )+
+                }
+            }
+
+            pub(crate) fn kind(&self) -> OverlayKind {
+                match self {
+                    $( Self::$variant(_) => OverlayKind::$variant, )+
+                }
+            }
+        }
+
+        impl OverlayKind {
+            /// Every overlay, for the guard tests that must not be allowed to
+            /// miss one.
+            pub(crate) const ALL: &'static [Self] = &[$( Self::$variant, )+];
+
+            pub(crate) fn mode(self) -> Mode {
+                match self {
+                    $( Self::$variant => Mode::$mode, )+
+                }
+            }
+
+            /// Whether keys in this overlay are commands and navigation (an
+            /// ASCII input source is wanted) rather than free text. Declared
+            /// with the variant, so a new overlay cannot fall off a list it
+            /// never knew about.
+            pub(crate) fn wants_ascii_input(self) -> bool {
+                match self {
+                    $( Self::$variant => $ascii, )+
+                }
+            }
+        }
+
+        impl AppState {
+            $(
+                pub(crate) fn $get(&self) -> Option<&$state> {
+                    match self.overlay.as_ref() {
+                        Some(Overlay::$variant(state)) => Some(state),
+                        _ => None,
+                    }
+                }
+
+                pub(crate) fn $get_mut(&mut self) -> Option<&mut $state> {
+                    match self.overlay.as_mut() {
+                        Some(Overlay::$variant(state)) => Some(state),
+                        _ => None,
+                    }
+                }
+
+                /// Take this overlay's state, closing it. Leaves a different
+                /// open overlay alone.
+                // Generated for every overlay so the accessor set is uniform;
+                // only the ones whose close path hands their state on — the
+                // navigator, the todo panel, the todo edit — call it today.
+                #[allow(dead_code)]
+                pub(crate) fn $take(&mut self) -> Option<$state> {
+                    match self.overlay.take() {
+                        Some(Overlay::$variant(state)) => Some(state),
+                        other => {
+                            self.overlay = other;
+                            None
+                        }
+                    }
+                }
+            )+
+        }
+    };
+}
+
+overlays! {
+    Settings(SettingsState) => mode Settings, ascii false,
+        settings / settings_mut / take_settings;
+    GlobalMenu(ListCursor) => mode GlobalMenu, ascii true,
+        global_menu / global_menu_mut / take_global_menu;
+    KeybindHelp(KeybindHelpState) => mode KeybindHelp, ascii true,
+        keybind_help / keybind_help_mut / take_keybind_help;
+    Navigator(NavigatorState) => mode Navigator, ascii true,
+        navigator / navigator_mut / take_navigator;
+    ContextMenu(ContextMenuState) => mode ContextMenu, ascii true,
+        context_menu / context_menu_mut / take_context_menu;
+    NotificationCenter(NotificationCenterState) => mode NotificationCenter, ascii true,
+        notification_center / notification_center_mut / take_notification_center;
+    PaneTodos(PaneTodoPanelState) => mode PaneTodos, ascii true,
+        pane_todos / pane_todos_mut / take_pane_todos;
+    PaneTodoEdit(PaneTodoEditState) => mode PaneTodoEdit, ascii false,
+        pane_todo_edit / pane_todo_edit_mut / take_pane_todo_edit;
+    ReleaseNotes(ReleaseNotesState) => mode ReleaseNotes, ascii false,
+        release_notes / release_notes_mut / take_release_notes;
+    ProductAnnouncement(ProductAnnouncementState) => mode ProductAnnouncement, ascii false,
+        product_announcement / product_announcement_mut / take_product_announcement;
+    NewLinkedWorktree(WorktreeCreateState) => mode NewLinkedWorktree, ascii false,
+        worktree_create / worktree_create_mut / take_worktree_create;
+    OpenExistingWorktree(WorktreeOpenState) => mode OpenExistingWorktree, ascii false,
+        worktree_open / worktree_open_mut / take_worktree_open;
+    ConfirmRemoveWorktree(WorktreeRemoveState) => mode ConfirmRemoveWorktree, ascii true,
+        worktree_remove / worktree_remove_mut / take_worktree_remove;
+    PaneMoveTargetPicker(PaneMoveTargetPickerState) => mode PaneMoveTargetPicker, ascii true,
+        pane_move_target_picker / pane_move_target_picker_mut / take_pane_move_target_picker;
+}
+
+impl AppState {
+    /// Open an overlay, putting the app in its mode. Whatever was open closes:
+    /// one overlay at a time is the invariant.
+    pub(crate) fn open_overlay(&mut self, overlay: Overlay) {
+        self.mode = overlay.mode();
+        self.overlay = Some(overlay);
+    }
+
+    /// Replace the open overlay without touching the mode, for the callers
+    /// that set the mode themselves on the next line. Mode and overlay still
+    /// cannot disagree — [`AppState::assert_invariants_for_test`] checks it.
+    pub(crate) fn set_overlay(&mut self, overlay: Overlay) {
+        self.overlay = Some(overlay);
+    }
+
+    /// Close this overlay if it is the one that is open. Leaves the mode to the
+    /// caller, which knows where it is going back to.
+    pub(crate) fn close_overlay(&mut self, kind: OverlayKind) {
+        if self
+            .overlay
+            .as_ref()
+            .is_some_and(|open| open.kind() == kind)
+        {
+            self.overlay = None;
+        }
+    }
+
+    /// Close whatever is open.
+    pub(crate) fn close_any_overlay(&mut self) {
+        self.overlay = None;
+    }
+
+    /// Which overlay is open, if any.
+    #[cfg(test)]
+    pub(crate) fn open_overlay_kind(&self) -> Option<OverlayKind> {
+        self.overlay.as_ref().map(Overlay::kind)
+    }
+
+    /// The keybind-help filter, empty when the panel is closed. Read by the
+    /// line builder, which also runs from the help-coverage guard test.
+    pub(crate) fn keybind_help_query(&self) -> &str {
+        self.keybind_help()
+            .map(|help| help.query.text())
+            .unwrap_or_default()
+    }
+
+    /// The settings section on show, defaulting to the first tab when the
+    /// panel is closed — the geometry helpers are asked for a size before the
+    /// panel is drawn.
+    pub(crate) fn settings_section(&self) -> SettingsSection {
+        self.settings()
+            .map(|settings| settings.section)
+            .unwrap_or(SettingsSection::Theme)
+    }
+
+    /// The settings list cursor, a copy: the panel's sections read and write
+    /// it around calls that also want the rest of `AppState`.
+    pub(crate) fn settings_list(&self) -> ListCursor {
+        self.settings()
+            .map(|settings| settings.list)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn set_settings_list(&mut self, list: ListCursor) {
+        if let Some(settings) = self.settings_mut() {
+            settings.list = list;
+        }
+    }
+
+    pub(crate) fn set_settings_selected(&mut self, selected: usize) {
+        if let Some(settings) = self.settings_mut() {
+            settings.list.selected = selected;
+        }
+    }
+
+    pub(crate) fn set_settings_section(&mut self, section: SettingsSection) {
+        if let Some(settings) = self.settings_mut() {
+            settings.section = section;
+        }
+    }
+
+    /// The navigator's search text, empty when it is closed.
+    pub(crate) fn navigator_query(&self) -> &str {
+        self.navigator()
+            .map(|navigator| navigator.query.text())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn navigator_state_filter(&self) -> Option<NavigatorStateFilter> {
+        self.navigator()
+            .and_then(|navigator| navigator.state_filter)
+    }
+
+    pub(crate) fn navigator_purpose(&self) -> NavigatorPurpose {
+        self.navigator()
+            .map(|navigator| navigator.purpose)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn navigator_selected(&self) -> usize {
+        self.navigator()
+            .map(|navigator| navigator.selected)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn navigator_scroll(&self) -> usize {
+        self.navigator()
+            .map(|navigator| navigator.scroll)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn navigator_workspace_expanded(&self, workspace_id: &str) -> bool {
+        self.navigator()
+            .is_some_and(|navigator| navigator.expanded_workspaces.contains(workspace_id))
+    }
+
+    pub(crate) fn set_navigator_selected(&mut self, selected: usize) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.selected = selected;
+        }
+    }
+
+    /// Expand or collapse a workspace in the navigator's tree.
+    pub(crate) fn toggle_navigator_workspace_expanded(&mut self, workspace_id: String) {
+        if let Some(navigator) = self.navigator_mut() {
+            if !navigator.expanded_workspaces.remove(&workspace_id) {
+                navigator.expanded_workspaces.insert(workspace_id);
+            }
+        }
+    }
+
+    /// Replace the navigator's search text, for tests that drive it directly.
+    #[cfg(test)]
+    pub(crate) fn set_keybind_help_query(&mut self, query: &str) {
+        if let Some(help) = self.keybind_help_mut() {
+            help.query = crate::ui::text_field::TextField::from_text(query, SEARCH_QUERY_MAX_CHARS);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_navigator_query(&mut self, query: &str) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.query =
+                crate::ui::text_field::TextField::from_text(query, SEARCH_QUERY_MAX_CHARS);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn navigator_expanded_count(&self) -> usize {
+        self.navigator()
+            .map(|navigator| navigator.expanded_workspaces.len())
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn set_navigator_state_filter(&mut self, filter: Option<NavigatorStateFilter>) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.state_filter = filter;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expand_navigator_workspace(&mut self, workspace_id: String) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.expanded_workspaces.insert(workspace_id);
+        }
+    }
+
+    pub(crate) fn navigator_search_focused(&self) -> bool {
+        self.navigator()
+            .is_some_and(|navigator| navigator.search_focused)
+    }
+
+    pub(crate) fn set_navigator_search_focused(&mut self, focused: bool) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.search_focused = focused;
+        }
+    }
+
+    /// Run `f` on an overlay search box's text, if that overlay is open.
+    /// The field is moved out for the duration so `f` can drive the shared
+    /// editing set against it while the rest of `AppState` stays reachable.
+    pub(crate) fn edit_navigator_query<T>(
+        &mut self,
+        f: impl FnOnce(&mut crate::ui::text_field::TextField) -> T,
+    ) -> Option<T> {
+        let navigator = self.navigator_mut()?;
+        let mut query = std::mem::replace(&mut navigator.query, search_query_field());
+        let out = f(&mut query);
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.query = query;
+        }
+        Some(out)
+    }
+
+    pub(crate) fn edit_keybind_help_query<T>(
+        &mut self,
+        f: impl FnOnce(&mut crate::ui::text_field::TextField) -> T,
+    ) -> Option<T> {
+        let help = self.keybind_help_mut()?;
+        let mut query = std::mem::replace(&mut help.query, search_query_field());
+        let out = f(&mut query);
+        if let Some(help) = self.keybind_help_mut() {
+            help.query = query;
+        }
+        Some(out)
+    }
+
+    pub(crate) fn clear_navigator_query(&mut self) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.query.clear();
+        }
+    }
+
+    pub(crate) fn global_menu_selected(&self) -> usize {
+        self.global_menu().map(|menu| menu.selected).unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn keybind_help_scroll(&self) -> u16 {
+        self.keybind_help().map(|help| help.scroll).unwrap_or(0)
+    }
+
+    pub(crate) fn set_keybind_help_scroll(&mut self, scroll: u16) {
+        if let Some(help) = self.keybind_help_mut() {
+            help.scroll = scroll;
+        }
+    }
+
+    pub(crate) fn keybind_help_search_focused(&self) -> bool {
+        self.keybind_help().is_some_and(|help| help.search_focused)
+    }
+
+    pub(crate) fn set_keybind_help_search_focused(&mut self, focused: bool) {
+        if let Some(help) = self.keybind_help_mut() {
+            help.search_focused = focused;
+        }
+    }
+
+    pub(crate) fn clear_keybind_help_query(&mut self) {
+        if let Some(help) = self.keybind_help_mut() {
+            help.query.clear();
+        }
+    }
+
+    pub(crate) fn set_navigator_scroll(&mut self, scroll: usize) {
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.scroll = scroll;
+        }
+    }
+
+    /// The todo being composed, whether its modal is the open overlay or it is
+    /// suspended behind the link picker.
+    pub(crate) fn editing_pane_todo(&self) -> Option<&PaneTodoEditState> {
+        self.pane_todo_edit().or_else(|| {
+            self.navigator()
+                .and_then(|navigator| navigator.suspended_pane_todo_edit.as_ref())
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn editing_pane_todo_mut(&mut self) -> Option<&mut PaneTodoEditState> {
+        match self.overlay.as_mut() {
+            Some(Overlay::PaneTodoEdit(edit)) => Some(edit),
+            Some(Overlay::Navigator(navigator)) => navigator.suspended_pane_todo_edit.as_mut(),
+            _ => None,
+        }
+    }
+}
+
 pub struct AppState {
     pub terminals:
         std::collections::HashMap<crate::terminal::TerminalId, crate::terminal::TerminalState>,
@@ -1832,19 +2244,13 @@ pub struct AppState {
     /// mutually exclusive with it so answering one prompt can never perform the
     /// other action.
     pub confirm_respawn_pane: Option<PaneId>,
-    pub worktree_create: Option<WorktreeCreateState>,
-    pub worktree_open: Option<WorktreeOpenState>,
-    pub pane_move_target_picker: Option<PaneMoveTargetPickerState>,
-    pub worktree_remove: Option<WorktreeRemoveState>,
+    /// The one open overlay. See [`Overlay`].
+    pub(crate) overlay: Option<Overlay>,
     pub worktree_directory: std::path::PathBuf,
     pub collapsed_space_keys: std::collections::HashSet<String>,
     pub request_complete_onboarding: bool,
     pub name_input: crate::ui::text_field::TextField,
     pub name_input_replace_on_type: bool,
-    pub release_notes: Option<ReleaseNotesState>,
-    pub product_announcement: Option<ProductAnnouncementState>,
-    pub keybind_help: KeybindHelpState,
-    pub navigator: NavigatorState,
     pub copy_mode: Option<CopyModeState>,
     pub app_scroll: Option<AppScrollState>,
     pub workspace_scroll: usize,
@@ -1870,7 +2276,6 @@ pub struct AppState {
     pub(crate) tab_presses: std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
     pub selection: Option<Selection>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
-    pub context_menu: Option<ContextMenuState>,
     // Notifications
     pub update_available: Option<String>,
     pub update_install_command: String,
@@ -1880,12 +2285,6 @@ pub struct AppState {
     pub toast: Option<ToastNotification>,
     /// Server-owned notification log fed by `post_notification`.
     pub notification_log: NotificationLog,
-    /// TUI-only dropdown panel state; `Some` while `Mode::NotificationCenter`.
-    pub notification_center: Option<NotificationCenterState>,
-    /// TUI-only panel state; `Some` while `Mode::PaneTodos`.
-    pub pane_todos: Option<PaneTodoPanelState>,
-    /// TUI-only edit buffer; `Some` while `Mode::PaneTodoEdit`.
-    pub pane_todo_edit: Option<PaneTodoEditState>,
     pub pending_agent_notifications: std::collections::HashMap<PaneId, PendingAgentNotification>,
     pub copy_feedback: Option<CopyFeedback>,
     /// Last reported focus state for the outer terminal hosting herdr.
@@ -2039,7 +2438,6 @@ pub struct AppState {
     /// True when the foreground host explicitly reported appearance via Mode 2031.
     pub host_terminal_appearance_explicit: bool,
     /// Settings panel state.
-    pub settings: SettingsState,
     /// Cached integration recommendations for onboarding/settings UI.
     pub integration_recommendations: Vec<crate::integration::IntegrationRecommendation>,
     /// Cached detection manifest source/version summaries for runtime/API status.
@@ -2059,7 +2457,6 @@ pub struct AppState {
     pub(crate) next_plugin_command_log_id: u64,
     pub(crate) plugin_commands_in_flight: usize,
     /// Highlight state for the bottom-right global launcher menu.
-    pub global_menu: ListCursor,
     /// Resolved host terminal default colors for theming embedded panes.
     pub host_terminal_theme: TerminalTheme,
     /// Last known foreground host terminal cell size in pixels.
@@ -2110,15 +2507,16 @@ impl AppState {
     }
 
     pub(crate) fn open_notification_center(&mut self) {
-        self.notification_center = Some(NotificationCenterState {
-            list: ListCursor::default(),
-            hovered_button: None,
-        });
-        self.mode = Mode::NotificationCenter;
+        self.open_overlay(crate::app::state::Overlay::NotificationCenter(
+            NotificationCenterState {
+                list: ListCursor::default(),
+                hovered_button: None,
+            },
+        ));
     }
 
     pub(crate) fn close_notification_center(&mut self) {
-        self.notification_center = None;
+        self.close_overlay(crate::app::state::OverlayKind::NotificationCenter);
     }
 
     /// Empty the notification log (the panel's "Clear all" action). Mutates the
@@ -2126,7 +2524,7 @@ impl AppState {
     /// and any external consumer stay in agreement.
     pub(crate) fn clear_notifications(&mut self) {
         self.notification_log.clear();
-        if let Some(center) = self.notification_center.as_mut() {
+        if let Some(center) = self.notification_center_mut() {
             center.list = ListCursor::default();
             center.hovered_button = None;
         }
@@ -2141,7 +2539,7 @@ impl AppState {
     pub(crate) fn notification_center_move_selection(&mut self, delta: isize) {
         let len = self.notification_log.len();
         let visible = self.notification_center_visible_rows();
-        let Some(center) = self.notification_center.as_mut() else {
+        let Some(center) = self.notification_center_mut() else {
             return;
         };
         center.list.move_by(delta, len);
@@ -2149,7 +2547,7 @@ impl AppState {
     }
 
     pub(crate) fn notification_center_selected_entry(&self) -> Option<&NotificationEntry> {
-        let center = self.notification_center.as_ref()?;
+        let center = self.notification_center()?;
         self.notification_log
             .entries_newest_first()
             .nth(center.list.selected)
@@ -2158,12 +2556,11 @@ impl AppState {
     /// Open the todo panel for a pane. The selection starts at the top of the
     /// presentation order, which is the most urgent outstanding todo.
     pub(crate) fn open_pane_todos(&mut self, pane_id: PaneId) {
-        self.pane_todos = Some(PaneTodoPanelState {
+        self.open_overlay(crate::app::state::Overlay::PaneTodos(PaneTodoPanelState {
             pane_id,
             list: ListCursor::default(),
             hovered_button: None,
-        });
-        self.mode = Mode::PaneTodos;
+        }));
     }
 
     /// Closes the panel only. Every caller pairs this with `leave_modal` or an
@@ -2172,23 +2569,35 @@ impl AppState {
     /// so no panel, modal, or pending confirmation outlives its pane.
     pub(crate) fn forget_pane_todo_ui(&mut self, pane_id: PaneId) {
         if self
-            .pane_todos
-            .as_ref()
+            .pane_todos()
             .is_some_and(|panel| panel.pane_id == pane_id)
         {
-            self.pane_todos = None;
+            self.close_overlay(crate::app::state::OverlayKind::PaneTodos);
             if self.mode == Mode::PaneTodos {
                 self.mode = Mode::Terminal;
             }
         }
         if self
-            .pane_todo_edit
-            .as_ref()
+            .editing_pane_todo()
             .is_some_and(|edit| edit.pane_id == pane_id)
         {
-            self.pane_todo_edit = None;
+            self.close_overlay(crate::app::state::OverlayKind::PaneTodoEdit);
+            if let Some(navigator) = self.navigator_mut() {
+                navigator.suspended_pane_todo_edit = None;
+                navigator.purpose = NavigatorPurpose::Goto;
+            }
             if self.mode == Mode::PaneTodoEdit {
                 self.mode = Mode::Terminal;
+            }
+        }
+        // A panel suspended behind an edit modal points at the pane too.
+        if self.pane_todo_edit().is_some_and(|edit| {
+            edit.suspended_panel
+                .as_ref()
+                .is_some_and(|panel| panel.pane_id == pane_id)
+        }) {
+            if let Some(edit) = self.pane_todo_edit_mut() {
+                edit.suspended_panel = None;
             }
         }
         if self.confirm_close_pane == Some(pane_id) {
@@ -2200,7 +2609,16 @@ impl AppState {
     }
 
     pub(crate) fn close_pane_todos(&mut self) {
-        self.pane_todos = None;
+        self.close_overlay(crate::app::state::OverlayKind::PaneTodos);
+    }
+
+    /// The todo panel, whether it is the open overlay or suspended behind the
+    /// edit modal that was opened over it.
+    pub(crate) fn open_pane_todo_panel(&self) -> Option<&PaneTodoPanelState> {
+        self.pane_todos().or_else(|| {
+            self.editing_pane_todo()
+                .and_then(|edit| edit.suspended_panel.as_ref())
+        })
     }
 
     /// A pane's todos in presentation order. Empty when the pane or its
@@ -2217,12 +2635,12 @@ impl AppState {
 
     /// Move (or, with `0`, re-clamp) the panel selection.
     pub(crate) fn pane_todos_move_selection(&mut self, delta: isize) {
-        let Some(pane_id) = self.pane_todos.as_ref().map(|panel| panel.pane_id) else {
+        let Some(pane_id) = self.pane_todos().map(|panel| panel.pane_id) else {
             return;
         };
         let len = self.pane_todos_in_display_order(pane_id).len();
         let visible = self.pane_todo_panel_visible_rows();
-        let Some(panel) = self.pane_todos.as_mut() else {
+        let Some(panel) = self.pane_todos_mut() else {
             return;
         };
         panel.list.move_by(delta, len);
@@ -2232,7 +2650,7 @@ impl AppState {
     /// The selected todo, cloned so callers can mutate through the API without
     /// holding a borrow of the store.
     pub(crate) fn selected_pane_todo(&self) -> Option<crate::terminal::todo::PaneTodo> {
-        let panel = self.pane_todos.as_ref()?;
+        let panel = self.open_pane_todo_panel()?;
         self.pane_todos_in_display_order(panel.pane_id)
             .get(panel.list.selected)
             .map(|todo| (*todo).clone())
@@ -2289,35 +2707,50 @@ impl AppState {
         else {
             return;
         };
-        self.pane_todo_edit = Some(PaneTodoEditState {
-            pane_id,
-            todo_id: Some(todo.id),
-            text: crate::ui::text_field::TextField::from_text(
-                &todo.text,
-                crate::terminal::todo::MAX_TODO_TEXT_LEN,
-            ),
-            priority: todo.priority,
-            link: PaneTodoEditLink::Keep,
-            done: todo.done,
-        });
-        self.mode = Mode::PaneTodoEdit;
+        // The panel the modal opened over is suspended onto it, so closing the
+        // modal hands it back rather than the panel outliving its own mode.
+        let suspended_panel = self.take_pane_todos();
+        self.open_overlay(crate::app::state::Overlay::PaneTodoEdit(
+            PaneTodoEditState {
+                pane_id,
+                todo_id: Some(todo.id),
+                text: crate::ui::text_field::TextField::from_text(
+                    &todo.text,
+                    crate::terminal::todo::MAX_TODO_TEXT_LEN,
+                ),
+                priority: todo.priority,
+                link: PaneTodoEditLink::Keep,
+                done: todo.done,
+                suspended_panel,
+            },
+        ));
     }
 
     /// Open the edit modal on a brand-new todo for a pane.
     pub(crate) fn open_new_pane_todo(&mut self, pane_id: PaneId) {
-        self.pane_todo_edit = Some(PaneTodoEditState {
-            pane_id,
-            todo_id: None,
-            text: crate::ui::text_field::TextField::new(crate::terminal::todo::MAX_TODO_TEXT_LEN),
-            priority: crate::terminal::todo::TodoPriority::default(),
-            link: PaneTodoEditLink::Keep,
-            done: false,
-        });
-        self.mode = Mode::PaneTodoEdit;
+        let suspended_panel = self.take_pane_todos();
+        self.open_overlay(crate::app::state::Overlay::PaneTodoEdit(
+            PaneTodoEditState {
+                pane_id,
+                todo_id: None,
+                text: crate::ui::text_field::TextField::new(
+                    crate::terminal::todo::MAX_TODO_TEXT_LEN,
+                ),
+                priority: crate::terminal::todo::TodoPriority::default(),
+                link: PaneTodoEditLink::Keep,
+                done: false,
+                suspended_panel,
+            },
+        ));
     }
 
+    /// Close the edit modal, reopening the panel it was suspended over.
     pub(crate) fn close_pane_todo_edit(&mut self) {
-        self.pane_todo_edit = None;
+        if let Some(edit) = self.take_pane_todo_edit() {
+            if let Some(panel) = edit.suspended_panel {
+                self.open_overlay(crate::app::state::Overlay::PaneTodos(panel));
+            }
+        }
     }
 
     /// How a staged link target is named in the edit modal. Deliberately the
@@ -2339,7 +2772,7 @@ impl AppState {
     /// new todo: `todo.add` carries no `done`, so there would be nothing to
     /// save it to.
     pub(crate) fn toggle_pane_todo_edit_done(&mut self) {
-        let Some(edit) = self.pane_todo_edit.as_mut() else {
+        let Some(edit) = self.pane_todo_edit_mut() else {
             return;
         };
         if edit.todo_id.is_none() {
@@ -2349,7 +2782,7 @@ impl AppState {
     }
 
     pub(crate) fn cycle_pane_todo_edit_priority(&mut self) {
-        let Some(edit) = self.pane_todo_edit.as_mut() else {
+        let Some(edit) = self.pane_todo_edit_mut() else {
             return;
         };
         edit.priority = match edit.priority {
@@ -2366,7 +2799,7 @@ impl AppState {
     /// nothing to follow — no link, an explicit clear, or a target that has
     /// gone — which is also exactly when the row offers no `go`.
     pub(crate) fn pane_todo_edit_link_target(&self) -> Option<(usize, PaneId)> {
-        let edit = self.pane_todo_edit.as_ref()?;
+        let edit = self.pane_todo_edit()?;
         let target = match edit.link {
             PaneTodoEditLink::Clear => return None,
             PaneTodoEditLink::Set(target) => target,
@@ -2389,7 +2822,7 @@ impl AppState {
     /// the panel's chip uses. A dead link resolves to no identifier and shows
     /// its label alone.
     pub(crate) fn pane_todo_edit_link_label(&self) -> String {
-        let Some(edit) = self.pane_todo_edit.as_ref() else {
+        let Some(edit) = self.pane_todo_edit() else {
             return String::new();
         };
         let (public_id, label) = match edit.link {
@@ -2709,10 +3142,7 @@ impl AppState {
             rename_pane_target: None,
             confirm_close_pane: None,
             confirm_respawn_pane: None,
-            worktree_create: None,
-            worktree_open: None,
-            pane_move_target_picker: None,
-            worktree_remove: None,
+            overlay: None,
             worktree_directory: std::path::PathBuf::from("/tmp/herdr-worktrees"),
             collapsed_space_keys: std::collections::HashSet::new(),
             request_complete_onboarding: false,
@@ -2720,10 +3150,6 @@ impl AppState {
                 crate::app::state::NAME_INPUT_MAX_CHARS,
             ),
             name_input_replace_on_type: false,
-            release_notes: None,
-            product_announcement: None,
-            keybind_help: KeybindHelpState::default(),
-            navigator: NavigatorState::default(),
             copy_mode: None,
             app_scroll: None,
             workspace_scroll: 0,
@@ -2757,7 +3183,6 @@ impl AppState {
             tab_presses: std::collections::HashMap::new(),
             selection: None,
             selection_autoscroll: None,
-            context_menu: None,
             update_available: None,
             update_install_command: "herdr update".into(),
             latest_release_notes_available: false,
@@ -2765,9 +3190,6 @@ impl AppState {
             config_diagnostic: None,
             toast: None,
             notification_log: NotificationLog::default(),
-            notification_center: None,
-            pane_todos: None,
-            pane_todo_edit: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -2875,12 +3297,6 @@ impl AppState {
             },
             host_terminal_appearance: None,
             host_terminal_appearance_explicit: false,
-            settings: SettingsState {
-                section: SettingsSection::Theme,
-                list: ListCursor::new(0),
-                original_palette: None,
-                original_theme: None,
-            },
             integration_recommendations: Vec::new(),
             agent_manifest_summaries: Vec::new(),
             agent_manifest_update_status:
@@ -2892,7 +3308,6 @@ impl AppState {
             plugin_command_logs: Vec::new(),
             next_plugin_command_log_id: 1,
             plugin_commands_in_flight: 0,
-            global_menu: ListCursor::new(0),
             host_terminal_theme: TerminalTheme::default(),
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             host_mouse_pixels: None,
@@ -2930,6 +3345,24 @@ impl AppState {
     }
 
     pub fn assert_invariants_for_test(&self) {
+        // Mode and overlay are one fact. An open overlay names the mode, and a
+        // mode that names an overlay has that overlay open — the pairing that
+        // used to be convention between `Mode` and ten-plus parallel
+        // `Option<XState>` fields.
+        if let Some(overlay) = self.overlay.as_ref() {
+            assert_eq!(
+                self.mode,
+                overlay.mode(),
+                "the open overlay ({:?}) and the active mode disagree",
+                overlay.kind()
+            );
+        } else if let Some(kind) = OverlayKind::ALL
+            .iter()
+            .find(|kind| kind.mode() == self.mode)
+        {
+            panic!("mode {:?} names {kind:?} but no overlay is open", self.mode);
+        }
+
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),
@@ -2974,11 +3407,11 @@ impl AppState {
             // contract than the code keeps. `rename_pane_target` is asserted
             // more strongly because a save consumes it.
             assert!(
-                self.pane_todos.is_none(),
+                self.pane_todos().is_none(),
                 "empty app state must not keep a pane todo panel"
             );
             assert!(
-                self.pane_todo_edit.is_none(),
+                self.pane_todo_edit().is_none(),
                 "empty app state must not keep a pane todo edit buffer"
             );
             assert!(
@@ -3012,7 +3445,7 @@ impl AppState {
                 "empty app state must not keep tab press state"
             );
             assert!(
-                self.context_menu.is_none(),
+                self.context_menu().is_none(),
                 "empty app state must not keep context menu"
             );
             assert!(
@@ -3211,7 +3644,7 @@ impl AppState {
         for press in self.tab_presses.values() {
             assert_tab_index(press.ws_idx, press.tab_idx, "tab press");
         }
-        if let Some(menu) = &self.context_menu {
+        if let Some(menu) = self.context_menu() {
             match menu.kind {
                 ContextMenuKind::Workspace { ws_idx }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. } => {
@@ -3303,10 +3736,12 @@ mod tests {
     }
 
     fn select(state: &mut AppState, want: impl Fn(&NavigatorRow) -> bool) {
-        state.navigator.selected = rows(state)
-            .iter()
-            .position(want)
-            .expect("the picker should offer such a row");
+        state.set_navigator_selected(
+            rows(state)
+                .iter()
+                .position(want)
+                .expect("the picker should offer such a row"),
+        );
     }
 
     /// Spec: "the navigator opens in selection mode listing panes across every
@@ -3345,7 +3780,7 @@ mod tests {
         });
         let NavigatorTarget::Pane {
             pane_id: target, ..
-        } = rows(&state)[state.navigator.selected].target
+        } = rows(&state)[state.navigator_selected()].target
         else {
             panic!("selected row should be a pane");
         };
@@ -3353,12 +3788,12 @@ mod tests {
         assert!(accept(&mut state));
 
         assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").link,
+            state.editing_pane_todo().expect("edit state").link,
             PaneTodoEditLink::Set(target),
             "a target in another workspace stages like any other"
         );
         assert_eq!(state.mode, Mode::PaneTodoEdit);
-        assert_eq!(state.navigator.purpose, NavigatorPurpose::Goto);
+        assert_eq!(state.navigator_purpose(), NavigatorPurpose::Goto);
         assert_ne!(target, pane_id);
     }
 
@@ -3368,18 +3803,18 @@ mod tests {
     fn workspace_and_tab_rows_never_resolve_a_link() {
         let (mut state, _) = state_with_link_picker_open();
         select(&mut state, |row| row.is_workspace);
-        let expanded_before = state.navigator.expanded_workspaces.len();
+        let expanded_before = state.navigator_expanded_count();
 
         assert!(!accept(&mut state), "a workspace row resolves nothing");
 
         assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").link,
+            state.editing_pane_todo().expect("edit state").link,
             PaneTodoEditLink::Keep,
             "the staged link is untouched"
         );
         assert_eq!(state.mode, Mode::Navigator, "the picker stays open");
         assert_ne!(
-            state.navigator.expanded_workspaces.len(),
+            state.navigator_expanded_count(),
             expanded_before,
             "it collapses or expands instead"
         );
@@ -3395,7 +3830,7 @@ mod tests {
         assert!(accept(&mut state));
 
         assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").link,
+            state.editing_pane_todo().expect("edit state").link,
             PaneTodoEditLink::Clear
         );
         assert_eq!(state.mode, Mode::PaneTodoEdit);
@@ -3415,17 +3850,17 @@ mod tests {
             NavigatorTarget::Pane { pane_id, .. } => pane_id,
             _ => unreachable!(),
         };
-        state.pane_todo_edit.as_mut().expect("edit state").link = PaneTodoEditLink::Set(target);
+        state.editing_pane_todo_mut().expect("edit state").link = PaneTodoEditLink::Set(target);
 
         state.close_pane_todo_link_picker();
 
         assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").link,
+            state.editing_pane_todo().expect("edit state").link,
             PaneTodoEditLink::Set(target),
             "dismissal stages nothing, so the previous choice stands"
         );
         assert_eq!(state.mode, Mode::PaneTodoEdit);
-        assert_eq!(state.navigator.purpose, NavigatorPurpose::Goto);
+        assert_eq!(state.navigator_purpose(), NavigatorPurpose::Goto);
     }
 
     /// The picker never opens on the clear entry, so a mis-keyed Enter cannot
@@ -3433,7 +3868,7 @@ mod tests {
     #[test]
     fn the_picker_does_not_open_on_the_clear_entry() {
         let (state, _) = state_with_link_picker_open();
-        assert!(state.navigator.selected > 0);
+        assert!(state.navigator_selected() > 0);
         assert!(matches!(rows(&state)[0].target, NavigatorTarget::ClearLink));
     }
 
@@ -3447,7 +3882,7 @@ mod tests {
         state.ensure_test_terminals();
         state.open_navigator();
 
-        assert_eq!(state.navigator.purpose, NavigatorPurpose::Goto);
+        assert_eq!(state.navigator_purpose(), NavigatorPurpose::Goto);
         assert!(!rows(&state)
             .iter()
             .any(|row| matches!(row.target, NavigatorTarget::ClearLink)));
@@ -3558,7 +3993,7 @@ mod tests {
         state.open_notification_center();
         state.notification_center_move_selection(2);
         assert_eq!(
-            state.notification_center.as_ref().map(|c| c.list.selected),
+            state.notification_center().map(|c| c.list.selected),
             Some(2)
         );
 
@@ -3571,7 +4006,7 @@ mod tests {
             "clearing leaves the panel open"
         );
         assert_eq!(
-            state.notification_center.as_ref().map(|c| c.list.selected),
+            state.notification_center().map(|c| c.list.selected),
             Some(0),
             "selection resets after clear"
         );
@@ -3706,8 +4141,7 @@ mod tests {
         );
         assert_eq!(
             state
-                .notification_center
-                .as_ref()
+                .notification_center()
                 .map(|center| center.list.selected),
             Some(0)
         );
@@ -3716,8 +4150,7 @@ mod tests {
         state.notification_center_move_selection(10);
         assert_eq!(
             state
-                .notification_center
-                .as_ref()
+                .notification_center()
                 .map(|center| center.list.selected),
             Some(2),
             "selection clamps to newest-first list length"
@@ -3725,8 +4158,7 @@ mod tests {
         state.notification_center_move_selection(-10);
         assert_eq!(
             state
-                .notification_center
-                .as_ref()
+                .notification_center()
                 .map(|center| center.list.selected),
             Some(0)
         );
@@ -3774,6 +4206,170 @@ mod tests {
         state.ensure_test_terminals();
 
         state.assert_invariants_for_test();
+    }
+
+    /// Every overlay, opened over adversarial identity state, agrees with the
+    /// mode — and closing it leaves nothing behind that names an overlay.
+    #[test]
+    fn every_overlay_agrees_with_the_mode_over_adversarial_identity_state() {
+        for kind in OverlayKind::ALL {
+            let mut state = AppState::test_with_adversarial_identity_state();
+            let pane_id = state.workspaces[0].tabs[0].root_pane;
+            state.open_overlay(overlay_for_kind(*kind, pane_id));
+            assert_eq!(state.open_overlay_kind(), Some(*kind));
+            state.assert_invariants_for_test();
+
+            state.close_any_overlay();
+            state.mode = Mode::Terminal;
+            state.assert_invariants_for_test();
+        }
+    }
+
+    /// A mode that names an overlay with no overlay open is exactly the
+    /// disagreement the enum exists to prevent, so the invariant must catch it.
+    #[test]
+    fn a_mode_naming_a_closed_overlay_fails_the_invariants() {
+        for kind in OverlayKind::ALL {
+            let mut state = AppState::test_with_adversarial_identity_state();
+            state.mode = kind.mode();
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state.assert_invariants_for_test()
+            }));
+            assert!(
+                caught.is_err(),
+                "{kind:?}'s mode with no overlay open should fail the invariants"
+            );
+        }
+    }
+
+    /// And the other direction: an overlay open under someone else's mode.
+    #[test]
+    fn an_overlay_under_the_wrong_mode_fails_the_invariants() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        state.open_overlay(overlay_for_kind(OverlayKind::PaneTodos, pane_id));
+        state.mode = Mode::Settings;
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            state.assert_invariants_for_test()
+        }));
+        assert!(
+            caught.is_err(),
+            "mode and overlay must not be allowed to disagree"
+        );
+    }
+
+    fn test_worktree_create_state() -> WorktreeCreateState {
+        WorktreeCreateState {
+            source_workspace_id: "ws".into(),
+            source_checkout_path: std::path::PathBuf::from("/tmp/repo"),
+            source_existing_membership: None,
+            source_repo_root: std::path::PathBuf::from("/tmp/repo"),
+            repo_key: "repo".into(),
+            repo_name: "repo".into(),
+            branch: "issue/1".into(),
+            checkout_path: std::path::PathBuf::from("/tmp/repo-issue-1"),
+            error: None,
+            creating: false,
+        }
+    }
+
+    fn test_worktree_open_state() -> WorktreeOpenState {
+        WorktreeOpenState {
+            source_workspace_id: "ws".into(),
+            source_existing_membership: None,
+            source_checkout_path: std::path::PathBuf::from("/tmp/repo"),
+            source_repo_root: std::path::PathBuf::from("/tmp/repo"),
+            repo_key: "repo".into(),
+            repo_name: "repo".into(),
+            entries: Vec::new(),
+            selected: 0,
+            query: String::new(),
+            search_focused: false,
+            error: None,
+        }
+    }
+
+    fn test_worktree_remove_state() -> WorktreeRemoveState {
+        WorktreeRemoveState {
+            workspace_id: "ws".into(),
+            repo_root: std::path::PathBuf::from("/tmp/repo"),
+            path: std::path::PathBuf::from("/tmp/repo-issue-1"),
+            error: None,
+            removing: false,
+            force_confirmation: false,
+        }
+    }
+
+    /// One representative state per overlay. Exhaustive on purpose: a new
+    /// overlay does not compile until the invariant tests can open it.
+    fn overlay_for_kind(kind: OverlayKind, pane_id: PaneId) -> Overlay {
+        match kind {
+            OverlayKind::Settings => Overlay::Settings(SettingsState {
+                section: SettingsSection::Theme,
+                list: ListCursor::new(0),
+                original_palette: None,
+                original_theme: None,
+            }),
+            OverlayKind::GlobalMenu => Overlay::GlobalMenu(ListCursor::new(0)),
+            OverlayKind::KeybindHelp => Overlay::KeybindHelp(KeybindHelpState::default()),
+            OverlayKind::Navigator => Overlay::Navigator(NavigatorState::default()),
+            OverlayKind::ContextMenu => Overlay::ContextMenu(ContextMenuState {
+                kind: ContextMenuKind::Workspace { ws_idx: 0 },
+                x: 0,
+                y: 0,
+                list: ListCursor::new(0),
+            }),
+            OverlayKind::NotificationCenter => {
+                Overlay::NotificationCenter(NotificationCenterState {
+                    list: ListCursor::default(),
+                    hovered_button: None,
+                })
+            }
+            OverlayKind::PaneTodos => Overlay::PaneTodos(PaneTodoPanelState {
+                pane_id,
+                list: ListCursor::default(),
+                hovered_button: None,
+            }),
+            OverlayKind::PaneTodoEdit => Overlay::PaneTodoEdit(PaneTodoEditState {
+                pane_id,
+                todo_id: None,
+                text: crate::ui::text_field::TextField::new(
+                    crate::terminal::todo::MAX_TODO_TEXT_LEN,
+                ),
+                priority: crate::terminal::todo::TodoPriority::default(),
+                link: PaneTodoEditLink::Keep,
+                done: false,
+                suspended_panel: None,
+            }),
+            OverlayKind::ReleaseNotes => Overlay::ReleaseNotes(ReleaseNotesState {
+                version: "0.0.0".into(),
+                body: String::new(),
+                scroll: 0,
+                preview: false,
+            }),
+            OverlayKind::ProductAnnouncement => {
+                Overlay::ProductAnnouncement(ProductAnnouncementState {
+                    version: "0.0.0".into(),
+                    id: "id".into(),
+                    title: String::new(),
+                    body: String::new(),
+                    scroll: 0,
+                    preview: false,
+                })
+            }
+            OverlayKind::NewLinkedWorktree => {
+                Overlay::NewLinkedWorktree(test_worktree_create_state())
+            }
+            OverlayKind::OpenExistingWorktree => {
+                Overlay::OpenExistingWorktree(test_worktree_open_state())
+            }
+            OverlayKind::ConfirmRemoveWorktree => {
+                Overlay::ConfirmRemoveWorktree(test_worktree_remove_state())
+            }
+            OverlayKind::PaneMoveTargetPicker => Overlay::PaneMoveTargetPicker(
+                PaneMoveTargetPickerState::new("p1".into(), Vec::new()),
+            ),
+        }
     }
 
     fn navigator_row_for_display(is_workspace: bool) -> NavigatorRow {

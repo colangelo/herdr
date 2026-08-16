@@ -150,7 +150,7 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
     let Some(inner) = render_panel_shell(frame, rect, p.accent, p.panel_bg) else {
         return;
     };
-    let Some(panel) = app.pane_todos.as_ref() else {
+    let Some(panel) = app.pane_todos() else {
         return;
     };
     let todos = app.pane_todos_in_display_order(panel.pane_id);
@@ -851,15 +851,12 @@ mod tests {
 
         app.pane_todos_move_selection(5);
         assert_eq!(
-            app.pane_todos.as_ref().expect("panel state").list.selected,
+            app.pane_todos().expect("panel state").list.selected,
             1,
             "selection stops at the last row"
         );
         app.pane_todos_move_selection(-9);
-        assert_eq!(
-            app.pane_todos.as_ref().expect("panel state").list.selected,
-            0
-        );
+        assert_eq!(app.pane_todos().expect("panel state").list.selected, 0);
 
         let empty = app_with_open_panel(&[]);
         assert!(empty.selected_pane_todo().is_none());

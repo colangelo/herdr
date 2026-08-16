@@ -14,6 +14,7 @@ use super::widgets::{
     modal_stack_areas, panel_contrast_fg, render_action_button, render_modal_header,
     render_modal_shell,
 };
+use crate::app::state::OverlayKind;
 use crate::app::AppState;
 
 pub(super) type HelpEntry = (String, Cow<'static, str>);
@@ -66,31 +67,109 @@ fn indexed_range_prefix(
     Some(prefix)
 }
 
+/// What an overlay contributes to the keybinding help panel.
+///
+/// The match below is exhaustive over [`OverlayKind`], so a new overlay does
+/// not compile until it says what it puts in the panel — which is the
+/// `AGENTS.md` rule "new keybindings must be discoverable in the help panel",
+/// enforced by the compiler instead of by remembering it.
+pub(super) enum OverlayHelp {
+    /// The entries this overlay contributes, in the order the panel shows
+    /// them. Never empty.
+    Entries(Vec<HelpEntry>),
+    /// This overlay has no keybinding to document, and why. The panel renders
+    /// `unset` for an unbound action, so this is only for surfaces that are
+    /// not reached by a key at all.
+    // The reason is the point of the variant — it is what makes "no entry" a
+    // recorded decision rather than an omission — and the guard test is what
+    // reads it.
+    #[allow(dead_code)]
+    NoKeybinding(&'static str),
+}
+
+impl OverlayHelp {
+    fn entries(self) -> Vec<HelpEntry> {
+        match self {
+            Self::Entries(entries) => entries,
+            Self::NoKeybinding(_) => Vec::new(),
+        }
+    }
+}
+
+pub(super) fn overlay_help(kind: OverlayKind, kb: &crate::config::Keybinds) -> OverlayHelp {
+    use OverlayHelp::{Entries, NoKeybinding};
+    match kind {
+        OverlayKind::KeybindHelp => Entries(vec![help_entry(keybind_label(&kb.help), "keybinds")]),
+        OverlayKind::Settings => Entries(vec![help_entry(keybind_label(&kb.settings), "settings")]),
+        OverlayKind::NotificationCenter => Entries(vec![help_entry(
+            keybind_label(&kb.open_notification_center),
+            "notification center",
+        )]),
+        OverlayKind::Navigator => Entries(vec![help_entry(
+            keybind_label(&kb.goto),
+            "session navigator",
+        )]),
+        OverlayKind::NewLinkedWorktree => Entries(vec![help_entry(
+            keybind_label(&kb.new_worktree),
+            "new worktree",
+        )]),
+        OverlayKind::OpenExistingWorktree => Entries(vec![help_entry(
+            keybind_label(&kb.open_worktree),
+            "open worktree",
+        )]),
+        OverlayKind::ConfirmRemoveWorktree => Entries(vec![help_entry(
+            keybind_label(&kb.remove_worktree),
+            "delete worktree checkout",
+        )]),
+        OverlayKind::PaneMoveTargetPicker => Entries(vec![help_entry(
+            keybind_label(&kb.move_pane_to_tab),
+            "move pane to tab or space",
+        )]),
+        OverlayKind::PaneTodos => Entries(vec![help_entry(
+            keybind_label(&kb.open_pane_todos),
+            "pane todos",
+        )]),
+        OverlayKind::PaneTodoEdit => Entries(vec![help_entry(
+            keybind_label(&kb.add_pane_todo),
+            "add pane todo",
+        )]),
+        OverlayKind::GlobalMenu => {
+            NoKeybinding("opened from the launcher glyph in the tab bar, by mouse only")
+        }
+        OverlayKind::ContextMenu => NoKeybinding("opened by right-clicking a sidebar row"),
+        OverlayKind::ReleaseNotes => {
+            NoKeybinding("opened from the global menu's what's-new entry after an update")
+        }
+        OverlayKind::ProductAnnouncement => {
+            NoKeybinding("shown once at startup when a release has something to announce")
+        }
+    }
+}
+
+fn overlay_entries(kind: OverlayKind, kb: &crate::config::Keybinds) -> Vec<HelpEntry> {
+    overlay_help(kind, kb).entries()
+}
+
 pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
     let kb = &app.keybinds;
     let mut groups = Vec::new();
 
-    groups.push((
-        "global",
-        vec![
-            help_entry(
-                crate::config::format_key_combo((app.prefix_code, app.prefix_mods)),
-                "prefix mode",
-            ),
-            help_entry(keybind_label(&kb.help), "keybinds"),
-            help_entry(keybind_label(&kb.settings), "settings"),
-            help_entry(keybind_label(&kb.detach), "detach"),
-            help_entry(keybind_label(&kb.reload_config), "reload config"),
-            help_entry(
-                keybind_label(&kb.open_notification_target),
-                "open notification target",
-            ),
-            help_entry(
-                keybind_label(&kb.open_notification_center),
-                "notification center",
-            ),
-        ],
-    ));
+    let mut global = vec![help_entry(
+        crate::config::format_key_combo((app.prefix_code, app.prefix_mods)),
+        "prefix mode",
+    )];
+    global.extend(overlay_entries(OverlayKind::KeybindHelp, kb));
+    global.extend(overlay_entries(OverlayKind::Settings, kb));
+    global.extend([
+        help_entry(keybind_label(&kb.detach), "detach"),
+        help_entry(keybind_label(&kb.reload_config), "reload config"),
+        help_entry(
+            keybind_label(&kb.open_notification_target),
+            "open notification target",
+        ),
+    ]);
+    global.extend(overlay_entries(OverlayKind::NotificationCenter, kb));
+    groups.push(("global", global));
 
     groups.push((
         "navigation",
@@ -120,16 +199,19 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
         ],
     ));
 
-    let workspace_tab = vec![
-        help_entry(keybind_label(&kb.workspace_picker), "workspace navigation"),
-        help_entry(keybind_label(&kb.goto), "session navigator"),
-        help_entry(keybind_label(&kb.new_workspace), "new workspace"),
-        help_entry(keybind_label(&kb.new_worktree), "new worktree"),
-        help_entry(keybind_label(&kb.open_worktree), "open worktree"),
-        help_entry(
-            keybind_label(&kb.remove_worktree),
-            "delete worktree checkout",
-        ),
+    let mut workspace_tab = vec![help_entry(
+        keybind_label(&kb.workspace_picker),
+        "workspace navigation",
+    )];
+    workspace_tab.extend(overlay_entries(OverlayKind::Navigator, kb));
+    workspace_tab.push(help_entry(
+        keybind_label(&kb.new_workspace),
+        "new workspace",
+    ));
+    workspace_tab.extend(overlay_entries(OverlayKind::NewLinkedWorktree, kb));
+    workspace_tab.extend(overlay_entries(OverlayKind::OpenExistingWorktree, kb));
+    workspace_tab.extend(overlay_entries(OverlayKind::ConfirmRemoveWorktree, kb));
+    workspace_tab.extend([
         help_entry(keybind_label(&kb.rename_workspace), "rename workspace"),
         help_entry(keybind_label(&kb.close_workspace), "close workspace"),
         help_entry(keybind_label(&kb.previous_workspace), "previous workspace"),
@@ -146,20 +228,19 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
         help_entry(keybind_label(&kb.move_tab_next), "move tab right"),
         help_entry(indexed_label(&kb.switch_tab), "switch tab 1-9"),
         help_entry(keybind_label(&kb.close_tab), "close tab"),
-    ];
+    ]);
     groups.push(("workspaces / tabs", workspace_tab));
 
-    let panes = vec![
+    let mut panes = vec![
         help_entry(keybind_label(&kb.split_vertical), "split vertical"),
         help_entry(keybind_label(&kb.split_horizontal), "split horizontal"),
         help_entry(keybind_label(&kb.close_pane), "close pane"),
         help_entry(keybind_label(&kb.respawn_pane), "respawn pane"),
         help_entry(keybind_label(&kb.rename_pane), "rename pane"),
         help_entry(keybind_label(&kb.break_pane), "break pane to new tab"),
-        help_entry(
-            keybind_label(&kb.move_pane_to_tab),
-            "move pane to tab or space",
-        ),
+    ];
+    panes.extend(overlay_entries(OverlayKind::PaneMoveTargetPicker, kb));
+    panes.extend([
         help_entry(
             keybind_label(&kb.move_pane_next_tab),
             "move pane to next tab",
@@ -170,8 +251,10 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
         ),
         help_entry(keybind_label(&kb.edit_scrollback), "edit scrollback"),
         help_entry(keybind_label(&kb.clear_scrollback), "clear scrollback"),
-        help_entry(keybind_label(&kb.open_pane_todos), "pane todos"),
-        help_entry(keybind_label(&kb.add_pane_todo), "add pane todo"),
+    ]);
+    panes.extend(overlay_entries(OverlayKind::PaneTodos, kb));
+    panes.extend(overlay_entries(OverlayKind::PaneTodoEdit, kb));
+    panes.extend([
         help_entry(keybind_label(&kb.copy_mode), "copy mode"),
         help_entry(keybind_label(&kb.copy_mode_page_up), "copy mode + page up"),
         help_entry(
@@ -208,7 +291,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             "cycle pane previous",
         ),
         help_entry(keybind_label(&kb.last_pane), "last pane"),
-    ];
+    ]);
     groups.push(("panes", panes));
 
     // Fixed chords rather than `KeysConfig` actions — the todo panel and its
@@ -317,8 +400,7 @@ pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)> 
         .add_modifier(Modifier::BOLD);
     let label_style = Style::default().fg(app.palette.text);
 
-    let groups =
-        filter_keybind_help_groups(keybind_help_groups(app), app.keybind_help.query.text());
+    let groups = filter_keybind_help_groups(keybind_help_groups(app), app.keybind_help_query());
     let key_width = groups
         .iter()
         .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
@@ -361,6 +443,9 @@ pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)> 
 }
 
 pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
+    let Some(help) = app.keybind_help() else {
+        return;
+    };
     super::dim_background(frame, frame.area());
 
     let Some(inner) = render_modal_shell(frame, frame.area(), 76, 22, &app.palette) else {
@@ -379,17 +464,13 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
         frame,
         release_notes_close_button_rect(header_rows[0]),
         Some("esc"),
-        if app.keybind_help.search_focused {
-            "back"
-        } else {
-            "close"
-        },
+        if help.search_focused { "back" } else { "close" },
         Style::default()
             .fg(panel_contrast_fg(&app.palette))
             .bg(app.palette.accent)
             .add_modifier(Modifier::BOLD),
     );
-    let search_line = if app.keybind_help.search_focused {
+    let search_line = if help.search_focused {
         Line::from(vec![
             Span::styled(
                 " / ",
@@ -398,7 +479,7 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                app.keybind_help.query.text(),
+                help.query.text(),
                 Style::default()
                     .fg(app.palette.text)
                     .add_modifier(Modifier::BOLD),
@@ -411,18 +492,16 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
         ))
     };
     frame.render_widget(Paragraph::new(search_line), header_rows[1]);
-    if app.keybind_help.search_focused {
+    if help.search_focused {
         // The search box has an insertion point now, so the host cursor goes
         // where it is — an IME composes at the host cursor, and a caret the
         // user cannot see is a caret they cannot use.
-        set_search_caret(frame, header_rows[1], &app.keybind_help.query);
+        set_search_caret(frame, header_rows[1], &help.query);
     }
 
     let body_area = stack.content;
     let metrics = crate::pane::ScrollMetrics {
-        offset_from_bottom: app
-            .keybind_help_max_scroll()
-            .saturating_sub(app.keybind_help.scroll) as usize,
+        offset_from_bottom: app.keybind_help_max_scroll().saturating_sub(help.scroll) as usize,
         max_offset_from_bottom: app.keybind_help_max_scroll() as usize,
         viewport_rows: body_area.height.max(1) as usize,
     };
@@ -445,7 +524,7 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
             .collect::<Vec<_>>(),
     )
     .wrap(Wrap { trim: false })
-    .scroll((app.keybind_help.scroll, 0));
+    .scroll((help.scroll, 0));
     frame.render_widget(body, text_area);
     if let Some(track) = track {
         render_scrollbar(
@@ -458,7 +537,7 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
         );
     }
 
-    let footer = if app.keybind_help.search_focused {
+    let footer = if help.search_focused {
         Line::from(vec![
             Span::styled(" filter ", Style::default().fg(app.palette.overlay0)),
             Span::styled("type/backspace", Style::default().fg(app.palette.text)),
@@ -577,10 +656,9 @@ mod tests {
     #[test]
     fn snapshot_keybind_help() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
-            app.keybind_help.scroll = 0;
-            app.keybind_help.query.clear();
-            app.keybind_help.search_focused = false;
-            app.mode = crate::app::state::Mode::KeybindHelp;
+            app.open_overlay(crate::app::state::Overlay::KeybindHelp(
+                crate::app::state::KeybindHelpState::default(),
+            ));
         })
         .assert(
             Rect::new(2, 1, 76, 22),
@@ -609,5 +687,50 @@ mod tests {
                 "└──────────────────────────────────────────────────────────────────────────┘",
             ],
         );
+    }
+
+    /// The second half of the help-panel rule. The `overlay_help` match is
+    /// exhaustive, so a new overlay cannot compile without saying what it puts
+    /// in the panel; this checks that what it claims is actually on screen,
+    /// and that an overlay claiming nothing says why.
+    #[test]
+    fn every_overlay_is_accounted_for_in_the_help_panel() {
+        let app = AppState::test_new();
+        let groups = keybind_help_groups(&app);
+        let labels: Vec<String> = groups
+            .iter()
+            .flat_map(|(_, entries)| entries.iter().map(|(_, label)| label.to_string()))
+            .collect();
+
+        for kind in OverlayKind::ALL {
+            match overlay_help(*kind, &app.keybinds) {
+                OverlayHelp::Entries(entries) => {
+                    assert!(!entries.is_empty(), "{kind:?} claims entries but has none");
+                    for (_, label) in entries {
+                        assert!(
+                            labels.contains(&label.to_string()),
+                            "{kind:?} contributes {label:?}, which the panel does not show"
+                        );
+                    }
+                }
+                OverlayHelp::NoKeybinding(reason) => assert!(
+                    !reason.trim().is_empty(),
+                    "{kind:?} must say why it has no keybinding to document"
+                ),
+            }
+        }
+    }
+
+    /// Every overlay's input-source answer comes from its own variant rather
+    /// than from a list on `Mode` that a new overlay can fall off.
+    #[test]
+    fn every_overlay_mode_takes_its_ascii_answer_from_its_variant() {
+        for kind in crate::app::state::OverlayKind::ALL {
+            assert_eq!(
+                kind.mode().wants_ascii_input(),
+                kind.wants_ascii_input(),
+                "{kind:?} and its mode disagree about the input source"
+            );
+        }
     }
 }

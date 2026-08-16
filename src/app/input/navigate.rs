@@ -826,7 +826,7 @@ impl App {
     }
 
     pub(crate) fn activate_notification_row(&mut self, index: usize) {
-        if let Some(center) = self.state.notification_center.as_mut() {
+        if let Some(center) = self.state.notification_center_mut() {
             center.list.selected = index;
         }
         self.activate_notification_center_selection();
@@ -1400,7 +1400,8 @@ impl App {
     fn open_pane_move_target_picker(&mut self) {
         match pane_move_target_picker_for_state(&self.state) {
             Ok(picker) => {
-                self.state.pane_move_target_picker = Some(picker);
+                self.state
+                    .set_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
                 self.state.mode = Mode::PaneMoveTargetPicker;
             }
             Err(message) => {
@@ -1438,7 +1439,8 @@ impl App {
     pub(crate) fn handle_pane_move_target_picker_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                self.state.pane_move_target_picker = None;
+                self.state
+                    .close_overlay(crate::app::state::OverlayKind::PaneMoveTargetPicker);
                 leave_navigate_mode(&mut self.state);
             }
             KeyCode::Enter => self.submit_pane_move_target_picker(),
@@ -1451,7 +1453,7 @@ impl App {
                 let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
                     return;
                 };
-                let Some(picker) = self.state.pane_move_target_picker.as_mut() else {
+                let Some(picker) = self.state.pane_move_target_picker_mut() else {
                     return;
                 };
                 let half = (picker.items.len() / 2).max(1);
@@ -1468,16 +1470,13 @@ impl App {
     }
 
     pub(crate) fn submit_pane_move_target_picker(&mut self) {
-        let selection = self
-            .state
-            .pane_move_target_picker
-            .as_ref()
-            .and_then(|picker| {
-                picker
-                    .selected_destination()
-                    .map(|entry| (picker.source_pane_id.clone(), entry.target.clone()))
-            });
-        self.state.pane_move_target_picker = None;
+        let selection = self.state.pane_move_target_picker().and_then(|picker| {
+            picker
+                .selected_destination()
+                .map(|entry| (picker.source_pane_id.clone(), entry.target.clone()))
+        });
+        self.state
+            .close_overlay(crate::app::state::OverlayKind::PaneMoveTargetPicker);
         leave_navigate_mode(&mut self.state);
         if let Some((source_pane_id, target)) = selection {
             self.dispatch_pane_move_to_target(source_pane_id, target);
@@ -2433,8 +2432,7 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::MovePaneToTab => match pane_move_target_picker_for_state(state) {
             Ok(picker) => {
-                state.pane_move_target_picker = Some(picker);
-                state.mode = Mode::PaneMoveTargetPicker;
+                state.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
             }
             Err(message) => {
                 set_pane_move_feedback(state, "pane move unavailable", message);
@@ -2887,10 +2885,7 @@ mod tests {
         app.execute_tui_navigate_action(NavigateAction::OpenPaneTodos, ActionContext::Prefix);
 
         assert_eq!(app.state.mode, Mode::PaneTodos);
-        assert_eq!(
-            app.state.pane_todos.as_ref().expect("panel").pane_id,
-            pane_id
-        );
+        assert_eq!(app.state.pane_todos().expect("panel").pane_id, pane_id);
     }
 
     #[test]
@@ -2932,11 +2927,11 @@ add_pane_todo = "prefix+a"
         app.execute_tui_navigate_action(NavigateAction::AddPaneTodo, ActionContext::Prefix);
 
         assert_eq!(app.state.mode, Mode::PaneTodoEdit);
-        let edit = app.state.pane_todo_edit.as_ref().expect("edit state");
+        let edit = app.state.pane_todo_edit().expect("edit state");
         assert_eq!(edit.pane_id, pane_id);
         assert_eq!(edit.todo_id, None, "the action authors a new todo");
         assert!(
-            app.state.pane_todos.is_none(),
+            app.state.pane_todos().is_none(),
             "the action goes straight to the modal without opening the panel"
         );
     }
@@ -2952,10 +2947,7 @@ add_pane_todo = "prefix+a"
         execute_navigate_action(&mut state, NavigateAction::AddPaneTodo);
 
         assert_eq!(state.mode, Mode::PaneTodoEdit);
-        assert_eq!(
-            state.pane_todo_edit.as_ref().expect("edit state").pane_id,
-            pane_id
-        );
+        assert_eq!(state.pane_todo_edit().expect("edit state").pane_id, pane_id);
     }
 
     #[test]
@@ -3069,8 +3061,7 @@ command = "echo custom"
 
     fn picker_of(app: &App) -> &crate::app::state::PaneMoveTargetPickerState {
         app.state
-            .pane_move_target_picker
-            .as_ref()
+            .pane_move_target_picker()
             .expect("picker should open")
     }
 
@@ -3105,8 +3096,7 @@ command = "echo custom"
     fn select_target(app: &mut App, target: &crate::app::state::PaneMoveTarget) {
         let picker = app
             .state
-            .pane_move_target_picker
-            .as_mut()
+            .pane_move_target_picker_mut()
             .expect("picker should open");
         let idx = picker
             .items
@@ -3129,7 +3119,7 @@ command = "echo custom"
         app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
 
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.pane_move_target_picker.is_none());
+        assert!(app.state.pane_move_target_picker().is_none());
         assert_eq!(
             app.state.toast.as_ref().map(|toast| toast.title.as_str()),
             Some("pane move unavailable")
@@ -3237,8 +3227,7 @@ command = "echo custom"
         for _ in 0..picker.items.len() + 2 {
             let picker = app
                 .state
-                .pane_move_target_picker
-                .as_mut()
+                .pane_move_target_picker_mut()
                 .expect("picker open");
             picker.select_next();
             assert!(!heading_indices.contains(&picker.list.selected));
@@ -3248,8 +3237,7 @@ command = "echo custom"
         for _ in 0..last_destination + 2 {
             let picker = app
                 .state
-                .pane_move_target_picker
-                .as_mut()
+                .pane_move_target_picker_mut()
                 .expect("picker open");
             picker.select_prev();
             assert!(!heading_indices.contains(&picker.list.selected));
@@ -3266,7 +3254,7 @@ command = "echo custom"
         app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
 
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.pane_move_target_picker.is_none());
+        assert!(app.state.pane_move_target_picker().is_none());
         assert!(app
             .state
             .toast
@@ -3301,7 +3289,7 @@ command = "echo custom"
         app.handle_pane_move_target_picker_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
         assert_eq!(app.state.mode, Mode::Terminal);
-        assert!(app.state.pane_move_target_picker.is_none());
+        assert!(app.state.pane_move_target_picker().is_none());
         assert_eq!(app.state.workspaces[0].tabs.len(), before_tabs);
     }
 

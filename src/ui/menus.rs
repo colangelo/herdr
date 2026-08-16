@@ -256,12 +256,13 @@ pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
     };
 
     let items = app.global_menu_labels();
+    let highlighted = app.global_menu().map(|menu| menu.selected).unwrap_or(0);
     for (idx, item) in items.iter().enumerate() {
         let y = inner.y + idx as u16;
         if y >= inner.y + inner.height {
             break;
         }
-        let selected = idx == app.global_menu.selected;
+        let selected = idx == highlighted;
         let rect = Rect::new(inner.x, y, inner.width, 1);
 
         let selected_style = Style::default()
@@ -321,7 +322,7 @@ pub(super) fn render_resize_overlay(app: &AppState, frame: &mut Frame, area: Rec
 }
 
 pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
-    let Some(menu) = &app.context_menu else {
+    let Some(menu) = app.context_menu() else {
         return;
     };
 
@@ -358,13 +359,14 @@ mod tests {
     #[test]
     fn snapshot_context_menu() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
-            app.context_menu = Some(crate::app::state::ContextMenuState {
-                kind: crate::app::state::ContextMenuKind::Workspace { ws_idx: 0 },
-                x: 10,
-                y: 5,
-                list: crate::app::state::ListCursor::new(0),
-            });
-            app.mode = crate::app::state::Mode::ContextMenu;
+            app.open_overlay(crate::app::state::Overlay::ContextMenu(
+                crate::app::state::ContextMenuState {
+                    kind: crate::app::state::ContextMenuKind::Workspace { ws_idx: 0 },
+                    x: 10,
+                    y: 5,
+                    list: crate::app::state::ListCursor::new(0),
+                },
+            ));
         })
         .assert(
             Rect::new(10, 5, 14, 4),
@@ -380,8 +382,9 @@ mod tests {
     #[test]
     fn snapshot_global_menu() {
         crate::ui::test_support::overlay_snapshot_of(|app| {
-            app.global_menu = crate::app::state::ListCursor::new(0);
-            app.mode = crate::app::state::Mode::GlobalMenu;
+            app.open_overlay(crate::app::state::Overlay::GlobalMenu(
+                crate::app::state::ListCursor::new(0),
+            ));
         })
         .assert(
             Rect::new(19, 6, 17, 6),

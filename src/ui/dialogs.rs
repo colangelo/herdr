@@ -209,7 +209,7 @@ fn input_row_line(
 }
 
 pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(edit) = app.pane_todo_edit.as_ref() else {
+    let Some(edit) = app.pane_todo_edit() else {
         return;
     };
     super::dim_background(frame, area);
@@ -601,7 +601,7 @@ pub(super) fn render_pane_move_target_picker_overlay(
 ) {
     use crate::app::state::PaneMoveTargetItem;
 
-    let Some(picker) = app.pane_move_target_picker.as_ref() else {
+    let Some(picker) = app.pane_move_target_picker() else {
         return;
     };
 
@@ -700,7 +700,7 @@ pub(super) fn render_pane_move_target_picker_overlay(
 }
 
 pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(create) = app.worktree_create.as_ref() else {
+    let Some(create) = app.worktree_create() else {
         return;
     };
 
@@ -787,7 +787,7 @@ pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Fra
 }
 
 pub(super) fn render_remove_worktree_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(remove) = app.worktree_remove.as_ref() else {
+    let Some(remove) = app.worktree_remove() else {
         return;
     };
 
@@ -884,7 +884,7 @@ pub(super) fn render_remove_worktree_overlay(app: &AppState, frame: &mut Frame, 
 }
 
 pub(super) fn render_open_existing_worktree_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(open) = app.worktree_open.as_ref() else {
+    let Some(open) = app.worktree_open() else {
         return;
     };
 
@@ -1410,7 +1410,7 @@ mod tests {
     fn new_worktree_error_renders_fatal_stderr_line() {
         let mut app = AppState::test_new();
         app.set_name_input("foo");
-        app.worktree_create = Some(WorktreeCreateState {
+        app.set_overlay(crate::app::state::Overlay::NewLinkedWorktree(WorktreeCreateState {
             source_workspace_id: "source".into(),
             source_checkout_path: "/repo/herdr".into(),
             source_existing_membership: None,
@@ -1424,7 +1424,7 @@ mod tests {
                     .into(),
             ),
             creating: false,
-        });
+        }));
 
         let mut terminal =
             Terminal::new(TestBackend::new(100, 30)).expect("test terminal should initialize");
@@ -1497,18 +1497,20 @@ mod tests {
     fn worktree_overlay_caret(branch: &str) -> Position {
         let mut app = AppState::test_new();
         app.set_name_input(branch);
-        app.worktree_create = Some(WorktreeCreateState {
-            source_workspace_id: "source".into(),
-            source_checkout_path: "/repo/herdr".into(),
-            source_existing_membership: None,
-            source_repo_root: "/repo/herdr".into(),
-            repo_key: "repo-key".into(),
-            repo_name: "herdr".into(),
-            branch: branch.into(),
-            checkout_path: "/repo/.worktrees/herdr/foo".into(),
-            error: None,
-            creating: false,
-        });
+        app.set_overlay(crate::app::state::Overlay::NewLinkedWorktree(
+            WorktreeCreateState {
+                source_workspace_id: "source".into(),
+                source_checkout_path: "/repo/herdr".into(),
+                source_existing_membership: None,
+                source_repo_root: "/repo/herdr".into(),
+                repo_key: "repo-key".into(),
+                repo_name: "herdr".into(),
+                branch: branch.into(),
+                checkout_path: "/repo/.worktrees/herdr/foo".into(),
+                error: None,
+                creating: false,
+            },
+        ));
 
         let mut terminal =
             Terminal::new(TestBackend::new(WORKTREE_AREA.width, WORKTREE_AREA.height))
@@ -1649,7 +1651,7 @@ mod tests {
         app.view.terminal_area = Rect::new(0, 0, 80, 24);
         let pane_id = app.workspaces[0].tabs[0].root_pane;
         app.open_new_pane_todo(pane_id);
-        if let Some(edit) = app.pane_todo_edit.as_mut() {
+        if let Some(edit) = app.pane_todo_edit_mut() {
             edit.text =
                 TextField::from_text("rerun the deploy", crate::terminal::todo::MAX_TODO_TEXT_LEN);
         }
@@ -1755,7 +1757,7 @@ mod tests {
 
         // Staged through the picker, before any save: `ctrl+g` acts on the
         // staged choice, so the hint has to follow it rather than the store.
-        if let Some(edit) = app.pane_todo_edit.as_mut() {
+        if let Some(edit) = app.pane_todo_edit_mut() {
             edit.link = crate::app::state::PaneTodoEditLink::Set(pane_id);
         }
         let row = link_row(&app);
@@ -1764,7 +1766,7 @@ mod tests {
             "a staged live link can be followed: {row}"
         );
 
-        if let Some(edit) = app.pane_todo_edit.as_mut() {
+        if let Some(edit) = app.pane_todo_edit_mut() {
             edit.link = crate::app::state::PaneTodoEditLink::Clear;
         }
         assert!(!link_row(&app).contains("^g"), "a cleared link cannot");
@@ -1809,7 +1811,7 @@ mod tests {
         };
 
         // Three lines fill the block exactly.
-        if let Some(edit) = app.pane_todo_edit.as_mut() {
+        if let Some(edit) = app.pane_todo_edit_mut() {
             edit.text =
                 TextField::from_text("one\ntwo\nthree", crate::terminal::todo::MAX_TODO_TEXT_LEN);
         }
@@ -1819,7 +1821,7 @@ mod tests {
 
         // A fourth scrolls the first out: the cursor lands on the last line,
         // and the block shows the last three.
-        if let Some(edit) = app.pane_todo_edit.as_mut() {
+        if let Some(edit) = app.pane_todo_edit_mut() {
             edit.text = TextField::from_text(
                 "one\ntwo\nthree\nfour",
                 crate::terminal::todo::MAX_TODO_TEXT_LEN,
@@ -2038,8 +2040,9 @@ mod tests {
             }),
         ];
         let item_count = items.len();
-        app.pane_move_target_picker = Some(PaneMoveTargetPickerState::new("pane".into(), items));
-        app.mode = Mode::PaneMoveTargetPicker;
+        app.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(
+            PaneMoveTargetPickerState::new("pane".into(), items),
+        ));
 
         let area = Rect::new(0, 0, 80, 24);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
