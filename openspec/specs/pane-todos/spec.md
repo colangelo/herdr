@@ -112,12 +112,6 @@ identifiers are scoped to a workspace, resolving a link target to its public
 identifier SHALL locate the target's own workspace rather than assuming the
 active one.
 
-A live link SHALL be presented leading with the target's public pane identifier,
-followed by the captured label, so the link both addresses and names its target.
-The identifier SHALL be derived from the live target at presentation time rather
-than stored, so it is either correct or absent. A dead link, which resolves to no
-identifier, SHALL be presented with its captured label alone.
-
 On restore, the target SHALL be remapped through the same identifier map that
 remaps layout references. A link whose target cannot be resolved SHALL be
 preserved as a dead link that retains its label, is presented as inert, and
@@ -164,7 +158,7 @@ SHALL NOT resolve to any other pane.
 
 - **WHEN** a todo's link target no longer exists
 - **THEN** the todo is retained, its link is presented as dead with its captured
-  label and no identifier, and activating it does not change focus
+  label, and activating it does not change focus
 
 #### Scenario: Ambiguous link targets are rejected
 
@@ -223,35 +217,6 @@ its pane id.
 - **THEN** it prints the todos as JSON including ids, done state, priority, and
   link target
 
-### Requirement: Pane todo indicator
-
-A pane with at least one todo SHALL show an indicator at the far right of its top
-border carrying the count of outstanding todos. A pane whose todos are all done
-SHALL show the indicator without a count. A pane with no todos SHALL show no
-indicator and SHALL render exactly as it does without this feature.
-
-The indicator SHALL be colored by the highest outstanding priority, and SHALL be
-configurable off. The region used to draw the indicator and the region that
-accepts a click SHALL be derived from a single shared definition. When pane width
-forces a choice, the indicator SHALL be laid out before the pane title so the
-title truncates instead of the control disappearing.
-
-#### Scenario: Outstanding count is shown
-
-- **WHEN** a pane holds three not-done todos and one done todo
-- **THEN** its indicator shows a count of three
-
-#### Scenario: A quiet pane is unchanged
-
-- **WHEN** a pane has no todos
-- **THEN** no indicator is drawn and the border renders identically to a build
-  without this feature
-
-#### Scenario: Click target matches what is drawn
-
-- **WHEN** the indicator is drawn for a pane
-- **THEN** the cells that respond to a click are exactly the cells drawn
-
 ### Requirement: Pane todo panel and editing
 
 Activating the indicator, by click or by a bindable action, SHALL open a panel
@@ -263,28 +228,19 @@ adding a new todo, following a todo's link, and closing.
 The panel SHALL offer the add action even when the pane holds no todos, so
 opening a quiet pane's panel is never a dead end.
 
-The panel SHALL list one row per todo regardless of how many lines that todo's
-text holds, showing its first line with a marker indicating that more follows.
-
 Opening a todo for editing SHALL present a modal built from the existing dialog
 structure allowing its text, priority, link, and done state to be changed, with
-explicit save and cancel. Because the modal's text field owns both the panel's
-done-toggle key and the key that commits an edit, the modal SHALL offer the
-toggle and the commit under distinct bindings that are not part of the text
-field's editing set. A todo being composed SHALL NOT offer the done toggle,
-since it cannot be already done.
+explicit save and cancel. Because the modal's text field owns the panel's
+done-toggle key, the modal SHALL offer the toggle under a distinct binding. A
+todo being composed SHALL NOT offer the done toggle, since it cannot be already
+done.
 
 Choosing a link SHALL present the session navigator in a selection mode rather
 than cycling through candidates, so the target can be searched and filtered.
 Rows that are not panes SHALL be context only and SHALL NOT be selectable as a
 target, the todo's own pane SHALL NOT be offered, and the selection SHALL
 include an explicit entry that clears the link. Leaving the selection without
-choosing SHALL leave the link as it was. Pane rows SHALL show the public
-identifier they would stage alongside the name they are listed under.
-
-The selection SHALL be movable from the keyboard without the arrow keys in every
-state of the picker, including while its search is focused, using the same chords
-in both states. The arrow keys SHALL continue to work.
+choosing SHALL leave the link as it was.
 
 Following a link SHALL move focus to the linked pane through the same focus path
 used when jumping to a notification's pane.
@@ -459,3 +415,63 @@ cannot compose a todo the server will reject.
 - **WHEN** the field already holds the maximum number of characters
 - **THEN** further typed characters are ignored rather than composing a todo the
   store would reject
+
+### Requirement: Always-on pane todo indicator
+
+Every pane that draws a top border SHALL show a todo indicator at the far right
+of it, whether or not the pane holds todos, so the affordance is in the same
+place on every such pane and a pane with no todos can still be opened by mouse.
+A pane that draws no top border SHALL show no indicator, since there is no
+chrome to carry it; the bindable action remains the path there.
+
+The indicator SHALL distinguish three states: a pane with outstanding todos
+carries their count, a pane whose todos are all done carries the glyph without a
+count, and a pane with no todos carries the glyph rendered in the dimmest tone
+so it reads as an empty affordance rather than as completed work.
+
+The indicator SHALL be colored by the highest outstanding priority when
+outstanding todos exist, and SHALL be configurable off, suppressing all three
+states. The region used to draw the indicator and the region that accepts a
+click SHALL be derived from a single shared definition. When pane width forces a
+choice the indicator SHALL win: it is laid out first and the title takes what is
+left, dropping itself when that is too narrow. The indicator SHALL be omitted
+only when the pane cannot carry the glyph and its enclosing border corners at
+all.
+
+#### Scenario: Outstanding count is shown
+
+- **WHEN** a pane holds three not-done todos and one done todo
+- **THEN** its indicator shows a count of three
+
+#### Scenario: An empty pane still offers the affordance
+
+- **WHEN** a pane with a top border has no todos
+- **THEN** the indicator is drawn without a count in the dimmest tone
+- **AND** activating it opens that pane's todo panel
+
+#### Scenario: A pane without a top border carries no indicator
+
+- **WHEN** a pane draws no top border
+- **THEN** no indicator is drawn for it regardless of its todos
+
+#### Scenario: The indicator outlives the title in a squeeze
+
+- **WHEN** a pane is too narrow to show both the indicator and its title
+- **THEN** the indicator is drawn and the title gives up the space
+- **WHEN** the pane cannot carry the glyph and its border corners at all
+- **THEN** the indicator is omitted
+
+#### Scenario: Empty is distinguishable from all-done
+
+- **WHEN** one pane has no todos and another pane's todos are all done
+- **THEN** both show the glyph without a count, rendered in different tones
+
+#### Scenario: The indicator can be turned off
+
+- **WHEN** the pane todo indicator is configured off
+- **THEN** no indicator is drawn for any pane, including panes holding todos
+
+#### Scenario: Click target matches what is drawn
+
+- **WHEN** the indicator is drawn for a pane
+- **THEN** the cells that respond to a click are exactly the cells drawn
