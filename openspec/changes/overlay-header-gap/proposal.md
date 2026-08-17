@@ -17,7 +17,10 @@ worktree dialogs do not. Nothing recorded which was intended.
 you think in.** It renders `w2:pP · imap-jmap-mcp`. The board exists to be read
 *across* spaces, so the first question a heading answers should be "where is
 this work", and the space is not in the heading at all — it is encoded in the
-first character of an identifier you have to decode.
+first character of an identifier you have to decode. Dogfooding the reordered
+heading then found the identifier was not worth carrying at either end: it is a
+creation counter, so it names nothing the reader can see, and its space
+component repeats the space name in code.
 
 ## What Changes
 
@@ -26,8 +29,10 @@ its title row plus one blank row under it, and the five overlays that were flush
 adopt it. The four that already left the gap are unchanged — this makes the
 existing majority the rule.
 
-The board's group heading becomes `space · pane label [addressable id]` —
-`infra · imap-jmap-mcp [w2:pP]`.
+The board's group heading becomes `space · pane label` —
+`infra · imap-jmap-mcp` — with no addressable identifier. The todo link chip
+keeps its own, because a chip is a destination you may want to address rather
+than a group you are reading.
 
 ## Impact
 
