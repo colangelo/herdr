@@ -575,10 +575,18 @@ impl AppState {
         }
     }
 
-    /// How a pane is named wherever the session lists panes: its title, then
-    /// its manual label, its agent, and finally the command it was launched
-    /// with, so a plain shell is identified by what it is running rather than
-    /// by a bare number.
+    /// How a pane is named wherever the session lists panes: the agent's own
+    /// reported title, then a name it was given, then the terminal's title,
+    /// then the agent, and finally the command it was launched with — so a
+    /// plain shell is identified by what it is running rather than by a bare
+    /// number.
+    ///
+    /// The terminal title is in that list because the agent-reported one
+    /// carries a TTL and goes quiet once an agent has been idle a while, which
+    /// left every unnamed agent pane called "claude". It sits *below* an
+    /// assigned name because that name is what `herdr agent send` addresses,
+    /// and a list that stopped showing it would stop telling you how to reach
+    /// the pane.
     ///
     /// Shared by the navigator's pane rows and the todo board's group
     /// headings, so a pane cannot be called one thing in the picker and
@@ -599,6 +607,7 @@ impl AppState {
             .or_else(|| {
                 terminal.and_then(|terminal| terminal.manual_label.as_deref().map(str::to_string))
             })
+            .or_else(|| terminal.and_then(|terminal| terminal.terminal_title_stripped()))
             .or_else(|| {
                 terminal.and_then(|terminal| terminal.agent_name.as_deref().map(str::to_string))
             })
@@ -3809,6 +3818,58 @@ mod tests {
             &[("other space", TodoPriority::Normal)],
         );
         (state, first_root, first_empty, second_root)
+    }
+
+    /// Regression: every agent pane without an assigned name was called
+    /// "claude" in the navigator and on the todo board. The agent-reported
+    /// title carries a TTL and goes quiet once a pane has been idle a while,
+    /// and nothing below it in the chain consulted the terminal's own title —
+    /// so the recognisable session name was on screen everywhere except the
+    /// lists you use to find the pane.
+    #[test]
+    fn an_unnamed_agent_pane_is_labelled_by_its_terminal_title() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![Workspace::test_new("one")];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let pane = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0]
+            .pane_state(pane)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).expect("terminal");
+        terminal.agent_name = Some("claude".into());
+        terminal.set_terminal_title(Some("✳ infra-side-of-direction-on-kube".into()));
+
+        assert_eq!(
+            state.pane_display_label(0, pane),
+            "infra-side-of-direction-on-kube",
+            "the terminal title beats the bare agent name"
+        );
+    }
+
+    /// An assigned name still wins, because that is what `herdr agent send`
+    /// addresses: a list that stopped showing it would stop telling you how to
+    /// reach the pane.
+    #[test]
+    fn an_assigned_name_outranks_the_terminal_title() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![Workspace::test_new("one")];
+        state.active = Some(0);
+        state.ensure_test_terminals();
+        let pane = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0]
+            .pane_state(pane)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).expect("terminal");
+        terminal.agent_name = Some("claude".into());
+        terminal.manual_label = Some("imap-jmap-mcp".into());
+        terminal.set_terminal_title(Some("✳ something else".into()));
+
+        assert_eq!(state.pane_display_label(0, pane), "imap-jmap-mcp");
     }
 
     #[test]
