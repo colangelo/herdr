@@ -1643,10 +1643,6 @@ pub enum TodoBoardItem {
         /// the board is read across spaces: where the work lives is the first
         /// thing you are deciding between.
         space: String,
-        /// The owning pane's addressable identifier. `None` only for a pane
-        /// whose public number cannot be resolved, which leaves the heading
-        /// without one.
-        public_id: Option<String>,
         label: String,
     },
     Todo {
@@ -4505,7 +4501,6 @@ mod tests {
             OverlayKind::TodoBoard => Overlay::TodoBoard(TodoBoardState::new(vec![
                 TodoBoardItem::PaneHeading {
                     space: "one".into(),
-                    public_id: Some("w1:pA".into()),
                     label: "shell".into(),
                 },
                 TodoBoardItem::Todo {

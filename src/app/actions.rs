@@ -641,7 +641,6 @@ impl AppState {
                     }
                     items.push(TodoBoardItem::PaneHeading {
                         space: ws.display_name_from_terminals(&self.terminals),
-                        public_id: self.session_public_pane_id(pane_id),
                         label: self.pane_display_label(ws_idx, pane_id),
                     });
                     items.extend(todos.iter().map(|todo| TodoBoardItem::Todo {
@@ -3770,11 +3769,7 @@ mod tests {
             .todo_board_items()
             .iter()
             .map(|item| match item {
-                TodoBoardItem::PaneHeading {
-                    space,
-                    public_id,
-                    label,
-                } => format!("# {space} {label} {}", public_id.as_deref().unwrap_or("-")),
+                TodoBoardItem::PaneHeading { space, label } => format!("# {space} {label}"),
                 TodoBoardItem::Todo { pane_id, todo_id } => state
                     .pane_todo_by_id(*pane_id, *todo_id)
                     .map(|todo| todo.text)
@@ -3917,34 +3912,24 @@ mod tests {
     #[test]
     fn panes_holding_no_todos_contribute_no_heading_and_no_rows() {
         let (state, _, first_empty, _) = app_with_board_todos();
-        let empty_id = state
-            .session_public_pane_id(first_empty)
-            .expect("the empty pane has an identifier");
+        let empty_label = state.pane_display_label(0, first_empty);
         assert!(
             !board_state(&state)
                 .iter()
-                .any(|row| row.contains(&empty_id)),
+                .any(|row| row.starts_with("# ") && row.contains(&empty_label)),
             "the empty pane should not appear"
         );
     }
 
     #[test]
-    fn a_heading_identifies_its_pane_by_addressable_id_then_label() {
+    fn a_heading_names_its_space_and_its_pane() {
         let (state, first_root, _, _) = app_with_board_todos();
-        let expected = state
-            .session_public_pane_id(first_root)
-            .expect("pane identifier");
         match &state.todo_board_items()[0] {
-            TodoBoardItem::PaneHeading {
-                space,
-                public_id,
-                label,
-            } => {
+            TodoBoardItem::PaneHeading { space, label } => {
                 assert_eq!(
                     space,
                     &state.workspaces[0].display_name_from_terminals(&state.terminals)
                 );
-                assert_eq!(public_id.as_deref(), Some(expected.as_str()));
                 assert_eq!(label, &state.pane_display_label(0, first_root));
             }
             other => panic!("expected a heading, got {other:?}"),
@@ -4018,12 +4003,16 @@ mod tests {
     fn removing_a_panes_last_todo_drops_its_heading() {
         let (mut state, _, _, second_root) = app_with_board_todos();
         state.open_todo_board();
-        let second_id = state
-            .session_public_pane_id(second_root)
-            .expect("pane identifier");
+        // Headings carry no identifier, so the second space's own name is what
+        // marks its group. Only `second_root` holds a todo there, so exactly
+        // one heading starts with it.
+        let second_space = format!(
+            "# {} ",
+            state.workspaces[1].display_name_from_terminals(&state.terminals)
+        );
         assert!(board_state(&state)
             .iter()
-            .any(|row| row.contains(&second_id)));
+            .any(|row| row.starts_with(&second_space)));
 
         let todo_id = state
             .pane_todos_in_display_order(second_root)
@@ -4046,7 +4035,7 @@ mod tests {
         assert!(
             !board_state(&state)
                 .iter()
-                .any(|row| row.contains(&second_id)),
+                .any(|row| row.starts_with(&second_space)),
             "the emptied pane keeps no heading"
         );
         state.assert_invariants_for_test();
