@@ -30,17 +30,24 @@ requirement `todo-board` archived a day earlier.
 - [x] 4.2 Measure the content width on `AppState` so the renderer and the mouse hit-test read one answer
 - [x] 4.3 Keep a minimum height so an empty board still reads as a panel, and a maximum width so it never spans a very wide terminal
 
-## 5. Tests
+## 5. The board's `clear done` scope
 
-- [x] 5.1 Re-record the board's rendered-layout snapshots for the header block and the new heading
-- [x] 5.2 Assert the board's blank row between title and first entry, alongside the existing footer-gap assertion
-- [x] 5.3 Update the pane-move picker's render and mouse tests to the named header height rather than a literal offset
-- [x] 5.4 Update the new-worktree caret test to track the input row
-- [x] 5.5 Heading-text unit tests: full form, missing label, unresolvable identifier
+- [x] 5.1 Clear the completed todos of every pane the board is showing, before the selected-todo lookup, rather than the selected todo's pane alone
+- [x] 5.2 Record the reversal of `todo-board`'s decision, and the rule it leaves behind
 
-- [x] 5.6 Sizing tests: grows for a long row and for many items, clamps at its cap and at the screen, and keeps its minimum when empty
+## 6. Tests
 
-## 6. Verification
+- [x] 6.1 Re-record the board's rendered-layout snapshots for the header block and the new heading
+- [x] 6.2 Assert the board's blank row between title and first entry, alongside the existing footer-gap assertion
+- [x] 6.3 Update the pane-move picker's render and mouse tests to the named header height rather than a literal offset
+- [x] 6.4 Update the new-worktree caret test to track the input row
+- [x] 6.5 Heading-text unit tests: full form, missing label, unresolvable identifier
 
-- [x] 6.1 `just check` green
-- [ ] 6.2 Dogfood on the `-ac-beta` channel: the board's title gap and heading, and one worktree dialog
+- [x] 6.6 Sizing tests: grows for a long row and for many items, clamps at its cap and at the screen, and keeps its minimum when empty
+
+- [x] 6.7 Clear-done tests: reaches a pane the selection is not on, and leaves outstanding todos alone
+
+## 7. Verification
+
+- [x] 7.1 `just check` green
+- [ ] 7.2 Dogfood on the `-ac-beta` channel: the board's title gap and heading, and one worktree dialog
