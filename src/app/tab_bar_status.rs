@@ -478,42 +478,83 @@ mod tests {
         );
     }
 
+    /// Whether `pid` still names a live process, for the abort test below.
+    ///
+    /// A killed process that its parent has not yet reaped is a zombie, and a
+    /// zombie is dead — it just has an entry left. `kill(pid, 0)` cannot tell
+    /// the two apart (it succeeds for both), and the descendant's parent shell
+    /// is killed alongside it, so there is always a window where the answer
+    /// would be wrong. Reading the process state distinguishes them.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn process_is_alive(pid: i32) -> bool {
+        let Ok(output) = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output()
+        else {
+            return false;
+        };
+        let state = String::from_utf8_lossy(&output.stdout);
+        let state = state.trim();
+        !state.is_empty() && !state.starts_with('Z')
+    }
+
+    /// A reload must kill the whole process group of the command it aborts,
+    /// descendants included, not just the shell at the top of it.
+    ///
+    /// Asserted on the descendant's *pid*, not on a file it failed to write in
+    /// time. The file form raced a wall clock: the descendant was spawned on a
+    /// 3s timer and the kill had to land first, so everything before the kill
+    /// — a poll loop budgeted at 500ms, the abort, and the aborted task's drop,
+    /// which is what actually sends the signal — ate a margin that could go
+    /// negative on a loaded machine. It failed intermittently on macOS CI and
+    /// locally under parallel load, and widening the sleep twice did not fix
+    /// it because the margin, not its size, was the problem.
+    ///
+    /// Here the descendant sleeps far longer than the test can run, so it
+    /// cannot exit on its own: if it stops being alive, the group kill is the
+    /// only thing that could have done it. The poll below is a liveness bound
+    /// rather than a correctness margin — under load it simply takes longer to
+    /// observe the same outcome.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[tokio::test]
     async fn reload_aborts_an_in_flight_command_task_and_its_descendants() {
         let started = unique_temp_path("started");
-        let survived = unique_temp_path("survived");
-        // The descendant must still be sleeping when the reload aborts it, or
-        // its absence below proves nothing. Everything between spawning it and
-        // the group kill landing eats into that margin: the poll loop for
-        // `started` alone is budgeted at 500ms, and on a loaded runner the
-        // aborted task's drop -- which is what sends the kill -- is scheduled,
-        // not immediate. At 0.3s the margin could go negative and at 1s it was
-        // still thin enough to lose on macOS CI, so give it seconds of room.
-        // Group membership itself is not the fragile part: a background job
-        // stays in its shell's process group under sh, bash and zsh alike.
+        let pidfile = unique_temp_path("descendant-pid");
+        // `$!` is the backgrounded `sleep` itself, so the pid under test is the
+        // descendant rather than a subshell standing in for it. Group
+        // membership is not the fragile part: a background job stays in its
+        // shell's process group under sh, bash and zsh alike.
         let command = format!(
-            "printf started > {}; (sleep 3; printf survived > {}) & wait",
-            started.display(),
-            survived.display()
+            "sleep 300 & printf $! > {}; printf started > {}; wait",
+            pidfile.display(),
+            started.display()
         );
         let mut app = test_app();
         app.configure_tab_bar_status(
             &[TabBarRightEntryConfig::Command {
                 command,
                 interval_seconds: 5,
-                timeout_seconds: 20,
+                timeout_seconds: 600,
             }],
             " ",
         );
         app.handle_tab_bar_status_tasks(std::time::Instant::now());
-        for _ in 0..50 {
-            if started.exists() {
+        for _ in 0..500 {
+            if started.exists() && pidfile.exists() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(started.exists(), "status command did not start");
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .expect("descendant pid file")
+            .trim()
+            .parse()
+            .expect("descendant pid");
+        assert!(
+            process_is_alive(pid),
+            "descendant was not running to begin with"
+        );
 
         app.configure_tab_bar_status(
             &[TabBarRightEntryConfig::Text {
@@ -527,12 +568,25 @@ mod tests {
                 .await
                 .is_err()
         );
-        // Past the descendant's own deadline, so its absence means it was
-        // killed rather than merely not due yet.
-        tokio::time::sleep(Duration::from_millis(3200)).await;
-        assert!(!survived.exists(), "status command descendant survived");
+
+        // Generous on purpose: this bounds how long we wait to see the kill
+        // land, and never how long the kill is allowed to take to be correct.
+        let mut alive = true;
+        for _ in 0..600 {
+            if !process_is_alive(pid) {
+                alive = false;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if alive {
+            // Do not leave a 300-second sleep behind on a failure.
+            // SAFETY: `kill` with a valid signal on a pid this test spawned.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
         let _ = std::fs::remove_file(started);
-        let _ = std::fs::remove_file(survived);
+        let _ = std::fs::remove_file(pidfile);
+        assert!(!alive, "status command descendant survived the reload");
     }
 
     #[tokio::test]
