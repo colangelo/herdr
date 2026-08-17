@@ -19,21 +19,33 @@ gets `PANE_MOVE_TARGET_HEADER_ROWS = HEADER_ROWS + 1`, named rather than
 open-coded because its renderer and its mouse hit-test both consume it and must
 not drift.
 
-## Why the heading and the link chip lead with different things
+## Why the heading carries no identifier and the link chip does
 
-The heading becomes `infra · imap-jmap-mcp [w2:pP]`, while the todo link chip
-stays `→ w2:pC · claude`. That looks inconsistent and is deliberate.
+The heading is `infra · imap-jmap-mcp`, while the todo link chip stays
+`→ w2:pC · claude`. That looks inconsistent and is deliberate.
 
-The chip shares a row with the todo's own text and is truncated from the right
-when the row is narrow. Leading with the identifier is what keeps the part you
-can act on — with `herdr pane`, `herdr agent read`, or a sibling agent's prompt
-— from being the part that disappears. A heading owns a whole row and competes
-with nothing, so it can afford to read in the order you think in: which space,
-which agent, and only then the address.
+The heading carried the identifier first, on the reasoning that a heading owns a
+whole row and can afford the address. Dogfooding the board found the address was
+not worth a row at any price. `w5:pV` is space 5, pane `V`, where `V` is 27 in
+the 32-character alphabet `123456789ABCDEFGHJKMNPQRSTVWXYZ0` — I, L, O and U are
+skipped so nothing is misread as 1 or 0. That 27 is a creation counter, never
+reused, and not a position: you cannot tell which pane it is by reading it, and
+`p27` would be readable and exactly as meaningless. The heading also named the
+space twice, because `w5` and the space's own name are the same fact.
 
-The rule is therefore not "identifier first" but "the part that must survive
-truncation goes first". In a chip that is the identifier; in a heading nothing
-is at risk, so readability wins.
+The encoding itself is untouched. It is upstream's (`f7a7da03`, upstream #569),
+it is what `$HERDR_PANE_ID` exposes, and re-encoding it here would diverge the
+fork and conflict on every sync for a cosmetic gain.
+
+A heading's job is recognising the pane, which the space and the label do, and
+activating the row travels there without anyone reading an address. A chip is
+the other case: it is a destination you may want to address — with `herdr pane`,
+`herdr agent read`, or a sibling agent's prompt — and it shares its row with the
+todo's own text and is truncated from the right, so the identifier goes first
+there to survive.
+
+The rule this leaves behind: show an identifier where it will be used, not where
+a row happens to have room for it.
 
 ## Why the space, and why first
 
@@ -72,7 +84,12 @@ narrower one.
 Rejected as a non-change: the four conforming overlays already look right, and
 touching them would re-record snapshots for no visual difference.
 
-**Keeping the identifier first and appending the space.**
-`w2:pP · infra · imap-jmap-mcp` keeps one ordering rule across chip and
-heading, but leads with the least readable field in the one place there is room
-to do better. The heading's job is triage, not addressing.
+**Keeping the identifier, last, after the space and the label.**
+`infra · imap-jmap-mcp [w2:pP]` is what shipped first and what dogfooding
+removed. Nothing reads wrong about it, which is why it survived review — the
+row had space, so the field went in. Space in a row is not a reason to fill it.
+
+**Rendering the counter in decimal — `infra · imap-jmap-mcp [p27]`.**
+Legible, and no more useful: 27 is still the order the pane was created in
+rather than anything on screen. It would also have to be decoded back for
+`$HERDR_PANE_ID`, putting a fork-local spelling on an upstream identity.

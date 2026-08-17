@@ -21,8 +21,8 @@ requirement `todo-board` archived a day earlier.
 ## 3. The board's heading
 
 - [x] 3.1 Carry the owning space's display name on the heading item, resolved without the terminal runtimes so the projection stays a pure `&self` read
-- [x] 3.2 Render `space · label [id]`, omitting any part that does not resolve rather than showing it empty
-- [x] 3.3 Leave the todo link chip leading with the identifier, and record why the two orders differ
+- [x] 3.2 Render `space · label`, omitting either part when the pane does not have it rather than showing it empty
+- [x] 3.3 Drop the addressable identifier from the heading, leave the todo link chip carrying its own, and record why one shows it and the other does not
 
 ## 4. Sizing
 
@@ -41,7 +41,7 @@ requirement `todo-board` archived a day earlier.
 - [x] 6.2 Assert the board's blank row between title and first entry, alongside the existing footer-gap assertion
 - [x] 6.3 Update the pane-move picker's render and mouse tests to the named header height rather than a literal offset
 - [x] 6.4 Update the new-worktree caret test to track the input row
-- [x] 6.5 Heading-text unit tests: full form, missing label, unresolvable identifier
+- [x] 6.5 Heading-text unit tests: full form, missing label, missing space — and no identifier in any of them
 
 - [x] 6.6 Sizing tests: grows for a long row and for many items, clamps at its cap and at the screen, and keeps its minimum when empty
 
