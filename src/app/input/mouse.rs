@@ -1915,15 +1915,9 @@ impl AppState {
             .items
             .iter()
             .map(|item| match item {
-                TodoBoardItem::PaneHeading {
-                    space,
-                    public_id,
-                    label,
-                } => crate::ui::text::display_width(&crate::ui::todo_board_heading_text(
-                    space,
-                    label,
-                    public_id.as_deref(),
-                )),
+                TodoBoardItem::PaneHeading { space, label } => crate::ui::text::display_width(
+                    &crate::ui::todo_board_heading_text(space, label),
+                ),
                 TodoBoardItem::Todo { pane_id, todo_id } => {
                     let Some(todo) = self.pane_todo_ref(*pane_id, *todo_id) else {
                         return 0;

@@ -155,26 +155,25 @@ pub(crate) fn todo_board_geometry(
     })
 }
 
-/// A group heading's text: the space, then the pane's label, then its
-/// addressable identifier in brackets — `infra · imap-jmap-mcp [w2:pP]`.
+/// A group heading's text: the space, then the pane's label —
+/// `infra · imap-jmap-mcp`.
 ///
-/// Deliberately the opposite order to the todo link chip, which leads with the
-/// identifier. The chip shares a row with the todo's own text and is truncated
-/// from the right, so leading with the identifier is what keeps the part you
-/// can act on from being the part that disappears. A heading owns a whole row
-/// and competes with nothing, so it can afford to read in the order you think
-/// in: which space, which agent, and only then the address.
-pub(crate) fn todo_board_heading_text(space: &str, label: &str, public_id: Option<&str>) -> String {
-    let name = match (space.is_empty(), label.is_empty()) {
-        (false, false) => format!("{space} · {label}"),
-        (false, true) => space.to_string(),
-        (true, false) => label.to_string(),
+/// No addressable identifier. It carried one, and it earned nothing: the
+/// identifier is a creation counter in a base-32 alphabet, so `w5:pV` is the
+/// 27th pane ever opened in that space rather than a position you can count to
+/// — unreadable *and* unrelated to what is on screen. It also named the space
+/// twice, since `w5` and the space's own name are the same fact. What a
+/// heading is for is recognising the pane, which the space and the label do,
+/// and `Enter` travels there without anyone having to read an address.
+///
+/// The todo link chip still carries its identifier, because a chip is a
+/// destination you may want to address rather than a group you are reading.
+pub(crate) fn todo_board_heading_text(space: &str, label: &str) -> String {
+    match (space.is_empty(), label.is_empty()) {
+        (false, false) => format!(" {space} · {label}"),
+        (false, true) => format!(" {space}"),
+        (true, false) => format!(" {label}"),
         (true, true) => String::new(),
-    };
-    match public_id {
-        Some(id) if name.is_empty() => format!(" [{id}]"),
-        Some(id) => format!(" {name} [{id}]"),
-        None => format!(" {name}"),
     }
 }
 
@@ -218,16 +217,12 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
             1,
         );
         match item {
-            TodoBoardItem::PaneHeading {
-                space,
-                public_id,
-                label,
-            } => {
+            TodoBoardItem::PaneHeading { space, label } => {
                 // The weight the move picker gives its space headings, so a
                 // group reads as a heading and never as a row.
                 frame.render_widget(
                     Paragraph::new(truncate_end(
-                        &todo_board_heading_text(space, label, public_id.as_deref()),
+                        &todo_board_heading_text(space, label),
                         row_rect.width as usize,
                     ))
                     .style(Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)),
@@ -331,7 +326,7 @@ mod tests {
                 "┌────────────────────────────────────────────────────────────────┐",
                 "│ todos                                                          │",
                 "│                                                                │",
-                "│ board · pane 1 [w2:p1]                                         │",
+                "│ board · pane 1                                                 │",
                 "│ ▲ rerun the deploy                                             │",
                 "│ ● check the 403                                                │",
                 "│ ✓ archive the change                                           │",
@@ -503,21 +498,13 @@ mod tests {
     }
 
     #[test]
-    fn a_heading_reads_space_then_agent_then_address() {
+    fn a_heading_reads_space_then_pane() {
         assert_eq!(
-            todo_board_heading_text("infra", "imap-jmap-mcp", Some("w2:pP")),
-            " infra · imap-jmap-mcp [w2:pP]"
+            todo_board_heading_text("infra", "imap-jmap-mcp"),
+            " infra · imap-jmap-mcp"
         );
         // A pane with no label of its own still names its space.
-        assert_eq!(
-            todo_board_heading_text("infra", "", Some("w2:pP")),
-            " infra [w2:pP]"
-        );
-        // And an unresolvable identifier drops the brackets rather than
-        // showing empty ones.
-        assert_eq!(
-            todo_board_heading_text("infra", "claude", None),
-            " infra · claude"
-        );
+        assert_eq!(todo_board_heading_text("infra", ""), " infra");
+        assert_eq!(todo_board_heading_text("", "claude"), " claude");
     }
 }
