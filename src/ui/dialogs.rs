@@ -11,13 +11,13 @@ use super::text_field::TextField;
 use super::widgets::{
     action_button_row_rects, centered_popup_rect, footer_split, panel_contrast_fg,
     render_action_button, render_modal_header, render_modal_shell, render_panel_shell,
-    ActionButtonSpec,
+    ActionButtonSpec, HEADER_ROWS,
 };
 use crate::app::{state::WorktreeOpenState, AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
 
 const NEW_LINKED_WORKTREE_POPUP_WIDTH: u16 = 68;
-const NEW_LINKED_WORKTREE_POPUP_HEIGHT: u16 = 12;
+const NEW_LINKED_WORKTREE_POPUP_HEIGHT: u16 = 13;
 
 pub(crate) fn rename_button_rects(inner: Rect) -> (Rect, Rect, Rect) {
     let rects = action_button_row_rects(
@@ -456,7 +456,7 @@ pub(crate) fn new_linked_worktree_button_rects(inner: Rect) -> (Rect, Rect) {
 }
 
 pub(crate) fn remove_worktree_popup_rect(area: Rect) -> Option<Rect> {
-    centered_popup_rect(area, 72, 10)
+    centered_popup_rect(area, 72, 11)
 }
 
 pub(crate) fn remove_worktree_button_rects(inner: Rect, force_confirmation: bool) -> (Rect, Rect) {
@@ -486,8 +486,8 @@ pub(crate) fn remove_worktree_button_rects(inner: Rect, force_confirmation: bool
 pub(crate) fn open_existing_worktree_inner_rect(area: Rect, entry_count: usize) -> Option<Rect> {
     let height = (entry_count as u16)
         .saturating_mul(2)
-        .saturating_add(7)
-        .clamp(12, 26);
+        .saturating_add(8)
+        .clamp(13, 27);
     centered_popup_rect(area, 96, height).map(|popup| {
         Rect::new(
             popup.x + 1,
@@ -499,7 +499,7 @@ pub(crate) fn open_existing_worktree_inner_rect(area: Rect, entry_count: usize) 
 }
 
 pub(crate) fn open_existing_worktree_max_visible_rows(inner: Rect) -> usize {
-    usize::from(inner.height.saturating_sub(5) / 2)
+    usize::from(inner.height.saturating_sub(6) / 2)
 }
 
 pub(crate) fn open_existing_worktree_visible_start(
@@ -540,10 +540,16 @@ pub(crate) fn open_existing_worktree_button_rects(inner: Rect) -> (Rect, Rect) {
 /// Grows with the grouped list — space headings included — up to the same
 /// ceiling the flat picker used, past which the list scrolls.
 ///
-/// Six rows of chrome sit around the list: the modal border, the header, the
-/// subtitle and the footer's blank row plus button row.
+/// Seven rows of chrome sit around the list: the modal border, the header
+/// block (its title, its subtitle and the blank row under them, per
+/// [`crate::ui::widgets::HEADER_ROWS`]) and the footer block.
+/// Rows the picker's header block occupies: its title, its subtitle, and the
+/// blank row under them. One more than [`crate::ui::widgets::HEADER_ROWS`]
+/// because this overlay's header is two lines rather than one.
+pub(crate) const PANE_MOVE_TARGET_HEADER_ROWS: u16 = crate::ui::widgets::HEADER_ROWS + 1;
+
 pub(crate) fn pane_move_target_height(item_count: usize) -> u16 {
-    (item_count as u16).saturating_add(6).clamp(8, 20)
+    (item_count as u16).saturating_add(7).clamp(8, 20)
 }
 
 pub(crate) fn pane_move_target_inner_rect(area: Rect, item_count: usize) -> Option<Rect> {
@@ -615,7 +621,7 @@ pub(super) fn render_pane_move_target_picker_overlay(
     ) else {
         return;
     };
-    if inner.height < 5 {
+    if inner.height < 6 {
         return;
     }
 
@@ -631,7 +637,9 @@ pub(super) fn render_pane_move_target_picker_overlay(
     );
 
     let (content, _) = footer_split(inner, true);
-    let max_rows = usize::from(content.height.saturating_sub(2));
+    // The title and its subtitle are one header block, and the blank row that
+    // follows them belongs to it.
+    let max_rows = usize::from(content.height.saturating_sub(PANE_MOVE_TARGET_HEADER_ROWS));
     let start = picker
         .list
         .selected
@@ -640,7 +648,9 @@ pub(super) fn render_pane_move_target_picker_overlay(
         let item_idx = start + visible_idx;
         let row = Rect::new(
             inner.x,
-            inner.y.saturating_add(2 + visible_idx as u16),
+            inner
+                .y
+                .saturating_add(PANE_MOVE_TARGET_HEADER_ROWS + visible_idx as u16),
             inner.width,
             1,
         );
@@ -718,7 +728,10 @@ pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Fra
         return;
     }
 
+    // `rows[1]` is the blank row the header block reserves; see
+    // `crate::ui::widgets::HEADER_ROWS`.
     let rows = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
@@ -728,38 +741,38 @@ pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Fra
         Constraint::Length(1),
         Constraint::Min(0),
     ])
-    .areas::<8>(inner);
+    .areas::<9>(inner);
 
     render_modal_header(frame, rows[0], "new worktree", &app.palette);
 
     frame.render_widget(
         Paragraph::new(" branch").style(Style::default().fg(app.palette.overlay0)),
-        rows[1],
+        rows[2],
     );
-    let input_rect = Rect::new(rows[2].x, rows[2].y, rows[2].width, 1);
+    let input_rect = Rect::new(rows[3].x, rows[3].y, rows[3].width, 1);
     render_name_input_field(app, frame, input_rect);
 
     let checkout = create.checkout_path.display().to_string();
     frame.render_widget(
         Paragraph::new(" checkout").style(Style::default().fg(app.palette.overlay0)),
-        rows[3],
+        rows[4],
     );
     frame.render_widget(
         Paragraph::new(format!(" {checkout}")).style(Style::default().fg(app.palette.subtext0)),
-        rows[4],
+        rows[5],
     );
 
     if create.creating {
         frame.render_widget(
             Paragraph::new(" creating…").style(Style::default().fg(app.palette.overlay0)),
-            rows[5],
+            rows[6],
         );
     } else if let Some(error) = &create.error {
         frame.render_widget(
             Paragraph::new(format!(" {error}"))
                 .style(Style::default().fg(app.palette.red))
                 .wrap(Wrap { trim: false }),
-            rows[5],
+            rows[6],
         );
     }
 
@@ -800,7 +813,10 @@ pub(super) fn render_remove_worktree_overlay(app: &AppState, frame: &mut Frame, 
         return;
     };
 
+    // `rows[1]` is the blank row the header block reserves; see
+    // `crate::ui::widgets::HEADER_ROWS`.
     let rows = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
@@ -810,7 +826,7 @@ pub(super) fn render_remove_worktree_overlay(app: &AppState, frame: &mut Frame, 
         Constraint::Length(1),
         Constraint::Min(0),
     ])
-    .areas::<8>(inner);
+    .areas::<9>(inner);
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
@@ -896,7 +912,7 @@ pub(super) fn render_open_existing_worktree_overlay(app: &AppState, frame: &mut 
     let Some(inner) = render_modal_shell(frame, area, 96, height, &app.palette) else {
         return;
     };
-    if inner.height < 8 {
+    if inner.height < 9 {
         return;
     }
 
@@ -909,13 +925,18 @@ pub(super) fn render_open_existing_worktree_overlay(app: &AppState, frame: &mut 
     render_open_worktree_search(
         app,
         frame,
-        Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        Rect::new(inner.x, inner.y + HEADER_ROWS, inner.width, 1),
         open,
     );
     frame.render_widget(
         Paragraph::new("─".repeat(inner.width as usize))
             .style(Style::default().fg(app.palette.surface1)),
-        Rect::new(inner.x, inner.y.saturating_add(2), inner.width, 1),
+        Rect::new(
+            inner.x,
+            inner.y.saturating_add(HEADER_ROWS + 1),
+            inner.width,
+            1,
+        ),
     );
 
     let filtered = open.filtered_indices();
@@ -926,7 +947,9 @@ pub(super) fn render_open_existing_worktree_overlay(app: &AppState, frame: &mut 
             continue;
         };
         let selected = Some(*entry_idx) == open.selected_entry_index();
-        let y = inner.y.saturating_add(3 + (visible_idx as u16 * 2));
+        let y = inner
+            .y
+            .saturating_add(HEADER_ROWS + 2 + (visible_idx as u16 * 2));
         let marker = if selected { "›" } else { " " };
         let row_style = if selected {
             Style::default()
@@ -1268,6 +1291,8 @@ mod tests {
     use crate::{
         app::{state::WorktreeCreateState, AppState, Mode},
         ui::text_field::TextField,
+        ui::widgets::HEADER_ROWS,
+        ui::PANE_MOVE_TARGET_HEADER_ROWS,
         workspace::Workspace,
     };
     use ratatui::{
@@ -1626,7 +1651,8 @@ mod tests {
     #[test]
     fn new_worktree_overlay_anchors_the_host_cursor_to_the_input_caret() {
         let popup = super::new_linked_worktree_inner_rect(WORKTREE_AREA).expect("popup fits");
-        let input = Rect::new(popup.x, popup.y + 2, popup.width, 1);
+        // Title, the header block's blank row, the "branch" label, then the input.
+        let input = Rect::new(popup.x, popup.y + HEADER_ROWS + 1, popup.width, 1);
 
         assert_eq!(
             worktree_overlay_caret(""),
@@ -2052,14 +2078,17 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let inner = pane_move_target_inner_rect(area, item_count).expect("picker rect");
 
+        // Rows start below the header block: the title, its subtitle, and the
+        // blank row under them.
         let row_text = |row: u16| -> String {
             (inner.x..inner.x + inner.width)
-                .map(|x| buffer[(x, inner.y + 2 + row)].symbol())
+                .map(|x| buffer[(x, inner.y + PANE_MOVE_TARGET_HEADER_ROWS + row)].symbol())
                 .collect::<String>()
                 .trim_end()
                 .to_string()
         };
-        let row_style = |row: u16| buffer[(inner.x + 1, inner.y + 2 + row)].style();
+        let row_style =
+            |row: u16| buffer[(inner.x + 1, inner.y + PANE_MOVE_TARGET_HEADER_ROWS + row)].style();
 
         assert_eq!(row_text(0), " main");
         assert_eq!(row_style(0).fg, Some(app.palette.overlay0));

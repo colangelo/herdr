@@ -635,6 +635,7 @@ impl AppState {
                         continue;
                     }
                     items.push(TodoBoardItem::PaneHeading {
+                        space: ws.display_name_from_terminals(&self.terminals),
                         public_id: self.session_public_pane_id(pane_id),
                         label: self.pane_display_label(ws_idx, pane_id),
                     });
@@ -3800,9 +3801,11 @@ mod tests {
             .todo_board_items()
             .iter()
             .map(|item| match item {
-                TodoBoardItem::PaneHeading { public_id, label } => {
-                    format!("# {} {label}", public_id.as_deref().unwrap_or("-"))
-                }
+                TodoBoardItem::PaneHeading {
+                    space,
+                    public_id,
+                    label,
+                } => format!("# {space} {label} {}", public_id.as_deref().unwrap_or("-")),
                 TodoBoardItem::Todo { pane_id, todo_id } => state
                     .pane_todo_by_id(*pane_id, *todo_id)
                     .map(|todo| todo.text)
@@ -3911,7 +3914,15 @@ mod tests {
             .session_public_pane_id(first_root)
             .expect("pane identifier");
         match &state.todo_board_items()[0] {
-            TodoBoardItem::PaneHeading { public_id, label } => {
+            TodoBoardItem::PaneHeading {
+                space,
+                public_id,
+                label,
+            } => {
+                assert_eq!(
+                    space,
+                    &state.workspaces[0].display_name_from_terminals(&state.terminals)
+                );
                 assert_eq!(public_id.as_deref(), Some(expected.as_str()));
                 assert_eq!(label, &state.pane_display_label(0, first_root));
             }

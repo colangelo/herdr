@@ -1749,9 +1749,13 @@ pub enum TodoBoardButton {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TodoBoardItem {
     PaneHeading {
+        /// The owning space's display name. The heading leads with it because
+        /// the board is read across spaces: where the work lives is the first
+        /// thing you are deciding between.
+        space: String,
         /// The owning pane's addressable identifier. `None` only for a pane
         /// whose public number cannot be resolved, which leaves the heading
-        /// its label alone.
+        /// without one.
         public_id: Option<String>,
         label: String,
     },
@@ -4649,6 +4653,7 @@ mod tests {
             ),
             OverlayKind::TodoBoard => Overlay::TodoBoard(TodoBoardState::new(vec![
                 TodoBoardItem::PaneHeading {
+                    space: "one".into(),
                     public_id: Some("w1:pA".into()),
                     label: "shell".into(),
                 },

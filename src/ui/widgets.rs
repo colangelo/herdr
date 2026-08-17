@@ -17,6 +17,36 @@ use crate::app::state::Palette;
 /// while the dialogs kept it only by accident of ending their content early.
 pub(crate) const FOOTER_ROWS: u16 = 2;
 
+/// Rows a titled overlay reserves at the top: the title row, plus the blank
+/// row under it.
+///
+/// The mirror of [`FOOTER_ROWS`], and here for the same reason. A title drawn
+/// flush against the first content row reads as stuck to it exactly the way
+/// buttons drawn flush against the last row did, and the overlays had drifted
+/// apart on it — the keybind help panel, the rename dialog, the todo edit
+/// modal and the release-notes header all left the gap, while the todo board,
+/// the pane-move picker and the three worktree dialogs did not.
+pub(crate) const HEADER_ROWS: u16 = 2;
+
+/// Splits a titled overlay's inner area into its title row and the content
+/// below the blank row that follows it, keeping [`HEADER_ROWS`] between them.
+///
+/// For the overlays that place their rows by offset from `inner`. The ones
+/// built from an explicit `Layout::vertical` spend the same rows as a
+/// `Constraint::Length(1)` spacer instead.
+pub(crate) fn header_split(inner: Rect) -> (Rect, Rect) {
+    let title = Rect {
+        height: inner.height.min(1),
+        ..inner
+    };
+    let content = Rect {
+        y: inner.y.saturating_add(HEADER_ROWS),
+        height: inner.height.saturating_sub(HEADER_ROWS),
+        ..inner
+    };
+    (title, content)
+}
+
 /// Splits a panel's inner area into the content rect and the row offset its
 /// buttons sit on, keeping [`FOOTER_ROWS`] between them.
 ///

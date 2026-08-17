@@ -428,14 +428,22 @@ impl AppState {
             };
             let item_count = picker.items.len();
             let inner = crate::ui::pane_move_target_inner_rect(self.screen_rect(), item_count)?;
-            let max_rows = usize::from(inner.height.saturating_sub(4));
+            let max_rows = usize::from(
+                inner
+                    .height
+                    .saturating_sub(crate::ui::PANE_MOVE_TARGET_HEADER_ROWS + 2),
+            );
             let start = picker
                 .list
                 .selected
                 .saturating_sub(max_rows.saturating_sub(1));
             let hovered_item = mouse
                 .row
-                .checked_sub(inner.y.saturating_add(2))
+                .checked_sub(
+                    inner
+                        .y
+                        .saturating_add(crate::ui::PANE_MOVE_TARGET_HEADER_ROWS),
+                )
                 .map(usize::from)
                 .filter(|row| *row < max_rows)
                 .filter(|_| {
@@ -1882,9 +1890,67 @@ impl AppState {
 
     /// The board's geometry, or `None` unless it is open — so render and
     /// hit-test go quiet together.
-    fn todo_board_geometry(&self) -> Option<crate::ui::TodoBoardGeometry> {
+    pub(crate) fn todo_board_geometry(&self) -> Option<crate::ui::TodoBoardGeometry> {
         let board = self.todo_board()?;
-        crate::ui::todo_board_geometry(self.screen_rect(), board.items.len())
+        crate::ui::todo_board_geometry(
+            self.screen_rect(),
+            board.items.len(),
+            self.todo_board_content_width(),
+        )
+    }
+
+    /// The widest row the board would like to draw, chrome included: a
+    /// heading's full text, or a todo's state glyph, first line and link chip.
+    ///
+    /// Measured here rather than in the renderer because the mouse layer needs
+    /// the same answer, and a board that hit-tested against a different width
+    /// than it drew would put its rows in one place and its clicks in another.
+    fn todo_board_content_width(&self) -> u16 {
+        use crate::app::state::TodoBoardItem;
+
+        let Some(board) = self.todo_board() else {
+            return 0;
+        };
+        let widest = board
+            .items
+            .iter()
+            .map(|item| match item {
+                TodoBoardItem::PaneHeading {
+                    space,
+                    public_id,
+                    label,
+                } => crate::ui::text::display_width(&crate::ui::todo_board_heading_text(
+                    space,
+                    label,
+                    public_id.as_deref(),
+                )),
+                TodoBoardItem::Todo { pane_id, todo_id } => {
+                    let Some(todo) = self.pane_todo_ref(*pane_id, *todo_id) else {
+                        return 0;
+                    };
+                    // Sized from the chip's own composition, so the board
+                    // widens for the identifier the chip leads with rather
+                    // than squeezing the label out to make room for it.
+                    let link_width = todo
+                        .link
+                        .as_ref()
+                        .map(|link| {
+                            crate::ui::text::display_width(&crate::ui::pane_todo_link_chip_text(
+                                self.pane_todo_link_public_id(todo).as_deref(),
+                                &link.label,
+                            ))
+                        })
+                        .unwrap_or(0);
+                    // Only the first line of a multi-line todo is ever drawn,
+                    // past the three-cell state glyph.
+                    let text = todo.text.split('\n').next().unwrap_or_default();
+                    3 + crate::ui::text::display_width(text) + link_width
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        // Two borders and a trailing space.
+        (widest + 3) as u16
     }
 
     /// The footer button row. `go` is offered only while the selected todo's
@@ -4275,7 +4341,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             inner.x + 1,
-            inner.y + 3,
+            inner.y + crate::ui::PANE_MOVE_TARGET_HEADER_ROWS + 1,
         ));
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
@@ -4332,7 +4398,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             inner.x + 1,
-            inner.y + 2,
+            inner.y + crate::ui::PANE_MOVE_TARGET_HEADER_ROWS,
         ));
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 2);
