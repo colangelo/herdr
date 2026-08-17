@@ -21,17 +21,25 @@ use super::overlay::{ButtonRow, ButtonSpec};
 use super::text::truncate_end;
 use super::todo_panel::render_pane_todo_row;
 use super::widgets::{
-    centered_popup_rect, footer_split, panel_contrast_fg, render_action_button,
-    render_modal_header, render_modal_shell, FOOTER_ROWS,
+    centered_popup_rect, footer_split, header_split, panel_contrast_fg, render_action_button,
+    render_modal_header, render_modal_shell, FOOTER_ROWS, HEADER_ROWS,
 };
 use crate::app::state::{AppState, TodoBoardButton, TodoBoardItem};
 
-/// Columns the board asks for before its own footer has a say.
-const TODO_BOARD_WIDTH: u16 = 64;
+/// Columns the board asks for before its own content or footer has a say.
+const TODO_BOARD_MIN_WIDTH: u16 = 64;
 
-/// Rows of chrome around the list: the modal border, the header, and the
-/// footer's blank row plus button row.
-const TODO_BOARD_CHROME_ROWS: u16 = 3 + FOOTER_ROWS;
+/// The widest the board will grow for its content, before the screen clamps
+/// it. A board spanning a very wide terminal would put its footer buttons a
+/// screen away from the rows they act on.
+const TODO_BOARD_MAX_WIDTH: u16 = 120;
+
+/// The board never shrinks below this, so an empty one still reads as a panel.
+const TODO_BOARD_MIN_HEIGHT: u16 = 8;
+
+/// Rows of chrome around the list: the modal border, the header block (its
+/// title and the blank row under it), and the footer block.
+const TODO_BOARD_CHROME_ROWS: u16 = 2 + HEADER_ROWS + FOOTER_ROWS;
 
 /// The board's footer, in the panel's language: the shortcut hint inside the
 /// filled box, in render order.
@@ -104,16 +112,27 @@ pub(crate) struct TodoBoardGeometry {
 /// Where the board sits. Centred rather than anchored: it belongs to the
 /// session, not to a pane, so there is nothing to hang it off.
 ///
-/// The width is never less than the footer's natural width, so the board is
-/// never narrower than the controls it means to show — and it is measured from
-/// the full set of boxes rather than the ones the current selection happens to
+/// It grows to its content in both directions and lets the screen do the
+/// clamping, because the board's whole job is showing a session's worth of
+/// todos at once — a fixed box turned that into scrolling as soon as a few
+/// panes had work.
+///
+/// `content_width` is what the caller measured its rows to need. The result is
+/// never less than the footer's natural width, so the board cannot end up too
+/// narrow for the controls it means to show, and that is measured from the
+/// full set of boxes rather than the ones the current selection happens to
 /// offer, so the box does not resize as the selection moves.
-pub(crate) fn todo_board_geometry(area: Rect, item_count: usize) -> Option<TodoBoardGeometry> {
-    let width = TODO_BOARD_WIDTH
+pub(crate) fn todo_board_geometry(
+    area: Rect,
+    item_count: usize,
+    content_width: u16,
+) -> Option<TodoBoardGeometry> {
+    let width = content_width
+        .clamp(TODO_BOARD_MIN_WIDTH, TODO_BOARD_MAX_WIDTH)
         .max(ButtonRow::natural_width(&todo_board_button_specs(true, true)).saturating_add(2));
     let height = (item_count as u16)
         .saturating_add(TODO_BOARD_CHROME_ROWS)
-        .clamp(8, 20);
+        .max(TODO_BOARD_MIN_HEIGHT);
     let outer = centered_popup_rect(area, width, height)?;
     let inner = Rect::new(
         outer.x + 1,
@@ -121,16 +140,10 @@ pub(crate) fn todo_board_geometry(area: Rect, item_count: usize) -> Option<TodoB
         outer.width.saturating_sub(2),
         outer.height.saturating_sub(2),
     );
-    if inner.width == 0 || inner.height < 2 + FOOTER_ROWS {
+    if inner.width == 0 || inner.height < HEADER_ROWS + FOOTER_ROWS {
         return None;
     }
-    let header = Rect::new(inner.x, inner.y, inner.width, 1);
-    let below_header = Rect::new(
-        inner.x,
-        inner.y + 1,
-        inner.width,
-        inner.height.saturating_sub(1),
-    );
+    let (header, below_header) = header_split(inner);
     let (list, _) = footer_split(below_header, true);
     let footer_row = Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1);
     Some(TodoBoardGeometry {
@@ -142,15 +155,26 @@ pub(crate) fn todo_board_geometry(area: Rect, item_count: usize) -> Option<TodoB
     })
 }
 
-/// A group heading's text: the addressable identifier first, because that is
-/// what you can act on with `herdr pane` or a sibling agent's prompt, then the
-/// label, because that is what you recognise. The same order the todo link
-/// chip settled on.
-pub(crate) fn todo_board_heading_text(public_id: Option<&str>, label: &str) -> String {
+/// A group heading's text: the space, then the pane's label, then its
+/// addressable identifier in brackets — `infra · imap-jmap-mcp [w2:pP]`.
+///
+/// Deliberately the opposite order to the todo link chip, which leads with the
+/// identifier. The chip shares a row with the todo's own text and is truncated
+/// from the right, so leading with the identifier is what keeps the part you
+/// can act on from being the part that disappears. A heading owns a whole row
+/// and competes with nothing, so it can afford to read in the order you think
+/// in: which space, which agent, and only then the address.
+pub(crate) fn todo_board_heading_text(space: &str, label: &str, public_id: Option<&str>) -> String {
+    let name = match (space.is_empty(), label.is_empty()) {
+        (false, false) => format!("{space} · {label}"),
+        (false, true) => space.to_string(),
+        (true, false) => label.to_string(),
+        (true, true) => String::new(),
+    };
     match public_id {
-        Some(id) if label.is_empty() => format!(" {id}"),
-        Some(id) => format!(" {id} · {label}"),
-        None => format!(" {label}"),
+        Some(id) if name.is_empty() => format!(" [{id}]"),
+        Some(id) => format!(" {name} [{id}]"),
+        None => format!(" {name}"),
     }
 }
 
@@ -159,7 +183,9 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
         return;
     };
     let area = frame.area();
-    let Some(geometry) = todo_board_geometry(area, board.items.len()) else {
+    // The same resolved geometry the mouse hit-tests against, so what is drawn
+    // and what is clickable cannot diverge.
+    let Some(geometry) = app.todo_board_geometry() else {
         return;
     };
     let p = &app.palette;
@@ -192,12 +218,16 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
             1,
         );
         match item {
-            TodoBoardItem::PaneHeading { public_id, label } => {
+            TodoBoardItem::PaneHeading {
+                space,
+                public_id,
+                label,
+            } => {
                 // The weight the move picker gives its space headings, so a
                 // group reads as a heading and never as a row.
                 frame.render_widget(
                     Paragraph::new(truncate_end(
-                        &todo_board_heading_text(public_id.as_deref(), label),
+                        &todo_board_heading_text(space, label, public_id.as_deref()),
                         row_rect.width as usize,
                     ))
                     .style(Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)),
@@ -296,11 +326,12 @@ mod tests {
             ("archive the change", true, TodoPriority::Low),
         ])
         .assert(
-            Rect::new(7, 8, 66, 9),
+            Rect::new(7, 7, 66, 10),
             &[
                 "┌────────────────────────────────────────────────────────────────┐",
                 "│ todos                                                          │",
-                "│ w2:p1 · pane 1                                                 │",
+                "│                                                                │",
+                "│ board · pane 1 [w2:p1]                                         │",
                 "│ ▲ rerun the deploy                                             │",
                 "│ ● check the 403                                                │",
                 "│ ✓ archive the change                                           │",
@@ -318,8 +349,8 @@ mod tests {
             &[
                 "┌────────────────────────────────────────────────────────────────┐",
                 "│ todos                                                          │",
-                "│ nothing outstanding                                            │",
                 "│                                                                │",
+                "│ nothing outstanding                                            │",
                 "│                                                                │",
                 "│                                                                │",
                 "│                    ↵ open pane    esc close                    │",
@@ -379,13 +410,18 @@ mod tests {
                 test_support::SNAPSHOT_HEIGHT,
             ),
             4,
+            TODO_BOARD_MIN_WIDTH,
         )
         .expect("geometry resolves");
         assert_eq!(
             geometry.list.y + geometry.list.height,
             geometry.footer_row.y - 1
         );
-        assert_eq!(geometry.header.y + 1, geometry.list.y);
+        assert_eq!(
+            geometry.header.y + crate::ui::widgets::HEADER_ROWS,
+            geometry.list.y,
+            "a blank row sits between the title and the first entry"
+        );
     }
 
     /// The board is never narrower than the controls it means to show — the
@@ -400,6 +436,7 @@ mod tests {
                 test_support::SNAPSHOT_HEIGHT,
             ),
             4,
+            TODO_BOARD_MIN_WIDTH,
         )
         .expect("geometry resolves");
         let natural = ButtonRow::natural_width(&todo_board_button_specs(true, true));
@@ -410,13 +447,77 @@ mod tests {
         );
     }
 
+    /// The board is the one view of a whole session's todos, so it grows to
+    /// its content rather than scrolling a fixed box as soon as a few panes
+    /// have work.
     #[test]
-    fn a_heading_leads_with_the_addressable_id() {
-        assert_eq!(
-            todo_board_heading_text(Some("w2:pC"), "claude"),
-            " w2:pC · claude"
+    fn the_board_grows_for_its_content_in_both_directions() {
+        let screen = Rect::new(0, 0, 200, 60);
+
+        // The floor is whichever is wider: the minimum, or the footer's own
+        // natural width — the board is never too narrow for its controls.
+        let floor = TODO_BOARD_MIN_WIDTH
+            .max(ButtonRow::natural_width(&todo_board_button_specs(true, true)) + 2);
+        let small = todo_board_geometry(screen, 4, TODO_BOARD_MIN_WIDTH).expect("resolves");
+        assert_eq!(small.outer.width, floor);
+
+        // A long heading or todo widens it.
+        let wide = todo_board_geometry(screen, 4, 90).expect("resolves");
+        assert_eq!(wide.outer.width, 90);
+        assert!(
+            wide.outer.width > floor,
+            "content widened it past the floor"
         );
-        assert_eq!(todo_board_heading_text(Some("w2:pC"), ""), " w2:pC");
-        assert_eq!(todo_board_heading_text(None, "claude"), " claude");
+
+        // Many panes' todos make it taller — the old fixed ceiling turned a
+        // busy session into scrolling.
+        let tall = todo_board_geometry(screen, 40, TODO_BOARD_MIN_WIDTH).expect("resolves");
+        assert!(
+            tall.list.height >= 40,
+            "40 items should not scroll on a 60-row screen, got {}",
+            tall.list.height
+        );
+    }
+
+    /// It stops growing before it swallows the terminal, in both directions.
+    #[test]
+    fn the_board_stops_growing_at_its_cap_and_at_the_screen() {
+        let screen = Rect::new(0, 0, 200, 60);
+        let capped = todo_board_geometry(screen, 4, 400).expect("resolves");
+        assert_eq!(capped.outer.width, TODO_BOARD_MAX_WIDTH);
+
+        // A short screen clamps rather than overflowing it.
+        let short = todo_board_geometry(Rect::new(0, 0, 80, 14), 40, TODO_BOARD_MIN_WIDTH)
+            .expect("resolves");
+        assert!(short.outer.height <= 14, "got {}", short.outer.height);
+        let narrow = todo_board_geometry(Rect::new(0, 0, 40, 30), 4, 400).expect("resolves");
+        assert!(narrow.outer.width <= 40, "got {}", narrow.outer.width);
+    }
+
+    /// An empty board is still a panel rather than collapsing to its chrome.
+    #[test]
+    fn an_empty_board_keeps_a_minimum_height() {
+        let geometry = todo_board_geometry(Rect::new(0, 0, 200, 60), 0, TODO_BOARD_MIN_WIDTH)
+            .expect("resolves");
+        assert_eq!(geometry.outer.height, TODO_BOARD_MIN_HEIGHT);
+    }
+
+    #[test]
+    fn a_heading_reads_space_then_agent_then_address() {
+        assert_eq!(
+            todo_board_heading_text("infra", "imap-jmap-mcp", Some("w2:pP")),
+            " infra · imap-jmap-mcp [w2:pP]"
+        );
+        // A pane with no label of its own still names its space.
+        assert_eq!(
+            todo_board_heading_text("infra", "", Some("w2:pP")),
+            " infra [w2:pP]"
+        );
+        // And an unresolvable identifier drops the brackets rather than
+        // showing empty ones.
+        assert_eq!(
+            todo_board_heading_text("infra", "claude", None),
+            " infra · claude"
+        );
     }
 }

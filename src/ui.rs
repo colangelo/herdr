@@ -84,7 +84,7 @@ pub(crate) use self::tab_surface::{
 use self::tabs::render_tab_bar;
 use self::todo_board::render_todo_board;
 pub(crate) use self::todo_board::{
-    todo_board_button_specs, todo_board_geometry, TodoBoardGeometry,
+    todo_board_button_specs, todo_board_geometry, todo_board_heading_text, TodoBoardGeometry,
 };
 pub(crate) use self::todo_panel::pane_todo_panel_button_rects;
 use self::todo_panel::render_pane_todo_panel;
@@ -101,7 +101,7 @@ pub(crate) use self::{
         pane_move_target_inner_rect, pane_todo_edit_column_scroll, pane_todo_edit_line_scroll,
         pane_todo_edit_rects, pane_todo_edit_text_area, remove_worktree_button_rects,
         remove_worktree_popup_rect, rename_button_rects, PaneTodoEditRects,
-        PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
+        PANE_MOVE_TARGET_HEADER_ROWS, PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     },
     settings::{
         settings_button_rects, settings_popup_height, settings_show_primary_action,
