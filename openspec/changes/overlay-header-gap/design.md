@@ -43,6 +43,29 @@ character of `w2:pP`, which is an identifier to decode rather than a name to
 recognise. The space name is what the sidebar already calls it, so the board
 borrows that rather than inventing a second name for the same thing.
 
+## Reversing the board's `clear done` scope
+
+`todo-board` decided that `c` on the board should clear the *selected* todo's
+pane, so the key would mean exactly what it means on that pane's own panel, and
+so a session-wide sweep would not hide behind a familiar letter. Dogfooding
+overturned it within a day.
+
+The failure mode is that a scoped action with no visible scope is
+indistinguishable from a broken one. The footer says `clear done`. Press it with
+the selection parked on a pane whose todos are all outstanding — the common case,
+since the selection opens on the first todo in the list — and nothing happens and
+nothing is said. It was reported as "c does not work", which is the correct
+reading of what it did.
+
+So `c` now clears the completed todos of every pane the board is showing. The
+destructiveness argument does not survive contact either: the todos being removed
+are the ones already marked done, the board is showing exactly which, and the
+per-pane panel still offers the narrower version for anyone who wants it.
+
+The general rule this leaves behind: an action on a session-scoped surface takes
+the scope of that surface, or it must show its scope. It cannot quietly take a
+narrower one.
+
 ## Alternatives considered
 
 **A blank row under every title, including the ones that already have one.**

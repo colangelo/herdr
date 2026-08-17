@@ -30,6 +30,12 @@ editing, following a todo's link, removing a todo, clearing done todos, and
 closing. Where an action exists on the pane todo panel, the board SHALL use the
 same key for it.
 
+Clearing done todos SHALL act on every pane the board is showing rather than on
+the selected todo's pane alone. The board is the session's view and the action
+names no scope, so scoping it to wherever the selection happens to be leaves it
+doing nothing, and saying nothing, whenever the selection is not on a pane with
+completed todos.
+
 Activating the selected row SHALL move focus to the pane that owns that todo,
 through the same focus path used when following a todo's link, and SHALL close
 the board. Following a link SHALL continue to target the *linked* pane, so a
@@ -47,6 +53,12 @@ SHALL read the same store, so a todo presents identically in either.
 - **THEN** every one of those todos is listed
 - **AND** they are grouped under their owning pane, with panes in space, tab, then pane order
 - **AND** each pane's todos follow the existing presentation order
+
+#### Scenario: Clearing done reaches panes the selection is not on
+
+- **WHEN** completed todos exist under more than one pane and the user clears done todos with the selection on one of them
+- **THEN** the completed todos under every pane the board is showing are cleared
+- **AND** no outstanding todo is removed
 
 #### Scenario: A heading names the space before the pane
 
