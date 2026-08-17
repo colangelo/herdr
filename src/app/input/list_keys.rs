@@ -10,9 +10,36 @@
 //! Overlays match their own keys first and fall through to [`list_chord`], so
 //! an overlay that already binds a letter keeps it.
 
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ui::overlay::ListCursor;
+
+/// An overlay's own letter key, with Shift read as capitalisation rather than
+/// as a chord.
+///
+/// The letter actions in the todo panel, the todo board and the notification
+/// center guard on their modifiers so the `ctrl+` forms fall through to
+/// [`list_chord`] — `ctrl+d` is half a page down, not a second way to spell
+/// "remove". That guard was written as "no modifiers at all", which also
+/// swallowed Shift: `C` did nothing where `c` cleared the completed todos, and
+/// nothing on screen explained why.
+///
+/// Shift on a letter is how the letter is typed; Ctrl and Alt are chords and
+/// are left untouched so they still fall through. Only for overlays with no
+/// text input — in one with a search box, `J` is text and must stay `J`.
+pub(crate) fn overlay_letter_key(key: KeyEvent) -> KeyEvent {
+    if key.modifiers != KeyModifiers::SHIFT {
+        return key;
+    }
+    match key.code {
+        KeyCode::Char(c) if c.is_ascii_uppercase() => KeyEvent {
+            code: KeyCode::Char(c.to_ascii_lowercase()),
+            modifiers: KeyModifiers::empty(),
+            ..key
+        },
+        _ => key,
+    }
+}
 
 /// A movement every list-bearing overlay accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
