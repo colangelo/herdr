@@ -1200,6 +1200,25 @@ impl App {
         }
     }
 
+    /// Every pane the board is currently showing, in board order and each only
+    /// once — what a board-scoped action acts on.
+    fn todo_board_panes(&self) -> Vec<crate::layout::PaneId> {
+        use crate::app::state::TodoBoardItem;
+
+        let Some(board) = self.state.todo_board() else {
+            return Vec::new();
+        };
+        let mut panes: Vec<crate::layout::PaneId> = Vec::new();
+        for item in &board.items {
+            if let TodoBoardItem::Todo { pane_id, .. } = item {
+                if !panes.contains(pane_id) {
+                    panes.push(*pane_id);
+                }
+            }
+        }
+        panes
+    }
+
     /// Move the board's selection by a chord, landing on a todo rather than on
     /// a heading — a heading is rendered in the same list but is never a
     /// destination.
@@ -1218,6 +1237,34 @@ impl App {
     /// through the `todo.*` API against the todo's *owning* pane, which is not
     /// necessarily the focused one and need not even be in the active space.
     pub(super) fn apply_todo_board_action(&mut self, action: TodoBoardAction) {
+        // Clearing acts on everything the board is showing rather than on a
+        // selection, so it runs before the selected-todo lookup — the same
+        // shape the panel's own clear has.
+        //
+        // It used to clear only the selected todo's pane, on the reasoning
+        // that `c` should mean exactly what it means one surface over. That
+        // was wrong in use: the board is the session's, the footer says
+        // "clear done" with no scope on it, and pressing it with the selection
+        // parked on some other pane cleared nothing and said nothing. A key
+        // that does nothing most of the time reads as broken, which is how it
+        // was reported.
+        if action == TodoBoardAction::ClearDone {
+            for pane_id in self.todo_board_panes() {
+                let Some(public_pane_id) = self.state.session_public_pane_id(pane_id) else {
+                    continue;
+                };
+                self.runtime_todo_clear(
+                    "tui.todo.clear",
+                    crate::api::schema::TodoClearParams {
+                        pane_id: public_pane_id,
+                        done_only: true,
+                    },
+                );
+            }
+            self.state.refresh_todo_board();
+            return;
+        }
+
         let Some((pane_id, todo_id)) = self
             .state
             .todo_board()
@@ -1276,20 +1323,8 @@ impl App {
                 );
                 self.state.refresh_todo_board();
             }
-            TodoBoardAction::ClearDone => {
-                // The selected todo's pane, not the session: `c` means the
-                // same thing here as on that pane's own panel, and a
-                // session-wide sweep would be a far more destructive action
-                // wearing the same letter.
-                self.runtime_todo_clear(
-                    "tui.todo.clear",
-                    crate::api::schema::TodoClearParams {
-                        pane_id: public_pane_id,
-                        done_only: true,
-                    },
-                );
-                self.state.refresh_todo_board();
-            }
+            // Handled above, before the selected-todo lookup.
+            TodoBoardAction::ClearDone => {}
             TodoBoardAction::FollowLink => {
                 // A dead link is inert, exactly as on the panel — and it
                 // targets the *linked* pane, never the owner, so a linked
@@ -3784,6 +3819,160 @@ mod tests {
         assert_eq!(app.state.active, Some(0), "travelled to the linked pane");
         assert!(app.state.todo_board().is_none(), "the board did not linger");
         app.state.assert_invariants_for_test();
+    }
+
+    /// Feedback loop for "pressing c on the board does not clear the completed
+    /// todos". Asserts the user's exact symptom.
+    #[test]
+    fn loop_c_clears_completed_todos_on_the_board() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        let done = terminal
+            .add_todo(
+                "already done",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+        terminal
+            .add_todo(
+                "still open",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo should be added");
+        terminal
+            .update_todo(
+                done.id,
+                crate::terminal::todo::TodoUpdate {
+                    done: Some(true),
+                    ..Default::default()
+                },
+                200,
+            )
+            .expect("todo should be updated");
+        app.state.active = Some(0);
+        app.state.open_todo_board();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('c')));
+
+        let left: Vec<String> = app
+            .state
+            .pane_todos_in_display_order(pane)
+            .into_iter()
+            .map(|todo| todo.text.clone())
+            .collect();
+        assert_eq!(
+            left,
+            vec!["still open".to_string()],
+            "c on the board should clear the completed todo"
+        );
+    }
+
+    /// Regression: `c` on the board cleared only the *selected* todo's pane,
+    /// so with the selection parked on some other pane it cleared nothing and
+    /// said nothing — which is indistinguishable from a broken key, and is how
+    /// it was reported. The board is the session's view, its footer says
+    /// "clear done" with no scope on it, and that is now what it does.
+    #[test]
+    fn clearing_done_from_the_board_clears_every_pane_it_shows() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        let first = app.state.workspaces[0].tabs[0].root_pane;
+        let second = app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+
+        let add = |app: &mut App, pane, text: &str, done: bool| {
+            let terminal_id = app.state.workspaces[0]
+                .pane_state(pane)
+                .expect("pane")
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).expect("terminal");
+            let todo = terminal
+                .add_todo(text, crate::terminal::todo::TodoPriority::Normal, None, 100)
+                .expect("todo should be added");
+            if done {
+                terminal
+                    .update_todo(
+                        todo.id,
+                        crate::terminal::todo::TodoUpdate {
+                            done: Some(true),
+                            ..Default::default()
+                        },
+                        200,
+                    )
+                    .expect("todo should be updated");
+            }
+        };
+        // The selection lands on the first pane's outstanding todo, while the
+        // done ones are spread across both panes.
+        add(&mut app, first, "still open", false);
+        add(&mut app, first, "first done", true);
+        add(&mut app, second, "second done", true);
+
+        app.state.active = Some(0);
+        app.state.open_todo_board();
+        assert_eq!(
+            app.state
+                .todo_board()
+                .and_then(|board| board.selected_todo())
+                .map(|(pane, _)| pane),
+            Some(first),
+            "precondition: the selection is not on the second pane"
+        );
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('c')));
+
+        let texts = |app: &App, pane| -> Vec<String> {
+            app.state
+                .pane_todos_in_display_order(pane)
+                .into_iter()
+                .map(|todo| todo.text.clone())
+                .collect()
+        };
+        assert_eq!(texts(&app, first), vec!["still open".to_string()]);
+        assert!(
+            texts(&app, second).is_empty(),
+            "the pane the selection was not on is cleared too"
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// Clearing takes nothing outstanding with it, whichever pane it is on.
+    #[test]
+    fn clearing_done_from_the_board_leaves_outstanding_todos_alone() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        for text in ["one", "two"] {
+            terminal
+                .add_todo(text, crate::terminal::todo::TodoPriority::Normal, None, 100)
+                .expect("todo should be added");
+        }
+        app.state.active = Some(0);
+        app.state.open_todo_board();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('c')));
+
+        assert_eq!(app.state.pane_todos_in_display_order(pane).len(), 2);
+        assert!(app.state.todo_board().is_some(), "the board stays open");
     }
 
     /// The letters carry the panel's modifier guard, so `ctrl+d` is half a page
