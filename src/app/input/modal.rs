@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Direction;
 use ratatui::layout::Rect;
 
-use super::list_keys::{list_chord, ListChord, PlainChars};
+use super::list_keys::{list_chord, overlay_letter_key, ListChord, PlainChars};
 use crate::{
     app::{
         state::{
@@ -1101,6 +1101,7 @@ fn notification_center_list_chord(state: &mut AppState, key: KeyEvent) {
 
 impl App {
     pub(crate) fn handle_notification_center_key_via_api(&mut self, key: KeyEvent) {
+        let key = overlay_letter_key(key);
         match key.code {
             KeyCode::Enter => self.activate_notification_center_selection(),
             KeyCode::Char('c') if key.modifiers.is_empty() => self.state.clear_notifications(),
@@ -1123,7 +1124,9 @@ impl App {
         // The letter actions carry a modifier guard so their `ctrl+` forms
         // fall through to the shared list chords: `ctrl+d` is half a page
         // down here as it is everywhere else, not a second way to spell
-        // "remove".
+        // "remove". Shift is not one of those chords — it is how a capital
+        // letter is typed — so it is normalised away first.
+        let key = overlay_letter_key(key);
         let bare = key.modifiers.is_empty();
         match key.code {
             // Enter edits rather than jumps: todos are authored, notifications
@@ -1172,6 +1175,7 @@ impl App {
     /// over, and the letters carry the panel's modifier guard so their `ctrl+`
     /// forms fall through to the shared list chords.
     pub(crate) fn handle_todo_board_key_via_api(&mut self, key: KeyEvent) {
+        let key = overlay_letter_key(key);
         let bare = key.modifiers.is_empty();
         match key.code {
             KeyCode::Enter => self.apply_todo_board_action(TodoBoardAction::OpenOwner),
@@ -3807,6 +3811,58 @@ mod tests {
             assert_eq!(app.state.mode, Mode::Terminal);
             app.state.assert_invariants_for_test();
         }
+    }
+
+    /// Regression: `C` did nothing where `c` cleared. The panel's letter
+    /// actions guarded on "no modifiers at all" so their `ctrl+` forms would
+    /// fall through to the shared list chords — but that swallowed Shift too,
+    /// and Shift on a letter is how a capital is typed, not a chord.
+    #[test]
+    fn a_shifted_letter_does_what_its_lowercase_form_does_in_the_panel() {
+        for pressed in [
+            key(KeyCode::Char('c')),
+            KeyEvent::new(KeyCode::Char('C'), KeyModifiers::SHIFT),
+        ] {
+            let mut app = app_with_pane_todos(&[
+                (
+                    "done one",
+                    true,
+                    crate::terminal::todo::TodoPriority::Normal,
+                ),
+                (
+                    "still open",
+                    false,
+                    crate::terminal::todo::TodoPriority::Normal,
+                ),
+            ]);
+
+            app.handle_pane_todos_key_via_api(pressed);
+
+            assert_eq!(
+                panel_todo_texts(&app),
+                vec!["still open".to_string()],
+                "{pressed:?} should clear the completed todo"
+            );
+        }
+    }
+
+    /// The other half of the same rule: `ctrl+` forms are chords and must
+    /// still fall through, so normalising Shift cannot have made `ctrl+d`
+    /// remove a todo.
+    #[test]
+    fn a_control_modified_letter_still_falls_through_in_the_panel() {
+        let mut app = app_with_pane_todos(&[
+            ("first", false, crate::terminal::todo::TodoPriority::High),
+            ("second", false, crate::terminal::todo::TodoPriority::Normal),
+        ]);
+
+        app.handle_pane_todos_key_via_api(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+
+        assert_eq!(
+            panel_todo_texts(&app),
+            vec!["first".to_string(), "second".to_string()],
+            "ctrl+d moves the selection; it does not remove"
+        );
     }
 
     #[test]
