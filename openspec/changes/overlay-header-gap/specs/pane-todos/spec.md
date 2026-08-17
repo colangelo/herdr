@@ -14,16 +14,19 @@ session presents them — space, then tab, then pane. Within a pane, todos SHALL
 follow the existing presentation order. Panes holding no todos SHALL NOT appear.
 
 Group headings SHALL identify the owning pane by its space, then the pane's
-label, then its addressable identifier — the space first because the board is
-read across spaces and where the work lives is what is being decided between,
-and the identifier last because a heading has a whole row and nothing competing
-for it. Where a heading lacks a space name, a label, or a resolvable identifier,
-it SHALL omit that part rather than render an empty one. Headings SHALL NOT be
-selectable, and selection SHALL step over them.
+label — the space first because the board is read across spaces and where the
+work lives is what is being decided between. Where a heading lacks a space name
+or a label, it SHALL omit that part rather than render an empty one. Headings
+SHALL NOT be selectable, and selection SHALL step over them.
 
-This ordering is deliberately the reverse of a todo link chip's, which leads
-with the identifier: a chip shares its row with the todo's own text and is
-truncated from the right, so what must survive truncation goes first there.
+Headings SHALL NOT carry the pane's addressable identifier. That identifier is a
+creation counter encoded in a 32-character alphabet, so it names neither a
+position on the board nor anything else the reader can see, and its space
+component states a second time what the heading already says in words. A
+heading's job is recognising the pane, which the space and the label do, and
+activating a row travels to that pane without anyone having to read an address.
+A todo link chip SHALL continue to carry its identifier, because a chip is a
+destination the user may want to address rather than a group being read.
 
 The board SHALL support moving the selection, toggling done, opening a todo for
 editing, following a todo's link, removing a todo, clearing done todos, and
@@ -63,12 +66,13 @@ SHALL read the same store, so a todo presents identically in either.
 #### Scenario: A heading names the space before the pane
 
 - **WHEN** a group heading is rendered for a pane in a named space
-- **THEN** it reads the space name, then the pane's label, then the pane's addressable identifier
+- **THEN** it reads the space name, then the pane's label
+- **AND** it shows no addressable identifier
 
-#### Scenario: A heading omits what it cannot resolve
+#### Scenario: A heading omits a part the pane does not have
 
-- **WHEN** a pane's identifier cannot be resolved
-- **THEN** its heading names the space and the label and shows no identifier
+- **WHEN** a pane carries no label of its own
+- **THEN** its heading names the space alone rather than rendering an empty part
 
 #### Scenario: Panes without todos are omitted
 
