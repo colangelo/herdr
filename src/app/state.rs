@@ -1759,6 +1759,17 @@ pub enum TodoBoardItem {
         pane_id: PaneId,
         todo_id: u64,
     },
+    /// The blank row separating one group from the next.
+    ///
+    /// An item rather than an offset the renderer adds, because the scroll
+    /// window, the selection and the mouse hit-test all rest on list row *n*
+    /// being item *n*. A renderer-side offset would hold that only in the
+    /// renderer, and a click below the first gap would land on the wrong todo.
+    ///
+    /// Nothing has to opt out of selecting it: everything that asks whether a
+    /// row is a destination goes through [`TodoBoardState::todo_at`], which
+    /// answers `None` for anything that is not a todo.
+    GroupGap,
 }
 
 /// TUI-only state for the session todo board. The todos are server-owned on

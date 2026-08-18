@@ -27,12 +27,25 @@ use super::widgets::{
 use crate::app::state::{AppState, TodoBoardButton, TodoBoardItem};
 
 /// Columns the board asks for before its own content or footer has a say.
-const TODO_BOARD_MIN_WIDTH: u16 = 64;
+///
+/// Raised from 64 after dogfooding: a session whose longest row was 66 columns
+/// got a 66-column box in the middle of a very wide terminal, truncating todos
+/// at a width the screen had no need to impose.
+const TODO_BOARD_MIN_WIDTH: u16 = 80;
 
 /// The widest the board will grow for its content, before the screen clamps
 /// it. A board spanning a very wide terminal would put its footer buttons a
 /// screen away from the rows they act on.
-const TODO_BOARD_MAX_WIDTH: u16 = 120;
+const TODO_BOARD_MAX_WIDTH: u16 = 140;
+
+/// Columns a group's todos are drawn in from its heading.
+///
+/// Applied by narrowing the rect a todo is drawn into rather than by teaching
+/// [`render_pane_todo_row`] an indent: that renderer is shared with the pane
+/// todo panel so a todo reads the same in both, and a board concern has no
+/// business in it. Headings are deliberately not indented — a heading is the
+/// thing being indented *from*.
+pub(crate) const TODO_BOARD_TODO_INDENT: u16 = 2;
 
 /// The board never shrinks below this, so an empty one still reads as a panel.
 const TODO_BOARD_MIN_HEIGHT: u16 = 8;
@@ -192,7 +205,12 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
     if render_modal_shell(frame, area, geometry.outer.width, geometry.outer.height, p).is_none() {
         return;
     }
-    render_modal_header(frame, geometry.header, "todos", p);
+    // `todos/notes`, not `todos`: what a pane records is as often a note to
+    // self as a task, and a title naming only one of them says the other does
+    // not belong here. Only the title changes — the CLI, the config key, the
+    // socket method and the protocol are addresses, and renaming those costs a
+    // protocol bump and a permanent divergence from upstream's `todo` naming.
+    render_modal_header(frame, geometry.header, "todos/notes", p);
 
     // The empty state still falls through to the footer: opening the board on
     // a quiet session must say so rather than look like a broken keybinding.
@@ -217,6 +235,9 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
             1,
         );
         match item {
+            // The separation between groups is the row itself; there is
+            // nothing to draw into it.
+            TodoBoardItem::GroupGap => {}
             TodoBoardItem::PaneHeading { space, label } => {
                 // The weight the move picker gives its space headings, so a
                 // group reads as a heading and never as a row.
@@ -233,10 +254,16 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
                 let Some(todo) = app.pane_todo_ref(*pane_id, *todo_id) else {
                     continue;
                 };
+                let indented = Rect::new(
+                    row_rect.x.saturating_add(TODO_BOARD_TODO_INDENT),
+                    row_rect.y,
+                    row_rect.width.saturating_sub(TODO_BOARD_TODO_INDENT),
+                    row_rect.height,
+                );
                 render_pane_todo_row(
                     frame,
                     app,
-                    row_rect,
+                    indented,
                     todo,
                     start + row == board.list.selected,
                 );
@@ -321,18 +348,64 @@ mod tests {
             ("archive the change", true, TodoPriority::Low),
         ])
         .assert(
-            Rect::new(7, 7, 66, 10),
+            Rect::new(2, 7, 76, 10),
             &[
-                "┌────────────────────────────────────────────────────────────────┐",
-                "│ todos                                                          │",
-                "│                                                                │",
-                "│ board · pane 1                                                 │",
-                "│ ▲ rerun the deploy                                             │",
-                "│ ● check the 403                                                │",
-                "│ ✓ archive the change                                           │",
-                "│                                                                │",
-                "│     ↵ open pane    spc toggle    c clear done    esc close     │",
-                "└────────────────────────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                              │",
+                "│                                                                          │",
+                "│ board · pane 1                                                           │",
+                "│   ▲ rerun the deploy                                                     │",
+                "│   ● check the 403                                                        │",
+                "│   ✓ archive the change                                                   │",
+                "│                                                                          │",
+                "│          ↵ open pane    spc toggle    c clear done    esc close          │",
+                "└──────────────────────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
+
+    /// Two panes with work, which is the case the board exists for and the
+    /// only one that can show a gap. The blank row between the groups is the
+    /// separation the single-group snapshot has nothing to demonstrate.
+    fn app_with_two_groups() -> AppState {
+        let mut app = test_support::app_with_one_pane("board");
+        let first = app.workspaces[0].tabs[0].root_pane;
+        let second = app.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.ensure_test_terminals();
+        for (pane_id, text) in [(first, "rerun the deploy"), (second, "check the 403")] {
+            let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.terminals
+                .get_mut(&terminal_id)
+                .expect("test terminal should exist")
+                .add_todo(text, TodoPriority::Normal, None, 100)
+                .expect("todo should be added");
+        }
+        test_support::layout(&mut app);
+        app
+    }
+
+    #[test]
+    fn snapshot_two_groups_are_separated_by_a_blank_row() {
+        let base = app_with_two_groups();
+        let mut open = app_with_two_groups();
+        open.open_todo_board();
+        test_support::layout(&mut open);
+        test_support::overlay_snapshot(&base, &open).assert(
+            Rect::new(2, 7, 76, 11),
+            &[
+                "┌──────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                              │",
+                "│                                                                          │",
+                "│ board · pane 1                                                           │",
+                "│   ● rerun the deploy                                                     │",
+                "│                                                                          │",
+                "│ board · pane 2                                                           │",
+                "│   ● check the 403                                                        │",
+                "│                                                                          │",
+                "│          ↵ open pane    spc toggle    c clear done    esc close          │",
+                "└──────────────────────────────────────────────────────────────────────────┘",
             ],
         );
     }
@@ -340,22 +413,24 @@ mod tests {
     #[test]
     fn snapshot_empty() {
         snapshot(&[]).assert(
-            Rect::new(7, 8, 66, 8),
+            Rect::new(2, 8, 76, 8),
             &[
-                "┌────────────────────────────────────────────────────────────────┐",
-                "│ todos                                                          │",
-                "│                                                                │",
-                "│ nothing outstanding                                            │",
-                "│                                                                │",
-                "│                                                                │",
-                "│                    ↵ open pane    esc close                    │",
-                "└────────────────────────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                              │",
+                "│                                                                          │",
+                "│ nothing outstanding                                                      │",
+                "│                                                                          │",
+                "│                                                                          │",
+                "│                         ↵ open pane    esc close                         │",
+                "└──────────────────────────────────────────────────────────────────────────┘",
             ],
         );
     }
 
     /// The board is the panel widened, so a todo drawn on it is the same text
-    /// the panel draws — same glyph, same first line, same done styling.
+    /// the panel draws — same glyph, same first line, same done styling. The
+    /// board indents it under its heading, which is why the comparison starts
+    /// at the indent: what moves is the rect, never the row renderer.
     #[test]
     fn a_todo_row_reads_exactly_as_it_does_on_the_pane_panel() {
         let todos = &[("check the 403", false, TodoPriority::Normal)];
@@ -370,8 +445,24 @@ mod tests {
         );
         let (list, _) = board.todo_board_list_window().expect("the board is open");
         // Row 0 is the pane heading; row 1 is the todo.
-        let board_row =
-            test_support::row_text(&board_buffer, Rect::new(list.x, list.y + 1, list.width, 1));
+        let todo_row = Rect::new(list.x, list.y + 1, list.width, 1);
+        let board_row = test_support::row_text(
+            &board_buffer,
+            Rect::new(
+                todo_row.x + TODO_BOARD_TODO_INDENT,
+                todo_row.y,
+                todo_row.width - TODO_BOARD_TODO_INDENT,
+                1,
+            ),
+        );
+        assert_eq!(
+            test_support::row_text(
+                &board_buffer,
+                Rect::new(todo_row.x, todo_row.y, TODO_BOARD_TODO_INDENT, 1),
+            ),
+            " ".repeat(TODO_BOARD_TODO_INDENT as usize),
+            "the indent is blank, so the todo sits under its heading"
+        );
 
         let mut panel = app_with_todos(todos);
         let pane_id = panel.workspaces[0].tabs[0].root_pane;
@@ -455,6 +546,15 @@ mod tests {
             .max(ButtonRow::natural_width(&todo_board_button_specs(true, true)) + 2);
         let small = todo_board_geometry(screen, 4, TODO_BOARD_MIN_WIDTH).expect("resolves");
         assert_eq!(small.outer.width, floor);
+        // Pinned, not merely derived from the constant: a floor of 64 gave a
+        // session whose longest row was 66 columns a 66-column box in the
+        // middle of a very wide terminal, which is the complaint this width
+        // answers. Lowering it again should fail here and read why.
+        assert!(
+            small.outer.width >= 80,
+            "the floor is what makes the board readable, got {}",
+            small.outer.width
+        );
 
         // A long heading or todo widens it.
         let wide = todo_board_geometry(screen, 4, 90).expect("resolves");
@@ -480,6 +580,11 @@ mod tests {
         let screen = Rect::new(0, 0, 200, 60);
         let capped = todo_board_geometry(screen, 4, 400).expect("resolves");
         assert_eq!(capped.outer.width, TODO_BOARD_MAX_WIDTH);
+        assert!(
+            capped.outer.width >= 140,
+            "the cap leaves room for a long heading and its todos, got {}",
+            capped.outer.width
+        );
 
         // A short screen clamps rather than overflowing it.
         let short = todo_board_geometry(Rect::new(0, 0, 80, 14), 40, TODO_BOARD_MIN_WIDTH)
