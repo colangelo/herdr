@@ -1897,6 +1897,9 @@ impl AppState {
             .items
             .iter()
             .map(|item| match item {
+                // A blank row asks for nothing, so it can never be what
+                // decides the board's width.
+                TodoBoardItem::GroupGap => 0,
                 TodoBoardItem::PaneHeading { space, label } => crate::ui::text::display_width(
                     &crate::ui::todo_board_heading_text(space, label),
                 ),
@@ -1920,7 +1923,12 @@ impl AppState {
                     // Only the first line of a multi-line todo is ever drawn,
                     // past the three-cell state glyph.
                     let text = todo.text.split('\n').next().unwrap_or_default();
-                    3 + crate::ui::text::display_width(text) + link_width
+                    // Todos are drawn indented from their heading, so the room
+                    // they need includes the indent they are pushed by.
+                    crate::ui::TODO_BOARD_TODO_INDENT as usize
+                        + 3
+                        + crate::ui::text::display_width(text)
+                        + link_width
                 }
             })
             .max()

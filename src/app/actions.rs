@@ -621,7 +621,8 @@ impl AppState {
     /// Every pane holding a todo, grouped by pane in the order the session
     /// presents them — space, then tab, then pane — each group led by a
     /// heading and followed by that pane's todos in the panel's own
-    /// presentation order.
+    /// presentation order, and separated from the group above it by a blank
+    /// row.
     ///
     /// Ordering *across* panes is deliberately not by priority: a global
     /// priority sort scatters one pane's todos through the list, and dealing
@@ -638,6 +639,12 @@ impl AppState {
                     let todos = self.pane_todos_in_display_order(pane_id);
                     if todos.is_empty() {
                         continue;
+                    }
+                    // Between groups only: above the first group the header
+                    // block already leaves a blank row, and a second one would
+                    // read as the list starting late rather than as a gap.
+                    if !items.is_empty() {
+                        items.push(TodoBoardItem::GroupGap);
                     }
                     items.push(TodoBoardItem::PaneHeading {
                         space: ws.display_name_from_terminals(&self.terminals),
@@ -3769,6 +3776,7 @@ mod tests {
             .todo_board_items()
             .iter()
             .map(|item| match item {
+                TodoBoardItem::GroupGap => String::new(),
                 TodoBoardItem::PaneHeading { space, label } => format!("# {space} {label}"),
                 TodoBoardItem::Todo { pane_id, todo_id } => state
                     .pane_todo_by_id(*pane_id, *todo_id)
@@ -3879,9 +3887,91 @@ mod tests {
             "first row is a heading: {texts:?}"
         );
         assert_eq!(&texts[1..3], &["high second", "normal first"]);
-        assert!(texts[3].starts_with('#'), "second group heading: {texts:?}");
-        assert_eq!(texts[4], "other space");
-        assert_eq!(texts.len(), 5);
+        // A blank row separates the groups, and only separates them: never
+        // above the first, never trailing the last.
+        assert_eq!(texts[3], "", "blank row between groups: {texts:?}");
+        assert!(texts[4].starts_with('#'), "second group heading: {texts:?}");
+        assert_eq!(texts[5], "other space");
+        assert_eq!(texts.len(), 6);
+    }
+
+    /// The gap separates groups from each other, so a board with one group has
+    /// nothing to separate and shows no blank row at all.
+    #[test]
+    fn a_single_group_carries_no_blank_row() {
+        let (mut state, _, _, second_root) = app_with_board_todos();
+        let todo_id = state
+            .pane_todos_in_display_order(second_root)
+            .first()
+            .expect("the pane holds one todo")
+            .id;
+        let terminal_id = state.workspaces[1]
+            .pane_state(second_root)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .remove_todo(todo_id)
+            .expect("todo should be removed");
+
+        let items = state.todo_board_items();
+        assert!(
+            !items
+                .iter()
+                .any(|item| matches!(item, TodoBoardItem::GroupGap)),
+            "one group has nothing to separate: {items:?}"
+        );
+    }
+
+    /// The gap is an item, so the selection has to step over it exactly as it
+    /// steps over a heading — otherwise moving down off a group's last todo
+    /// parks the cursor on a blank row.
+    #[test]
+    fn selection_steps_over_the_blank_row_between_groups() {
+        let (mut state, _, _, _) = app_with_board_todos();
+        state.open_todo_board();
+
+        let gap = state
+            .todo_board()
+            .expect("board")
+            .items
+            .iter()
+            .position(|item| matches!(item, TodoBoardItem::GroupGap))
+            .expect("two groups are separated by a gap");
+
+        // Down from the todo immediately above the gap, then back up.
+        state.todo_board_mut().expect("board").list.select(gap - 1);
+        state.move_todo_board_selection_by(1);
+        let after_down = state.todo_board().expect("board").list.selected;
+        assert_ne!(after_down, gap, "moving down must not land on the gap");
+        assert!(state.todo_board().expect("board").selected_todo().is_some());
+
+        state.move_todo_board_selection_by(-1);
+        let after_up = state.todo_board().expect("board").list.selected;
+        assert_ne!(after_up, gap, "moving up must not land on the gap");
+        assert!(state.todo_board().expect("board").selected_todo().is_some());
+    }
+
+    /// A click on a blank row changes nothing: `select_todo` refuses any index
+    /// that does not hold a todo, which is what keeps the gap inert without
+    /// the mouse layer having to know it exists.
+    #[test]
+    fn clicking_the_blank_row_between_groups_is_inert() {
+        let (mut state, _, _, _) = app_with_board_todos();
+        state.open_todo_board();
+        let board = state.todo_board_mut().expect("board");
+        let gap = board
+            .items
+            .iter()
+            .position(|item| matches!(item, TodoBoardItem::GroupGap))
+            .expect("two groups are separated by a gap");
+        let before = board.list.selected;
+
+        assert!(!board.select_todo(gap), "a gap is not a destination");
+        assert_eq!(board.list.selected, before, "the selection did not move");
     }
 
     /// The board reads the panel's own ordering rather than deriving a second
@@ -3941,24 +4031,27 @@ mod tests {
         let (mut state, _, _, _) = app_with_board_todos();
         state.open_todo_board();
 
+        // The list is: heading, two todos, the gap between groups, the second
+        // heading, its todo.
         // Opens on the first todo, not on the heading above it.
         assert_eq!(state.todo_board().expect("board").list.selected, 1);
 
-        // Forward past the second group's heading lands on its todo.
+        // Forward past the gap and the second group's heading lands on its
+        // todo — two inert rows crossed in one step.
         state.move_todo_board_selection_by(1);
         assert_eq!(state.todo_board().expect("board").list.selected, 2);
         state.move_todo_board_selection_by(1);
-        assert_eq!(state.todo_board().expect("board").list.selected, 4);
+        assert_eq!(state.todo_board().expect("board").list.selected, 5);
 
         // And back the same way.
         state.move_todo_board_selection_by(-1);
         assert_eq!(state.todo_board().expect("board").list.selected, 2);
 
-        // Clamping at either end never parks on a heading.
+        // Clamping at either end never parks on a heading or a gap.
         state.move_todo_board_selection_by(-10);
         assert_eq!(state.todo_board().expect("board").list.selected, 1);
         state.move_todo_board_selection_by(10);
-        assert_eq!(state.todo_board().expect("board").list.selected, 4);
+        assert_eq!(state.todo_board().expect("board").list.selected, 5);
         state.assert_invariants_for_test();
     }
 
@@ -3994,7 +4087,8 @@ mod tests {
             "the selection landed on a todo: {:?}",
             board.items
         );
-        assert_eq!(board_state(&state).len(), 4);
+        // Two headings, one todo each, and the gap between the groups.
+        assert_eq!(board_state(&state).len(), 5);
     }
 
     /// The last todo of a pane takes its heading with it, because the

@@ -85,6 +85,7 @@ use self::tabs::render_tab_bar;
 use self::todo_board::render_todo_board;
 pub(crate) use self::todo_board::{
     todo_board_button_specs, todo_board_geometry, todo_board_heading_text, TodoBoardGeometry,
+    TODO_BOARD_TODO_INDENT,
 };
 pub(crate) use self::todo_panel::pane_todo_panel_button_rects;
 use self::todo_panel::render_pane_todo_panel;
