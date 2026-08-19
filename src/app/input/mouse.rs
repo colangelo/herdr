@@ -303,40 +303,53 @@ impl AppState {
         if self.mode == Mode::TodoBoard {
             match mouse.kind {
                 MouseEventKind::Moved => {
+                    // The pointer moves the hovered *button* and nothing else.
+                    // Dragging the selection along with it made a list long
+                    // enough to scan unreadable, and made a stray click travel
+                    // somewhere the pointer had merely passed over.
                     let over_button = self
                         .todo_board_buttons()
                         .and_then(|buttons| buttons.button_at(mouse.column, mouse.row));
-                    // Hover follows the pointer onto todos only: a heading is
-                    // drawn in the same list but is never a destination.
-                    let hovered_row = self.todo_board_row_at(mouse.column, mouse.row);
                     if let Some(board) = self.todo_board_mut() {
-                        if let Some(idx) = hovered_row {
-                            board.select_todo(idx);
-                        }
                         board.hovered_button = over_button;
                     }
                 }
-                MouseEventKind::ScrollUp => self.move_todo_board_selection_by(-1),
-                MouseEventKind::ScrollDown => self.move_todo_board_selection_by(1),
+                MouseEventKind::ScrollUp => self.scroll_todo_board_by(-1),
+                MouseEventKind::ScrollDown => self.scroll_todo_board_by(1),
                 MouseEventKind::Down(MouseButton::Left) => {
                     if let Some(idx) = self.todo_board_row_at(mouse.column, mouse.row) {
-                        let on_chip = self.todo_board_link_chip_at(mouse.column, mouse.row);
+                        // A chip is an explicit target that names where it
+                        // goes, so it acts on the first click wherever the
+                        // selection happens to be.
+                        if self.todo_board_link_chip_at(mouse.column, mouse.row) {
+                            if self
+                                .todo_board_mut()
+                                .is_some_and(|board| board.select_todo(idx))
+                            {
+                                return Some(MouseAction::TodoBoard(TodoBoardAction::FollowLink));
+                            }
+                            return None;
+                        }
+                        let already_selected = self
+                            .todo_board()
+                            .is_some_and(|board| board.list.selected == idx);
                         let selected = self
                             .todo_board_mut()
                             .is_some_and(|board| board.select_todo(idx));
-                        // A click on a heading selects nothing and does
-                        // nothing, rather than acting on whatever was selected
-                        // before.
+                        // A click on a heading or a gap selects nothing and
+                        // does nothing, rather than acting on whatever was
+                        // selected before.
                         if !selected {
                             return None;
                         }
-                        // The row's own meaning here is its owner, so a click
-                        // travels there; the chip keeps meaning the link.
-                        return Some(MouseAction::TodoBoard(if on_chip {
-                            TodoBoardAction::FollowLink
-                        } else {
-                            TodoBoardAction::OpenOwner
-                        }));
+                        // The first click only places the selection. Travel —
+                        // which closes the board and moves you to another
+                        // space — takes a second click on the row you can now
+                        // see is chosen.
+                        if !already_selected {
+                            return None;
+                        }
+                        return Some(MouseAction::TodoBoard(TodoBoardAction::OpenOwner));
                     }
                     use crate::ui::overlay::ButtonRowHit;
                     match self
@@ -6129,6 +6142,135 @@ mod tests {
             "the second click closes it"
         );
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    /// A board taller than its window: two panes with enough todos that the
+    /// list must scroll, for the pointer/wheel/scroll behaviours that only
+    /// appear at length.
+    fn app_for_long_todo_board() -> crate::app::App {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("todos")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.workspaces[0].test_split(Direction::Vertical);
+        app.state.ensure_test_terminals();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let mut infos = app.state.view.pane_infos.clone();
+        infos.sort_by_key(|info| info.rect.y);
+        for (n, info) in infos.iter().enumerate() {
+            for i in 0..12 {
+                add_pane_todo(&mut app, info.id, &format!("pane {n} todo {i}"));
+            }
+        }
+        app.state.open_todo_board();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        app
+    }
+
+    /// Regression: scrolling to the bottom and back stranded the first group's
+    /// heading for good. The selection can only be a todo and item 0 is always
+    /// a heading, so the scroll floor was the first todo's index — the heading
+    /// above it was unreachable by keyboard or wheel.
+    #[test]
+    fn the_first_heading_comes_back_after_scrolling_to_the_bottom_and_back() {
+        let mut app = app_for_long_todo_board();
+        let len = app.state.todo_board().expect("board").items.len();
+        let visible = app.state.todo_board_visible_rows();
+        assert!(len > visible, "the fixture must actually scroll");
+
+        app.state.move_todo_board_selection_by(len as isize);
+        assert!(
+            app.state.todo_board().expect("board").list.scroll > 0,
+            "the bottom really scrolled the window"
+        );
+
+        app.state.move_todo_board_selection_by(-(len as isize));
+        assert_eq!(
+            app.state.todo_board().expect("board").list.scroll,
+            0,
+            "the first heading is visible again"
+        );
+    }
+
+    /// The pointer and the wheel are not the selection: one moves the hovered
+    /// button, the other the window, and neither drags the cursor along.
+    #[test]
+    fn the_pointer_and_the_wheel_leave_the_board_selection_alone() {
+        let mut app = app_for_long_todo_board();
+        let (list, _) = app
+            .state
+            .todo_board_list_window()
+            .expect("the board is open");
+        let before = app.state.todo_board().expect("board").list.selected;
+
+        for row in list.y..list.y + list.height {
+            app.state.handle_mouse(
+                &mut app.terminal_runtimes,
+                mouse(MouseEventKind::Moved, list.x + 4, row),
+            );
+        }
+        assert_eq!(
+            app.state.todo_board().expect("board").list.selected,
+            before,
+            "the pointer crossing rows must not move the selection"
+        );
+
+        for _ in 0..3 {
+            app.state.handle_mouse(
+                &mut app.terminal_runtimes,
+                mouse(MouseEventKind::ScrollDown, list.x + 4, list.y),
+            );
+        }
+        let board = app.state.todo_board().expect("board");
+        assert_eq!(board.list.selected, before, "the wheel moved the selection");
+        assert_eq!(board.list.scroll, 3, "the wheel moved the window");
+    }
+
+    /// The first click places the selection; travel — which closes the board
+    /// and moves you to another space — takes a second click on the row you
+    /// can now see is chosen.
+    #[test]
+    fn the_first_board_click_selects_and_the_second_opens_the_owner() {
+        let mut app = app_for_long_todo_board();
+        let (list, _) = app
+            .state
+            .todo_board_list_window()
+            .expect("the board is open");
+        // Row 3 is a todo well below the opening selection.
+        let target = list.y + 3;
+        let idx = app
+            .state
+            .todo_board_row_at(list.x + 4, target)
+            .expect("a row is drawn there");
+        assert!(
+            app.state
+                .todo_board()
+                .expect("board")
+                .todo_at(idx)
+                .is_some(),
+            "the fixture row must be a todo"
+        );
+        assert_ne!(app.state.todo_board().expect("board").list.selected, idx);
+
+        let first = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, target),
+        );
+        assert!(first.is_none(), "the first click only selects");
+        assert_eq!(app.state.todo_board().expect("board").list.selected, idx);
+        assert!(app.state.todo_board().is_some(), "the board stays open");
+
+        let second = app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, target),
+        );
+        assert!(
+            matches!(
+                second,
+                Some(MouseAction::TodoBoard(TodoBoardAction::OpenOwner))
+            ),
+            "the second click on the selected row travels"
+        );
     }
 
     /// The row's own meaning on the board is its owner, so a click travels
