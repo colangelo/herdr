@@ -1717,6 +1717,17 @@ impl TodoBoardState {
     /// travel first and falling back the other way at either end — so no
     /// movement can park on a heading, and a jump to the first or last item
     /// lands on a todo rather than on the heading above it.
+    /// The heading that labels the item at `idx` — the nearest one at or
+    /// before it. Scrolling keeps this on screen with the selection, because a
+    /// selected row whose heading has scrolled away does not say which pane it
+    /// belongs to.
+    pub fn group_heading_index(&self, idx: usize) -> usize {
+        (0..=idx.min(self.items.len().saturating_sub(1)))
+            .rev()
+            .find(|i| matches!(self.items.get(*i), Some(TodoBoardItem::PaneHeading { .. })))
+            .unwrap_or(0)
+    }
+
     pub fn nearest_todo(&self, target: usize, forward: bool) -> Option<usize> {
         let ahead: Option<usize> = if forward {
             (target..self.items.len()).find(|idx| self.todo_at(*idx).is_some())
@@ -2750,7 +2761,19 @@ impl AppState {
         if let Some(idx) = board.nearest_todo(target, delta >= 0) {
             board.list.select(idx);
         }
-        board.list.reveal(visible, len);
+        let heading = board.group_heading_index(board.list.selected);
+        board.list.reveal_with_context(heading, visible, len);
+    }
+
+    /// Move the board's visible window without moving the selection — the
+    /// wheel on a list long enough to scan.
+    pub(crate) fn scroll_todo_board_by(&mut self, delta: isize) {
+        let visible = self.todo_board_visible_rows();
+        let Some(board) = self.todo_board_mut() else {
+            return;
+        };
+        let len = board.items.len();
+        board.list.scroll_by(delta, visible, len);
     }
 
     /// The selected todo, cloned so callers can mutate through the API without

@@ -59,6 +59,21 @@ impl ListCursor {
         self.scroll = reveal_scroll(self.scroll, self.selected, visible, len);
     }
 
+    /// Move the visible window without moving the selection, clamped at both
+    /// ends. The wheel on a long scannable list scrolls the view; dragging the
+    /// selection with it makes the list unreadable while you look for
+    /// something in it.
+    pub(crate) fn scroll_by(&mut self, delta: isize, visible: usize, len: usize) {
+        let max = len.saturating_sub(visible);
+        self.scroll = self.scroll.saturating_add_signed(delta).min(max);
+    }
+
+    /// Reveal `index`, and pull `context` into view as well when the two fit
+    /// in the window together. See [`reveal_scroll_with_context`].
+    pub(crate) fn reveal_with_context(&mut self, context: usize, visible: usize, len: usize) {
+        self.scroll = reveal_scroll_with_context(self.scroll, context, self.selected, visible, len);
+    }
+
     /// The first visible index and how many rows fit. Clamps a scroll left
     /// stale by a list that shrank underneath it.
     pub(crate) fn window(&self, list: Rect, len: usize) -> (usize, usize) {
@@ -100,6 +115,30 @@ pub(crate) fn reveal_scroll(scroll: usize, index: usize, visible: usize, len: us
     scroll.min(len.saturating_sub(visible))
 }
 
+/// [`reveal_scroll`], plus a second index that should be on screen when it can
+/// be.
+///
+/// The selection always wins: a group taller than the window shows the
+/// selection rather than the heading above it. Without this, a list whose
+/// first row is never selectable — the board's first heading — can never be
+/// scrolled back to, because the scroll floor is the selection's own index.
+pub(crate) fn reveal_scroll_with_context(
+    scroll: usize,
+    context: usize,
+    index: usize,
+    visible: usize,
+    len: usize,
+) -> usize {
+    let scroll = reveal_scroll(scroll, index, visible, len);
+    if visible == 0 || context >= scroll {
+        return scroll;
+    }
+    if index.saturating_sub(context) < visible {
+        return context;
+    }
+    scroll
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +149,36 @@ mod tests {
         width: 20,
         height: 5,
     };
+
+    /// Regression: the board's first row is a heading and its selection can
+    /// only be a todo, so the scroll floor was the first todo's index and the
+    /// heading above it could never be scrolled back to.
+    #[test]
+    fn context_pulls_an_unselectable_leading_row_back_into_view() {
+        // Selection on item 1, heading at 0, five-row window: revealing 1
+        // alone floors the scroll at 1 and strands the heading.
+        assert_eq!(reveal_scroll(9, 1, 5, 20), 1);
+        assert_eq!(reveal_scroll_with_context(9, 0, 1, 5, 20), 0);
+
+        // The selection wins when the group cannot fit its heading too.
+        assert_eq!(reveal_scroll_with_context(0, 0, 12, 5, 20), 8);
+
+        // A context already on screen changes nothing.
+        assert_eq!(reveal_scroll_with_context(6, 6, 8, 5, 20), 6);
+    }
+
+    #[test]
+    fn scrolling_the_window_leaves_the_selection_alone() {
+        let mut cursor = ListCursor::new(3);
+        cursor.scroll_by(4, 5, 20);
+        assert_eq!((cursor.scroll, cursor.selected), (4, 3));
+        // Clamped at the far end, and never past it.
+        cursor.scroll_by(100, 5, 20);
+        assert_eq!((cursor.scroll, cursor.selected), (15, 3));
+        // And at zero.
+        cursor.scroll_by(-100, 5, 20);
+        assert_eq!((cursor.scroll, cursor.selected), (0, 3));
+    }
 
     #[test]
     fn movement_clamps_at_both_ends_rather_than_wrapping() {
