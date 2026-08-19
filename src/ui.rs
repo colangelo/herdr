@@ -30,6 +30,7 @@ mod todo_panel;
 pub(crate) mod text;
 // pub(crate): pure-data editing state that modal key handling drives.
 pub(crate) mod text_field;
+pub(crate) mod text_wrap;
 mod widgets;
 
 use self::dialogs::{
@@ -99,10 +100,10 @@ pub(crate) use self::{
         new_linked_worktree_inner_rect, open_existing_worktree_button_rects,
         open_existing_worktree_inner_rect, open_existing_worktree_max_visible_rows,
         open_existing_worktree_visible_start, pane_move_target_button_rects,
-        pane_move_target_inner_rect, pane_todo_edit_column_scroll, pane_todo_edit_line_scroll,
-        pane_todo_edit_rects, pane_todo_edit_text_area, remove_worktree_button_rects,
-        remove_worktree_popup_rect, rename_button_rects, PaneTodoEditRects,
-        PANE_MOVE_TARGET_HEADER_ROWS, PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
+        pane_move_target_inner_rect, pane_todo_edit_rects, pane_todo_edit_row_scroll,
+        pane_todo_edit_text_area, remove_worktree_button_rects, remove_worktree_popup_rect,
+        rename_button_rects, PaneTodoEditRects, PANE_MOVE_TARGET_HEADER_ROWS,
+        PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     },
     settings::{
         settings_button_rects, settings_popup_height, settings_show_primary_action,

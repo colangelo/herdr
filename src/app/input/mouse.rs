@@ -1838,17 +1838,22 @@ impl AppState {
     }
 
     /// Map a click in the text block back to an insertion point, through the
-    /// same scroll helpers the renderer draws with — so the cursor lands under
-    /// the pointer whatever the field is scrolled to.
+    /// same wrap layout the renderer drew with — so the cursor lands under
+    /// the pointer whatever the field is wrapped and scrolled to.
     pub(crate) fn place_pane_todo_edit_cursor(&mut self, input: Rect, col: u16, row: u16) {
         let Some(edit) = self.pane_todo_edit_mut() else {
             return;
         };
         let text_area = crate::ui::pane_todo_edit_text_area(input);
-        let line = crate::ui::pane_todo_edit_line_scroll(&edit.text, text_area.height)
-            + row.saturating_sub(text_area.y) as usize;
-        let column = crate::ui::pane_todo_edit_column_scroll(&edit.text, text_area.width)
-            + col.saturating_sub(text_area.x) as usize;
+        let wrapped = crate::ui::text_wrap::wrap_layout(edit.text.text(), text_area.width as usize);
+        let visual_row =
+            crate::ui::pane_todo_edit_row_scroll(&wrapped, &edit.text, text_area.height)
+                + row.saturating_sub(text_area.y) as usize;
+        let (line, column) = crate::ui::text_wrap::visual_to_logical(
+            &wrapped,
+            visual_row,
+            col.saturating_sub(text_area.x) as usize,
+        );
         edit.text.place_cursor(line, column);
     }
 
