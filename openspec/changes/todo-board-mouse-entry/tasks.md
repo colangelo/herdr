@@ -24,4 +24,4 @@
 ## 5. Verification
 
 - [x] 5.1 `just check` green
-- [ ] 5.2 Dogfood on the `-ac-beta` channel
+- [x] 5.2 Dogfood on the `-ac-beta` channel

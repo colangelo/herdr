@@ -50,4 +50,4 @@ requirement `todo-board` archived a day earlier.
 ## 7. Verification
 
 - [x] 7.1 `just check` green
-- [ ] 7.2 Dogfood on the `-ac-beta` channel: the board's title gap and heading, and one worktree dialog
+- [x] 7.2 Dogfood on the `-ac-beta` channel: the board's title gap and heading, and one worktree dialog

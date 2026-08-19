@@ -21,4 +21,4 @@
 ## 4. Verification
 
 - [x] 4.1 `just check` green
-- [ ] 4.2 Dogfood on the `-ac-beta` channel against the real 37-todo board
+- [x] 4.2 Dogfood on the `-ac-beta` channel against the real 37-todo board
