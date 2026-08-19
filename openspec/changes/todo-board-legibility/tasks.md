@@ -21,7 +21,8 @@ back out.
 
 - [x] 3.1 Raise the width floor from 64 to 80 and the cap from 120 to 140, with content still deciding between them
 - [x] 3.2 Title the board `todos/notes`
-- [x] 3.3 Leave the CLI, the config key, the socket API and the protocol named `todo`
+- [x] 3.3 Title the compose/edit overlay `new todo/note` and `edit todo/note`, both arms together, and check the longer title against the modal's fixed width
+- [x] 3.4 Leave the CLI, the config key, the socket API and the protocol named `todo`
 
 ## 4. Tests
 

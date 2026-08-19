@@ -39,9 +39,15 @@ activating a row travels to that pane without anyone having to read an address.
 A todo link chip SHALL continue to carry its identifier, because a chip is a
 destination the user may want to address rather than a group being read.
 
-The board SHALL be titled `todos/notes`. What a pane records is a next step as
-often as it is a task, and a title naming only one of them tells the user the
-other does not belong there.
+The board SHALL be titled `todos/notes`, and the overlay that composes or edits
+an entry SHALL name it the same way. What a pane records is a next step as often
+as it is a task, and a title naming only one of them tells the user the other
+does not belong there.
+
+One requirement owns both titles deliberately, even though the overlay belongs
+to the editing surface: they are one decision about what the feature is called,
+and stating them apart is how they drift into naming it a note while it is
+composed and a todo the moment it is reopened.
 
 The board SHALL support moving the selection, toggling done, opening a todo for
 editing, following a todo's link, removing a todo, clearing done todos, and
@@ -93,6 +99,11 @@ SHALL read the same store, so a todo presents identically in either.
 
 - **WHEN** a pane carries no label of its own
 - **THEN** its heading names the space alone rather than rendering an empty part
+
+#### Scenario: The compose and edit overlay is named like the board
+
+- **WHEN** the overlay opens to compose a new entry, or to edit an existing one
+- **THEN** its title names both a todo and a note, as the board's does
 
 #### Scenario: Groups are separated and their todos indented
 
