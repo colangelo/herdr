@@ -25,6 +25,7 @@ pub(crate) struct TabBarView {
     pub scroll_left_hit_area: Rect,
     pub scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
+    pub todo_hit_area: Rect,
     pub notification_hit_area: Rect,
 }
 
@@ -33,13 +34,33 @@ pub(crate) fn notification_indicator_width(unread: usize) -> u16 {
     display_width_u16(&notification_indicator_label(unread))
 }
 
+/// The tab bar's two trailing indicators speak the fork's modified-letter
+/// glyph language — the sidebar prefix badge (`Ᵽ`) set the precedent: `и` is a
+/// mirrored N for notifications, `τ` a Greek t for todos. The per-pane border
+/// indicator keeps `▾`; it marks a place on a pane, not an entry point in the
+/// chrome.
 pub(super) fn notification_indicator_label(unread: usize) -> String {
     if unread == 0 {
-        " ◆ ".to_string()
+        " и ".to_string()
     } else if unread > 99 {
-        " ◆ 99+ ".to_string()
+        " и 99+ ".to_string()
     } else {
-        format!(" ◆ {unread} ")
+        format!(" и {unread} ")
+    }
+}
+
+/// Width of the todo indicator for the given outstanding count.
+pub(crate) fn todo_indicator_width(outstanding: usize) -> u16 {
+    display_width_u16(&todo_indicator_label(outstanding))
+}
+
+pub(super) fn todo_indicator_label(outstanding: usize) -> String {
+    if outstanding == 0 {
+        " τ ".to_string()
+    } else if outstanding > 99 {
+        " τ 99+ ".to_string()
+    } else {
+        format!(" τ {outstanding} ")
     }
 }
 
@@ -199,14 +220,16 @@ pub(crate) fn compute_tab_bar_view(
     follow_active: bool,
     mouse_chrome: bool,
     notification_width: u16,
+    todo_width: u16,
 ) -> TabBarView {
     if area.width == 0 || area.height == 0 {
         return TabBarView::default();
     }
 
-    // The notification indicator claims the far right of the bar before any
+    // The trailing indicators claim the far right of the bar before any
     // tab/new-tab/scroll layout so those controls shift left instead of
-    // overlapping it.
+    // overlapping them: the notification indicator outermost, the todo
+    // indicator immediately left of it.
     let notification_width = notification_width.min(area.width);
     let notification_hit_area = Rect::new(
         area.x + area.width - notification_width,
@@ -214,9 +237,22 @@ pub(crate) fn compute_tab_bar_view(
         notification_width,
         1,
     );
-    let area = Rect::new(area.x, area.y, area.width - notification_width, area.height);
+    let todo_width = todo_width.min(area.width - notification_width);
+    let todo_hit_area = Rect::new(
+        area.x + area.width - notification_width - todo_width,
+        area.y,
+        todo_width,
+        1,
+    );
+    let area = Rect::new(
+        area.x,
+        area.y,
+        area.width - notification_width - todo_width,
+        area.height,
+    );
     let mut view = compute_tab_controls_view(ws, area, current_scroll, follow_active, mouse_chrome);
     view.notification_hit_area = notification_hit_area;
+    view.todo_hit_area = todo_hit_area;
     view
 }
 
@@ -244,6 +280,7 @@ fn compute_tab_controls_view(
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
+            todo_hit_area: Rect::default(),
             notification_hit_area: Rect::default(),
         };
     }
@@ -271,6 +308,7 @@ fn compute_tab_controls_view(
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area,
+            todo_hit_area: Rect::default(),
             notification_hit_area: Rect::default(),
         };
     }
@@ -316,6 +354,7 @@ fn compute_tab_controls_view(
         scroll_left_hit_area: left_hit_area,
         scroll_right_hit_area: right_hit_area,
         new_tab_hit_area,
+        todo_hit_area: Rect::default(),
         notification_hit_area: Rect::default(),
     }
 }
@@ -490,6 +529,24 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         );
     }
 
+    // The todo indicator is tab-bar-only (no floating variant), colored by
+    // the highest outstanding priority — the border indicator's rule — so the
+    // corner and the pane never disagree about urgency.
+    if app.view.todo_hit_area.width > 0 {
+        let (outstanding, highest) = app.session_outstanding_todos();
+        let style = if outstanding > 0 {
+            Style::default()
+                .fg(app.pane_todo_indicator_color(highest))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.overlay1)
+        };
+        frame.render_widget(
+            Paragraph::new(todo_indicator_label(outstanding)).style(style),
+            app.view.todo_hit_area,
+        );
+    }
+
     // With the bottom-right center position the hit area is the floating
     // bottom-of-frame indicator, drawn by the notification_center module.
     let indicator_in_tab_bar = app.notification_center_position
@@ -594,8 +651,15 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view =
-            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            0,
+            0,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -630,7 +694,7 @@ mod tests {
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 60, 1);
         let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false, 0);
+        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false, 0, 0);
         app.view.tab_hit_areas = view.tab_hit_areas.clone();
 
         let backend = TestBackend::new(60, 1);
@@ -665,7 +729,7 @@ mod tests {
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);
         let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false, 0);
+        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false, 0, 0);
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(40, 1);
@@ -697,7 +761,7 @@ mod tests {
         let wide_enough = Rect::new(0, 0, MIN_TAB_STRIP_WIDTH + 2, 1);
         let content = tab_bar_content_area(&app, wide_enough);
         assert_eq!(content.width, MIN_TAB_STRIP_WIDTH);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, true, 0);
+        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, true, 0, 0);
         assert!(view.tab_hit_areas[0].width >= MIN_TAB_WIDTH);
     }
 
@@ -727,6 +791,7 @@ mod tests {
             true,
             true,
             0,
+            0,
         );
         assert!(view.tab_hit_areas[0].width > 0);
         assert!(view.new_tab_hit_area.width > 0);
@@ -741,8 +806,15 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view =
-            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            0,
+            0,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -772,8 +844,15 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view =
-            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            0,
+            0,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -798,8 +877,15 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view =
-            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            0,
+            0,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -839,6 +925,7 @@ mod tests {
             true,
             true,
             notification_indicator_width(app.notification_log.unread_count()),
+            0,
         );
         assert_eq!(view.notification_hit_area.width, 5);
         assert_eq!(
@@ -857,14 +944,58 @@ mod tests {
             .unwrap();
 
         let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
-        assert!(row.contains("◆ 2"), "tab row: {row:?}");
+        assert!(row.contains("и 2"), "tab row: {row:?}");
     }
 
     #[test]
     fn tab_bar_indicator_without_unread_is_icon_only() {
         assert_eq!(notification_indicator_width(0), 3);
-        assert_eq!(notification_indicator_label(0), " ◆ ");
-        assert_eq!(notification_indicator_label(150), " ◆ 99+ ");
+        assert_eq!(notification_indicator_label(0), " и ");
+        assert_eq!(notification_indicator_label(150), " и 99+ ");
+    }
+
+    #[test]
+    fn todo_indicator_labels_mirror_the_notification_grammar() {
+        assert_eq!(todo_indicator_width(0), 3);
+        assert_eq!(todo_indicator_label(0), " τ ");
+        assert_eq!(todo_indicator_label(5), " τ 5 ");
+        assert_eq!(todo_indicator_label(150), " τ 99+ ");
+    }
+
+    /// The two trailing indicators share the corner: notifications outermost,
+    /// todos immediately left, disjoint, and both taken out of the tab strip.
+    #[test]
+    fn todo_indicator_sits_left_of_the_notification_indicator() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            true,
+            notification_indicator_width(2),
+            todo_indicator_width(5),
+        );
+        assert_eq!(
+            view.notification_hit_area.x + view.notification_hit_area.width,
+            40,
+            "notifications keep the right edge"
+        );
+        assert_eq!(
+            view.todo_hit_area.x + view.todo_hit_area.width,
+            view.notification_hit_area.x,
+            "todos sit flush against the notification indicator's left edge"
+        );
+        assert_eq!(view.todo_hit_area.width, todo_indicator_width(5));
+        assert!(
+            view.tab_hit_areas
+                .iter()
+                .all(|rect| rect.x + rect.width <= view.todo_hit_area.x),
+            "the tab strip stops short of the indicators"
+        );
     }
 
     #[test]
@@ -896,8 +1027,15 @@ mod tests {
         app.active = Some(0);
         app.workspaces = vec![ws];
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view =
-            compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false, 0);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            0,
+            0,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);

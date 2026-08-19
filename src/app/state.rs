@@ -789,6 +789,7 @@ pub struct ViewState {
     pub tab_scroll_left_hit_area: Rect,
     pub tab_scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
+    pub todo_hit_area: Rect,
     pub notification_hit_area: Rect,
     pub terminal_area: Rect,
     pub mobile_header_rect: Rect,
@@ -2654,6 +2655,23 @@ impl AppState {
     /// Open the session todo board. The projection is taken here, once, and
     /// the selection starts on the first todo rather than on the heading above
     /// it.
+    /// The session-wide outstanding todo count and the highest priority among
+    /// them, for the tab bar's todo indicator. One fold over the terminals
+    /// map, no allocation: this runs once per rendered frame, beside pane
+    /// borders that already read the same per-terminal todo state.
+    pub(crate) fn session_outstanding_todos(
+        &self,
+    ) -> (usize, Option<crate::terminal::todo::TodoPriority>) {
+        self.terminals
+            .values()
+            .fold((0, None), |(count, highest), terminal| {
+                (
+                    count + terminal.outstanding_todo_count(),
+                    highest.max(terminal.highest_outstanding_todo_priority()),
+                )
+            })
+    }
+
     pub(crate) fn open_todo_board(&mut self) {
         let items = self.todo_board_items();
         self.open_overlay(crate::app::state::Overlay::TodoBoard(TodoBoardState::new(
@@ -3283,6 +3301,7 @@ impl AppState {
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
+                todo_hit_area: Rect::default(),
                 notification_hit_area: Rect::default(),
                 terminal_area: Rect::default(),
                 mobile_header_rect: Rect::default(),

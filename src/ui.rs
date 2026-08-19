@@ -130,7 +130,10 @@ pub(crate) use self::{
     },
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
-    tabs::{compute_tab_bar_view, notification_indicator_width, tab_bar_content_area},
+    tabs::{
+        compute_tab_bar_view, notification_indicator_width, tab_bar_content_area,
+        todo_indicator_width,
+    },
     widgets::{centered_popup_rect, modal_stack_areas, FOOTER_ROWS},
 };
 // The indicator's cells have exactly one definition; the pane renderer reaches
@@ -363,6 +366,8 @@ fn compute_view_internal(
     let indicator_width = notification_indicator_width(app.notification_log.unread_count());
     let indicator_in_tab_bar = app.notification_center_position
         == crate::config::NotificationCenterPositionConfig::TopRight;
+    let (outstanding_todos, _) = app.session_outstanding_todos();
+    let todo_width = todo_indicator_width(outstanding_todos);
     let tab_bar_view = app
         .active
         .and_then(|ws_idx| app.workspaces.get(ws_idx))
@@ -378,6 +383,7 @@ fn compute_view_internal(
                 } else {
                     0
                 },
+                todo_width,
             )
         })
         .unwrap_or_default();
@@ -427,6 +433,7 @@ fn compute_view_internal(
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
+        todo_hit_area: tab_bar_view.todo_hit_area,
         notification_hit_area,
         terminal_area,
         mobile_header_rect: Rect::default(),
@@ -491,6 +498,7 @@ fn compute_mobile_view(
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
         new_tab_hit_area: Rect::default(),
+        todo_hit_area: Rect::default(),
         notification_hit_area: Rect::default(),
         terminal_area,
         mobile_header_rect: header_rect,

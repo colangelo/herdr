@@ -725,7 +725,7 @@ impl PaneTodoIndicatorState {
 /// `▾ N` for N outstanding todos and a bare `▾` otherwise. Every pane gets one
 /// so the control sits in the same place on all of them; the empty and
 /// all-done states are told apart by [`PaneTodoIndicatorState::color`], not by
-/// width. Same spacing grammar as the notification `◆`. The count is at most
+/// width. Same spacing grammar as the notification `и`. The count is at most
 /// two digits because `add_todo` caps a pane at `MAX_TODOS_PER_PANE` (50).
 fn pane_todo_indicator_label(state: PaneTodoIndicatorState) -> String {
     match state {
