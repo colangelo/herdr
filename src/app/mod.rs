@@ -237,6 +237,13 @@ pub(crate) enum TerminalInputContext {
     /// non-terminal context for the same reason, and a distinct one from
     /// `Copy` so a transition between the two modes still stops the repeats.
     AppScroll,
+    /// Every other mode — the overlays, prefix, onboarding — holds a context
+    /// keyed by the mode itself, so a held key repeats inside an overlay (list
+    /// motion, text-field typing) exactly as it does in a pane, and the press
+    /// that moves between overlays changes the context and stops the repeats.
+    /// Without this the lease table saw no context at all for an overlay and
+    /// suppressed every repeat: the first press worked, holding did nothing.
+    Ui(Mode),
 }
 
 impl TerminalInputContext {
@@ -1901,7 +1908,7 @@ impl App {
         } else if self.state.mode == Mode::AppScroll {
             Some(TerminalInputContext::AppScroll)
         } else {
-            None
+            Some(TerminalInputContext::Ui(self.state.mode))
         }
     }
 
@@ -2345,6 +2352,143 @@ mod tests {
         );
         assert!(other_rx.try_recv().is_err());
         assert!(app.input_leases.is_empty());
+    }
+
+    /// A one-pane app whose pane carries `count` todos, for driving overlay
+    /// input through the full client-event path — leases included.
+    fn app_with_pane_todos(count: usize) -> (App, crate::layout::PaneId) {
+        let mut app = test_app();
+        let workspace = Workspace::test_new("todos");
+        let pane = workspace.focused_pane_id().unwrap();
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[0]
+            .pane_state(pane)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).expect("terminal");
+        for i in 0..count {
+            terminal
+                .add_todo(
+                    &format!("todo {i}"),
+                    crate::terminal::todo::TodoPriority::Normal,
+                    None,
+                    100,
+                )
+                .expect("todo should be added");
+        }
+        (app, pane)
+    }
+
+    /// Regression: holding an arrow in an overlay did nothing past the first
+    /// press. Every overlay mode mapped to no input context, so the lease
+    /// table suppressed the held key's repeats — in every overlay, while the
+    /// pane, copy mode and app-scroll all repeated fine.
+    #[tokio::test]
+    async fn held_key_repeats_move_the_todo_board_selection() {
+        let (mut app, _) = app_with_pane_todos(3);
+        app.state.open_todo_board();
+        assert_eq!(app.state.todo_board().expect("board").list.selected, 1);
+
+        app.route_client_events(
+            vec![raw_key(
+                KeyCode::Down,
+                KeyModifiers::empty(),
+                KeyEventKind::Press,
+            )],
+            false,
+        );
+        assert_eq!(app.state.todo_board().expect("board").list.selected, 2);
+
+        app.route_client_events(
+            vec![raw_key(
+                KeyCode::Down,
+                KeyModifiers::empty(),
+                KeyEventKind::Repeat,
+            )],
+            false,
+        );
+        assert_eq!(
+            app.state.todo_board().expect("board").list.selected,
+            3,
+            "the held key's repeat moves the selection exactly as a press does"
+        );
+    }
+
+    /// The same regression in a text field: holding a character (or backspace,
+    /// or an arrow) in the todo editor emitted only the initial press.
+    #[tokio::test]
+    async fn held_key_repeats_type_into_the_todo_editor() {
+        let (mut app, pane) = app_with_pane_todos(0);
+        app.state.open_new_pane_todo(pane);
+
+        app.route_client_events(
+            vec![
+                raw_key(
+                    KeyCode::Char('x'),
+                    KeyModifiers::empty(),
+                    KeyEventKind::Press,
+                ),
+                raw_key(
+                    KeyCode::Char('x'),
+                    KeyModifiers::empty(),
+                    KeyEventKind::Repeat,
+                ),
+            ],
+            false,
+        );
+        assert_eq!(
+            app.state.pane_todo_edit().expect("editor").text.text(),
+            "xx",
+            "the repeat types exactly as the press did"
+        );
+    }
+
+    /// The transition guard the pane and copy mode already have, now for
+    /// overlays: a press that moves between overlays changes the input
+    /// context, so the held key's remaining repeats die with the overlay they
+    /// were pressed in rather than replaying into the one it opened.
+    #[tokio::test]
+    async fn repeats_do_not_cross_an_overlay_transition() {
+        let (mut app, _) = app_with_pane_todos(1);
+        app.state.open_todo_board();
+
+        // `e` on the board opens the editor on the selected todo...
+        app.route_client_events(
+            vec![raw_key(
+                KeyCode::Char('e'),
+                KeyModifiers::empty(),
+                KeyEventKind::Press,
+            )],
+            false,
+        );
+        let before = app
+            .state
+            .pane_todo_edit()
+            .expect("the editor opened")
+            .text
+            .text()
+            .to_string();
+
+        // ...so the key's still-held repeats belong to the board, not to the
+        // editor's text field.
+        app.route_client_events(
+            vec![raw_key(
+                KeyCode::Char('e'),
+                KeyModifiers::empty(),
+                KeyEventKind::Repeat,
+            )],
+            false,
+        );
+        assert_eq!(
+            app.state.pane_todo_edit().expect("editor").text.text(),
+            before,
+            "a repeat from before the transition must not type into the editor"
+        );
     }
 
     fn release_notes_state() -> state::ReleaseNotesState {
@@ -4530,7 +4674,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeat_key_events_are_ignored_outside_terminal_mode() {
+    async fn untracked_repeats_dispatch_into_the_open_overlay() {
+        // The mirror of `copy_mode_honors_repeat_without_suppressing`: an
+        // overlay holds a stable context now, so a repeat whose press predates
+        // tracking dispatches like a press instead of being dropped. Repeats
+        // that must NOT act — the ones from a press that changed context —
+        // are the tracked case, covered by
+        // `repeats_do_not_cross_an_overlay_transition`.
         let mut app = test_app();
         app.state.mode = Mode::ReleaseNotes;
         app.state
@@ -4546,9 +4696,13 @@ mod tests {
             ))
             .await;
 
-        assert!(!handled);
-        assert_eq!(app.state.mode, Mode::ReleaseNotes);
-        assert!(app.state.release_notes().is_some());
+        assert!(handled);
+        assert_ne!(
+            app.state.mode,
+            Mode::ReleaseNotes,
+            "the repeat dismissed the release notes exactly as a press would"
+        );
+        assert!(app.state.release_notes().is_none());
     }
 
     #[tokio::test]
@@ -4605,9 +4759,20 @@ mod tests {
         // It stays on the app-level key path, not the pane-forwarding one.
         assert!(!TerminalInputContext::AppScroll.routes_to_terminal());
 
-        // Prefix mode still yields no context, so modal keys cannot repeat.
+        // Prefix — like every overlay mode — holds a context keyed by the
+        // mode, distinct from every other, so held keys repeat inside it and
+        // any transition (a prefix binding firing always is one) stops them.
         app.state.mode = Mode::Prefix;
-        assert_eq!(app.terminal_input_context(), None);
+        assert_eq!(
+            app.terminal_input_context(),
+            Some(TerminalInputContext::Ui(Mode::Prefix))
+        );
+        app.state.mode = Mode::PaneTodoEdit;
+        assert_eq!(
+            app.terminal_input_context(),
+            Some(TerminalInputContext::Ui(Mode::PaneTodoEdit))
+        );
+        assert!(!TerminalInputContext::Ui(Mode::PaneTodoEdit).routes_to_terminal());
     }
 
     #[tokio::test]
