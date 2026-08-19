@@ -79,13 +79,16 @@ fn render_name_input_field(app: &AppState, frame: &mut Frame, input_rect: Rect) 
     frame.set_cursor_position((caret_x, input_rect.y));
 }
 
-pub(crate) const PANE_TODO_EDIT_POPUP_WIDTH: u16 = 60;
-pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 14;
+/// Sized for reading: at 84 columns the text block holds ~80, so even a todo
+/// at the store's 500-character cap wraps to about seven rows and is mostly
+/// visible at once in the eight-row block.
+pub(crate) const PANE_TODO_EDIT_POPUP_WIDTH: u16 = 84;
+pub(crate) const PANE_TODO_EDIT_POPUP_HEIGHT: u16 = 20;
 
-/// How many lines of a todo the modal shows at once. A todo is a note, not a
-/// document, so the block is bounded and scrolls rather than growing the modal
-/// to fit whatever was pasted into it.
-pub(crate) const PANE_TODO_EDIT_INPUT_ROWS: u16 = 3;
+/// How many wrapped rows of a todo the modal shows at once. A todo is a note,
+/// not a document, so the block is bounded and scrolls rather than growing
+/// the modal to fit whatever was pasted into it.
+pub(crate) const PANE_TODO_EDIT_INPUT_ROWS: u16 = 8;
 
 /// One column of padding at each edge of the input block, matching the `" "`
 /// every other modal row is prefixed with.
@@ -141,22 +144,21 @@ pub(crate) fn pane_todo_edit_rects(inner: Rect) -> Option<PaneTodoEditRects> {
     })
 }
 
-/// Which of the field's lines the input block starts at: the least it can
+/// Which wrapped visual row the input block starts at: the least it can
 /// scroll and still show the cursor. Derived rather than stored, so the view
-/// cannot drift out of step with the cursor.
-pub(crate) fn pane_todo_edit_line_scroll(field: &TextField, rows: u16) -> usize {
-    field
-        .cursor_line()
-        .saturating_sub(rows.max(1).saturating_sub(1) as usize)
-}
-
-/// Display columns the input block's text is shifted left by, so the cursor
-/// stays visible on a line wider than the block. Applied to every row, not
-/// just the cursor's, so the lines stay aligned with each other.
-pub(crate) fn pane_todo_edit_column_scroll(field: &TextField, width: u16) -> usize {
-    field
-        .cursor_column()
-        .saturating_sub(width.max(1).saturating_sub(1) as usize)
+/// cannot drift out of step with the cursor. There is no horizontal
+/// counterpart — wrapping is what removed it.
+pub(crate) fn pane_todo_edit_row_scroll(
+    rows: &[crate::ui::text_wrap::WrappedRow],
+    field: &TextField,
+    visible_rows: u16,
+) -> usize {
+    let (caret_row, _) = crate::ui::text_wrap::caret_visual_position(
+        rows,
+        field.cursor_line(),
+        field.cursor_column(),
+    );
+    caret_row.saturating_sub(visible_rows.max(1).saturating_sub(1) as usize)
 }
 
 /// The part of the input block that holds the todo itself, once its padding is
@@ -171,31 +173,27 @@ pub(crate) fn pane_todo_edit_text_area(input: Rect) -> Rect {
     )
 }
 
-/// One rendered row of the input block: the visible slice of `line`, with the
-/// character under the cursor picked out when the cursor is on this line.
+/// One rendered row of the input block: a wrapped slice of one logical line,
+/// with the character under the cursor picked out when the cursor is on this
+/// visual row.
 fn input_row_line(
-    line: &str,
-    column_scroll: usize,
-    width: usize,
+    slice: &str,
     cursor_column: Option<usize>,
     text_style: Style,
     cursor_style: Style,
 ) -> Line<'static> {
     let (mut before, mut under, mut after) = (String::new(), String::new(), String::new());
     let mut column = 0usize;
-    for ch in line.chars() {
+    for ch in slice.chars() {
         let start = column;
         column += crate::ui::text::char_display_width(ch);
-        if start < column_scroll || start - column_scroll >= width {
-            continue;
-        }
         match cursor_column {
             Some(cursor) if start == cursor => under.push(ch),
             Some(cursor) if start < cursor => before.push(ch),
             _ => after.push(ch),
         }
     }
-    // At the end of a line there is no character to sit on, so the cursor
+    // At the end of a row there is no character to sit on, so the cursor
     // takes a blank cell — which is also where a fresh todo starts.
     if cursor_column.is_some() && under.is_empty() {
         under.push(' ');
@@ -251,20 +249,25 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
         .fg(app.palette.surface0)
         .bg(app.palette.accent);
     let text_area = pane_todo_edit_text_area(rects.input);
-    let line_scroll = pane_todo_edit_line_scroll(&edit.text, rects.input.height);
-    let column_scroll = pane_todo_edit_column_scroll(&edit.text, text_area.width);
-    let cursor_line = edit.text.cursor_line();
+    let wrapped = crate::ui::text_wrap::wrap_layout(edit.text.text(), text_area.width as usize);
+    let row_scroll = pane_todo_edit_row_scroll(&wrapped, &edit.text, rects.input.height);
+    let (caret_row, caret_col) = crate::ui::text_wrap::caret_visual_position(
+        &wrapped,
+        edit.text.cursor_line(),
+        edit.text.cursor_column(),
+    );
     let lines: Vec<&str> = edit.text.lines().collect();
     for row in 0..rects.input.height {
         let rect = Rect::new(rects.input.x, rects.input.y + row, rects.input.width, 1);
-        let idx = line_scroll + row as usize;
-        let line = lines.get(idx).copied().unwrap_or("");
+        let idx = row_scroll + row as usize;
+        let slice = wrapped
+            .get(idx)
+            .map(|wrapped_row| &lines[wrapped_row.line][wrapped_row.start..wrapped_row.end])
+            .unwrap_or("");
         frame.render_widget(
             Paragraph::new(input_row_line(
-                line,
-                column_scroll,
-                text_area.width as usize,
-                (idx == cursor_line).then(|| edit.text.cursor_column()),
+                slice,
+                (idx == caret_row).then_some(caret_col),
                 input_style,
                 cursor_style,
             ))
@@ -1840,26 +1843,45 @@ mod tests {
                 .collect::<String>()
         };
 
-        // Three lines fill the block exactly.
+        // Eight lines fill the block exactly.
+        let eight = (1..=8).map(|i| format!("line{i}")).collect::<Vec<_>>();
         if let Some(edit) = app.pane_todo_edit_mut() {
             edit.text =
-                TextField::from_text("one\ntwo\nthree", crate::terminal::todo::MAX_TODO_TEXT_LEN);
+                TextField::from_text(&eight.join("\n"), crate::terminal::todo::MAX_TODO_TEXT_LEN);
         }
-        assert!(render(&app, 0).contains("one"));
-        assert!(render(&app, 1).contains("two"));
-        assert!(render(&app, 2).contains("three"));
+        assert!(render(&app, 0).contains("line1"));
+        assert!(render(&app, 7).contains("line8"));
 
-        // A fourth scrolls the first out: the cursor lands on the last line,
-        // and the block shows the last three.
+        // A ninth scrolls the first out: the cursor lands on the last line,
+        // and the block shows the last eight.
         if let Some(edit) = app.pane_todo_edit_mut() {
             edit.text = TextField::from_text(
-                "one\ntwo\nthree\nfour",
+                &format!("{}\nline9", eight.join("\n")),
                 crate::terminal::todo::MAX_TODO_TEXT_LEN,
             );
         }
-        assert!(!render(&app, 0).contains("one"));
-        assert!(render(&app, 0).contains("two"));
-        assert!(render(&app, 2).contains("four"));
+        assert!(!render(&app, 0).contains("line1"));
+        assert!(render(&app, 0).contains("line2"));
+        assert!(render(&app, 7).contains("line9"));
+
+        // Prose wider than the block wraps onto the next row at a word
+        // boundary instead of sliding out of view to the right, and an
+        // explicit newline still starts its own row after the wrapped ones.
+        let wide = format!("{} tail\nsecond", "word ".repeat(20).trim_end());
+        if let Some(edit) = app.pane_todo_edit_mut() {
+            let mut field = TextField::from_text(&wide, crate::terminal::todo::MAX_TODO_TEXT_LEN);
+            field.place_cursor(0, 0);
+            edit.text = field;
+        }
+        let first = render(&app, 0);
+        let second = render(&app, 1);
+        assert!(first.contains("word"), "first row: {first:?}");
+        assert!(
+            first.trim_end().len() < rects.input.width as usize,
+            "the row breaks at a word, not at the edge: {first:?}"
+        );
+        assert!(second.contains("tail"), "wrapped remainder: {second:?}");
+        assert!(render(&app, 2).contains("second"), "hard newline survives");
     }
 
     /// The title used to start in the frame's first inner column while every
