@@ -16,4 +16,4 @@
 ## 4. Verification
 
 - [x] 4.1 `just check` green
-- [ ] 4.2 Dogfood on the `-ac-beta` channel, including referencing a shown id straight into `herdr todo done`
+- [x] 4.2 Dogfood on the `-ac-beta` channel, including referencing a shown id straight into `herdr todo done`

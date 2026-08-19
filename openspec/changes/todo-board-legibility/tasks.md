@@ -36,4 +36,4 @@ back out.
 ## 5. Verification
 
 - [x] 5.1 `just check` green
-- [ ] 5.2 Dogfood on the `-ac-beta` channel against a real multi-pane session
+- [x] 5.2 Dogfood on the `-ac-beta` channel against a real multi-pane session
