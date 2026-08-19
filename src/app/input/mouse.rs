@@ -1755,9 +1755,13 @@ impl AppState {
                         ))
                     })
                     .unwrap_or(0);
-                // Only the first line of a multi-line todo is ever drawn.
+                // Only the first line of a multi-line todo is ever drawn —
+                // plus the row's trailing `#id` and the space before it.
                 let text = todo.text.split('\n').next().unwrap_or_default();
-                crate::ui::text::display_width(text) + link_width
+                crate::ui::text::display_width(text)
+                    + link_width
+                    + crate::ui::text::display_width(&crate::ui::pane_todo_row_id_text(todo.id))
+                    + 1
             })
             .max()
             .unwrap_or(16);
@@ -1886,7 +1890,7 @@ impl AppState {
         };
         let public_id = self.pane_todo_link_public_id(todo);
         crate::ui::pane_todo_link_chip(
-            Rect::new(list.x, row, list.width, 1),
+            crate::ui::pane_todo_row_chip_area(Rect::new(list.x, row, list.width, 1), todo.id),
             public_id.as_deref(),
             &link.label,
         )
@@ -1947,11 +1951,16 @@ impl AppState {
                     // past the three-cell state glyph.
                     let text = todo.text.split('\n').next().unwrap_or_default();
                     // Todos are drawn indented from their heading, so the room
-                    // they need includes the indent they are pushed by.
+                    // they need includes the indent they are pushed by — and
+                    // their trailing `#id` plus the space before it.
                     crate::ui::TODO_BOARD_TODO_INDENT as usize
                         + 3
                         + crate::ui::text::display_width(text)
                         + link_width
+                        + crate::ui::text::display_width(&crate::ui::pane_todo_row_id_text(
+                            *todo_id,
+                        ))
+                        + 1
                 }
             })
             .max()
@@ -2021,8 +2030,16 @@ impl AppState {
         let Some(link) = todo.link.as_ref() else {
             return false;
         };
+        // The same indented rect the renderer draws the row into, so the
+        // chip's truncation — and therefore its cells — cannot drift.
+        let row_rect = Rect::new(
+            list.x + crate::ui::TODO_BOARD_TODO_INDENT,
+            row,
+            list.width.saturating_sub(crate::ui::TODO_BOARD_TODO_INDENT),
+            1,
+        );
         crate::ui::pane_todo_link_chip(
-            Rect::new(list.x, row, list.width, 1),
+            crate::ui::pane_todo_row_chip_area(row_rect, todo.id),
             self.pane_todo_link_public_id(&todo).as_deref(),
             &link.label,
         )
@@ -5880,9 +5897,13 @@ mod tests {
             .state
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
-        let (chip, _) =
-            crate::ui::pane_todo_link_chip(Rect::new(list.x, list.y, list.width, 1), None, "infra")
-                .expect("a linked row draws a chip");
+        let todo_id = app.state.pane_todos_in_display_order(pane_id)[0].id;
+        let (chip, _) = crate::ui::pane_todo_link_chip(
+            crate::ui::pane_todo_row_chip_area(Rect::new(list.x, list.y, list.width, 1), todo_id),
+            None,
+            "infra",
+        )
+        .expect("a linked row draws a chip");
         assert!(
             !rect_contains(chip, list.x + 4, list.y),
             "the body column must really miss the chip {chip:?}"

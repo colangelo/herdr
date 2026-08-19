@@ -93,7 +93,9 @@ use self::todo_panel::render_pane_todo_panel;
 // The chip's cells have exactly one definition, so a click can never land on
 // cells the renderer did not draw: the renderer reaches it inside the module
 // and the mouse hit-test reaches it through this re-export.
-pub(crate) use self::todo_panel::{pane_todo_link_chip, pane_todo_link_chip_text};
+pub(crate) use self::todo_panel::{
+    pane_todo_link_chip, pane_todo_link_chip_text, pane_todo_row_chip_area, pane_todo_row_id_text,
+};
 pub(crate) use self::{
     dialogs::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,

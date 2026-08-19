@@ -354,9 +354,9 @@ mod tests {
                 "│ todos/notes                                                              │",
                 "│                                                                          │",
                 "│ board · pane 1                                                           │",
-                "│   ▲ rerun the deploy                                                     │",
-                "│   ● check the 403                                                        │",
-                "│   ✓ archive the change                                                   │",
+                "│   ▲ rerun the deploy                                                   #1│",
+                "│   ● check the 403                                                      #2│",
+                "│   ✓ archive the change                                                 #3│",
                 "│                                                                          │",
                 "│          ↵ open pane    spc toggle    c clear done    esc close          │",
                 "└──────────────────────────────────────────────────────────────────────────┘",
@@ -399,10 +399,10 @@ mod tests {
                 "│ todos/notes                                                              │",
                 "│                                                                          │",
                 "│ board · pane 1                                                           │",
-                "│   ● rerun the deploy                                                     │",
+                "│   ● rerun the deploy                                                   #1│",
                 "│                                                                          │",
                 "│ board · pane 2                                                           │",
-                "│   ● check the 403                                                        │",
+                "│   ● check the 403                                                      #1│",
                 "│                                                                          │",
                 "│          ↵ open pane    spc toggle    c clear done    esc close          │",
                 "└──────────────────────────────────────────────────────────────────────────┘",
@@ -481,7 +481,18 @@ mod tests {
             Rect::new(panel_list.x, panel_list.y, panel_list.width, 1),
         );
 
-        assert_eq!(board_row.trim_end(), panel_row.trim_end());
+        // Each surface right-aligns the row's `#id` at its own width, so the
+        // comparison is of everything before it: glyph, text and chip.
+        let strip_id = |row: &str| row.trim_end().trim_end_matches("#1").trim_end().to_string();
+        assert!(
+            board_row.trim_end().ends_with("#1"),
+            "board row: {board_row:?}"
+        );
+        assert!(
+            panel_row.trim_end().ends_with("#1"),
+            "panel row: {panel_row:?}"
+        );
+        assert_eq!(strip_id(&board_row), strip_id(&panel_row));
     }
 
     /// The kit's footer convention: a blank row between the last entry and the

@@ -75,6 +75,22 @@ pub(crate) fn pane_todo_panel_button_rects(
 /// the captured label — `→ w2:pC · claude` — because the identifier is the part
 /// you can act on and the label is the part you recognise. A dead link has no
 /// identifier to lead with, so it keeps its label alone.
+/// The row's trailing identity, as rendered: `#<id>`. The `#` is display
+/// only — the CLI accepts the bare number — and marks the cells as an
+/// identity rather than a count, beside indicators that really are counts.
+pub(crate) fn pane_todo_row_id_text(todo_id: u64) -> String {
+    format!("#{todo_id}")
+}
+
+/// The part of a row the link chip may occupy: everything left of the id and
+/// the space before it. One definition for the renderer and both mouse
+/// hit-tests, so the chip cannot be drawn in one place and clicked in
+/// another.
+pub(crate) fn pane_todo_row_chip_area(row: Rect, todo_id: u64) -> Rect {
+    let reserved = display_width_u16(&pane_todo_row_id_text(todo_id)).saturating_add(1);
+    Rect::new(row.x, row.y, row.width.saturating_sub(reserved), row.height)
+}
+
 pub(crate) fn pane_todo_link_chip(
     row: Rect,
     public_id: Option<&str>,
@@ -157,10 +173,15 @@ pub(crate) fn render_pane_todo_row(
 ) {
     let p = &app.palette;
     let public_id = app.pane_todo_link_public_id(todo);
-    let chip = todo
-        .link
-        .as_ref()
-        .and_then(|link| pane_todo_link_chip(row_rect, public_id.as_deref(), &link.label));
+    let id_text = pane_todo_row_id_text(todo.id);
+    let id_width = display_width(&id_text);
+    let chip = todo.link.as_ref().and_then(|link| {
+        pane_todo_link_chip(
+            pane_todo_row_chip_area(row_rect, todo.id),
+            public_id.as_deref(),
+            &link.label,
+        )
+    });
     let chip_width = chip.as_ref().map(|(rect, _)| rect.width).unwrap_or(0) as usize;
 
     let (glyph_style, text_style, row_style) = if is_selected {
@@ -184,7 +205,7 @@ pub(crate) fn render_pane_todo_row(
         )
     };
 
-    let text_budget = (row_rect.width as usize).saturating_sub(3 + chip_width);
+    let text_budget = (row_rect.width as usize).saturating_sub(3 + chip_width + id_width + 1);
     let text = pane_todo_row_text(&todo.text, text_budget);
     let pad = text_budget.saturating_sub(display_width(&text));
     let line = Line::from(vec![
@@ -193,6 +214,23 @@ pub(crate) fn render_pane_todo_row(
         Span::styled(" ".repeat(pad), row_style),
     ]);
     frame.render_widget(Paragraph::new(line).style(row_style), row_rect);
+
+    // The identity claims the true right edge, chip beside it, so ids line up
+    // in one scannable column whether or not a row carries a link.
+    if (id_width as u16) < row_rect.width {
+        let id_rect = Rect::new(
+            row_rect.x + row_rect.width - id_width as u16,
+            row_rect.y,
+            id_width as u16,
+            1,
+        );
+        let id_style = if is_selected {
+            Style::default().fg(panel_contrast_fg(p)).bg(p.accent)
+        } else {
+            Style::default().fg(p.overlay0)
+        };
+        frame.render_widget(Paragraph::new(id_text).style(id_style), id_rect);
+    }
 
     if let Some((chip_rect, chip_text)) = chip {
         // A dead link keeps its captured label but reads as inert.
@@ -360,15 +398,15 @@ mod tests {
             test_support::SNAPSHOT_HEIGHT,
         )
         .assert(
-            Rect::new(26, 2, 54, 7),
+            Rect::new(23, 2, 57, 7),
             &[
-                "┌────────────────────────────────────────────────────┐",
-                "│ ▲ ship the overlay kit before the todo board lands │",
-                "│ ● write the rendered-layout tests first            │",
-                "│ ✓ read the plan                                    │",
-                "│                                                    │",
-                "│  a add    spc toggle    c clear done    esc close  │",
-                "└────────────────────────────────────────────────────┘",
+                "┌───────────────────────────────────────────────────────┐",
+                "│ ▲ ship the overlay kit before the todo board lands  #1│",
+                "│ ● write the rendered-layout tests first             #2│",
+                "│ ✓ read the plan                                     #3│",
+                "│                                                       │",
+                "│   a add    spc toggle    c clear done    esc close    │",
+                "└───────────────────────────────────────────────────────┘",
             ],
         );
     }
@@ -410,8 +448,8 @@ mod tests {
             Rect::new(4, 3, 30, 6),
             &[
                 "┌────────────────────────────┐",
-                "│ ▲ ship the kit             │",
-                "│ ✓ read the plan            │",
+                "│ ▲ ship the kit           #1│",
+                "│ ✓ read the plan          #2│",
                 "│                            │",
                 "│     a add    esc close     │",
                 "└────────────────────────────┘",
@@ -549,11 +587,16 @@ mod tests {
         let (list, _) = app
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
-        // Row 1: the linked todo, which is not the selected row.
+        // Row 1: the linked todo, which is not the selected row. The chip's
+        // area stops short of the row's trailing `#id`.
         let row = Rect::new(list.x, list.y + 1, list.width, 1);
         let public_id = app.pane_todo_link_public_id(&app.terminals[&terminal_id].todos()[0]);
-        let (chip, _) =
-            pane_todo_link_chip(row, public_id.as_deref(), "infra").expect("chip should fit");
+        let (chip, _) = pane_todo_link_chip(
+            super::pane_todo_row_chip_area(row, todo_id),
+            public_id.as_deref(),
+            "infra",
+        )
+        .expect("chip should fit");
         let buffer = draw(&app);
         assert!(row_text(&buffer, chip).contains('→'));
         assert_eq!(
@@ -629,10 +672,12 @@ mod tests {
         let (list, _) = app
             .pane_todo_panel_list_window()
             .expect("panel list window should exist");
-        // Row 1: the linked todo, which is not the selected row.
+        // Row 1: the linked todo, which is not the selected row. The chip's
+        // area stops short of the row's trailing `#id`.
         let row = Rect::new(list.x, list.y + 1, list.width, 1);
+        let chip_area = super::pane_todo_row_chip_area(row, todo_id);
         let (chip, text) =
-            pane_todo_link_chip(row, Some(&public_id), "infra").expect("chip should fit");
+            pane_todo_link_chip(chip_area, Some(&public_id), "infra").expect("chip should fit");
         assert_eq!(text, format!(" → {public_id} · infra "));
 
         // The drawn cells are the cells the hit-test is handed, so what looks
@@ -642,7 +687,7 @@ mod tests {
 
         link(&mut app, None, 400);
         let (dead_chip, dead_text) =
-            pane_todo_link_chip(row, None, "infra").expect("chip should fit");
+            pane_todo_link_chip(chip_area, None, "infra").expect("chip should fit");
         assert_eq!(dead_text, " → infra ", "no identifier to lead with");
         let buffer = draw(&app);
         assert_eq!(row_text(&buffer, dead_chip), dead_text);

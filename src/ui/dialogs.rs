@@ -216,10 +216,12 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
     // as often a note to self as a task. Both arms move together — naming the
     // thing a note while it is composed and a todo the moment you reopen it
     // would be worse than naming it neither.
-    let title = if edit.todo_id.is_some() {
-        "edit todo/note"
-    } else {
-        "new todo/note"
+    // Editing names the id — the same id a row shows and the CLI accepts —
+    // so what the modal changes is what was just read off the board. A new
+    // todo has no id until the store assigns one.
+    let title = match edit.todo_id {
+        Some(id) => format!("edit todo/note #{id}"),
+        None => "new todo/note".to_string(),
     };
     let Some(inner) = render_modal_shell(
         frame,
@@ -237,7 +239,7 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
     render_modal_header(
         frame,
         Rect::new(inner.x, inner.y, inner.width, 1),
-        title,
+        &title,
         &app.palette,
     );
 
