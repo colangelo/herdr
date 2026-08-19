@@ -2012,12 +2012,14 @@ impl AppState {
             } else {
                 0
             },
+            crate::ui::todo_indicator_width(self.session_outstanding_todos().0),
         );
         self.tab_scroll = layout.scroll;
         self.view.tab_hit_areas = layout.tab_hit_areas;
         self.view.tab_scroll_left_hit_area = layout.scroll_left_hit_area;
         self.view.tab_scroll_right_hit_area = layout.scroll_right_hit_area;
         self.view.new_tab_hit_area = layout.new_tab_hit_area;
+        self.view.todo_hit_area = layout.todo_hit_area;
         if indicator_in_tab_bar {
             // Bottom-right keeps the floating rect computed by compute_view;
             // it does not depend on tab bar geometry.
@@ -4039,6 +4041,50 @@ mod tests {
 
     /// A board that listed every pane to say "nothing here" would bury the
     /// todos it exists to show.
+    /// The tab-bar indicator's numbers: the count spans every space, and the
+    /// color rule reads the highest priority among what is outstanding — done
+    /// todos contribute neither.
+    #[test]
+    fn session_outstanding_todos_aggregate_across_spaces() {
+        use crate::terminal::todo::{TodoPriority, TodoUpdate};
+
+        let (mut state, first_root, _, second_root) = app_with_board_todos();
+        assert_eq!(
+            state.session_outstanding_todos(),
+            (3, Some(TodoPriority::High))
+        );
+
+        // Completing the high one drops both the count and the ceiling.
+        let high_id = state
+            .pane_todos_in_display_order(first_root)
+            .first()
+            .expect("the high todo sorts first")
+            .id;
+        let terminal_id = state.workspaces[0]
+            .pane_state(first_root)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .update_todo(
+                high_id,
+                TodoUpdate {
+                    done: Some(true),
+                    ..TodoUpdate::default()
+                },
+                200,
+            )
+            .expect("todo should be updated");
+        assert_eq!(
+            state.session_outstanding_todos(),
+            (2, Some(TodoPriority::Normal))
+        );
+        let _ = second_root;
+    }
+
     #[test]
     fn panes_holding_no_todos_contribute_no_heading_and_no_rows() {
         let (state, _, first_empty, _) = app_with_board_todos();

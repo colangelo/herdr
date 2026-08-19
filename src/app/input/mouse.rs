@@ -204,6 +204,24 @@ impl AppState {
             return None;
         }
 
+        // The todo indicator toggles the board the way the notification
+        // indicator toggles its panel, so the two corner controls read as one
+        // mechanism. Open and close go through the keybinding's own paths.
+        let todo_indicator_hit = matches!(
+            self.mode,
+            Mode::Terminal | Mode::Navigate | Mode::Resize | Mode::TodoBoard
+        ) && self.view.todo_hit_area.width > 0
+            && rect_contains(self.view.todo_hit_area, mouse.column, mouse.row);
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) && todo_indicator_hit {
+            if self.mode == Mode::TodoBoard {
+                self.close_todo_board();
+                leave_modal(self);
+            } else {
+                self.open_todo_board();
+            }
+            return None;
+        }
+
         // Placement is the whole trick: the indicator sits on a pane's top
         // border, and for every pane below the top of the layout
         // `find_border_at` treats that row as a split-drag hitbox. Answering
@@ -6054,6 +6072,41 @@ mod tests {
         app.state.open_todo_board();
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         (app, owner)
+    }
+
+    /// The tab-bar todo indicator is the board's mouse entry: one click opens
+    /// the board, a second click on the same cells closes it — the toggle the
+    /// notification indicator already taught the corner.
+    #[test]
+    fn clicking_the_todo_indicator_toggles_the_board() {
+        let (mut app, _) = app_for_todo_board();
+        // The fixture opens the board; start from the closed state the same
+        // way the real close paths leave it — overlay gone AND mode restored.
+        app.state.close_todo_board();
+        leave_modal(&mut app.state);
+        assert_eq!(app.state.mode, Mode::Terminal);
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let hit = app.state.view.todo_hit_area;
+        assert!(hit.width > 0, "the indicator is laid out");
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y),
+        );
+        assert!(
+            app.state.todo_board().is_some(),
+            "the first click opens the board"
+        );
+
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y),
+        );
+        assert!(
+            app.state.todo_board().is_none(),
+            "the second click closes it"
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     /// The row's own meaning on the board is its owner, so a click travels

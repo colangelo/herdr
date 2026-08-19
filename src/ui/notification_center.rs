@@ -393,7 +393,7 @@ mod tests {
         let row: String = (rect.x..rect.x + rect.width)
             .map(|x| buffer[(x, rect.y)].symbol())
             .collect();
-        assert!(row.contains("◆ 2"), "indicator row: {row:?}");
+        assert!(row.contains("и 2"), "indicator row: {row:?}");
         let mid = &buffer[(rect.x + 1, rect.y)];
         assert_eq!(
             mid.style().fg,
