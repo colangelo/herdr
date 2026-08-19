@@ -214,10 +214,14 @@ pub(super) fn render_pane_todo_edit_overlay(app: &AppState, frame: &mut Frame, a
     };
     super::dim_background(frame, area);
 
+    // `todo/note` in both, matching the session board: what a pane records is
+    // as often a note to self as a task. Both arms move together — naming the
+    // thing a note while it is composed and a todo the moment you reopen it
+    // would be worse than naming it neither.
     let title = if edit.todo_id.is_some() {
-        "edit todo"
+        "edit todo/note"
     } else {
-        "new todo"
+        "new todo/note"
     };
     let Some(inner) = render_modal_shell(
         frame,
@@ -1893,7 +1897,7 @@ mod tests {
             row.x + text.find(needle).expect("row should hold its label") as u16
         };
 
-        let title_x = column_of(Rect::new(inner.x, inner.y, inner.width, 1), "new todo");
+        let title_x = column_of(Rect::new(inner.x, inner.y, inner.width, 1), "new todo/note");
         let priority_x = column_of(rects.priority, "priority");
 
         assert!(
