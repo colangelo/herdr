@@ -11,7 +11,7 @@ use super::sidebar::{
     next_entry_is_indented_workspace, workspace_list_entries_expanded, AgentPanelEntry,
     WorkspaceListEntry,
 };
-use super::status::{state_icon, state_icon_symbol};
+use super::status::state_icon;
 use super::text::{display_width_u16, truncate_end};
 use crate::app::state::{Palette, ToastKind, ToastNotification};
 use crate::app::AppState;
@@ -327,7 +327,12 @@ fn render_header_status(
     };
 
     let (state, seen) = ws.display_state(&app.terminals);
-    let (dot, dot_style) = state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
+    let (dot, dot_style) = state_icon(
+        state,
+        seen,
+        &app.state_icon_symbols(),
+        &app.state_icon_colors(),
+    );
     let tab_label = mobile_tab_status(ws);
     let row1 = Rect::new(area.x, area.y, area.width, 1);
     let tab_w = display_width_u16(&tab_label)
@@ -410,7 +415,7 @@ fn render_switch_button(app: &AppState, frame: &mut Frame, area: Rect) {
         let (symbol, style) = state_icon(
             AgentState::Blocked,
             true,
-            app.status_indicators,
+            &app.state_icon_symbols(),
             &app.state_icon_colors(),
         );
         frame.buffer_mut()[(bx, area.y)]
@@ -542,7 +547,7 @@ fn render_mobile_switcher_content(
             let (icon, icon_style) = state_icon(
                 entry.state,
                 entry.seen,
-                app.status_indicators,
+                &app.state_icon_symbols(),
                 &app.state_icon_colors(),
             );
             let title = Line::from(vec![
@@ -607,8 +612,12 @@ fn render_mobile_switcher_content(
         let selected = *ws_idx == app.selected;
         let bg = mobile_item_bg(selected, active, p);
         let (state, seen) = ws.display_state(&app.terminals);
-        let (dot, dot_style) =
-            state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
+        let (dot, dot_style) = state_icon(
+            state,
+            seen,
+            &app.state_icon_symbols(),
+            &app.state_icon_colors(),
+        );
 
         let mut title_spans = vec![Span::styled("  ", Style::default().bg(bg))];
         // Worktrees of the same space render as branches off their parent, so a
@@ -1026,6 +1035,7 @@ enum SummaryTone {
 fn agent_summary_segments(
     counts: GlobalAgentCounts,
     indicator_style: StatusIndicatorStyle,
+    symbols: &crate::app::state::StateIconSymbols<'_>,
 ) -> Vec<(String, SummaryTone)> {
     if counts.total() == 0 {
         return vec![("no agents".to_string(), SummaryTone::Muted)];
@@ -1038,6 +1048,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                symbols,
                 AgentState::Blocked,
                 true,
                 Some("◉"),
@@ -1051,6 +1062,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                symbols,
                 AgentState::Idle,
                 false,
                 Some("●"),
@@ -1064,6 +1076,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                symbols,
                 AgentState::Working,
                 true,
                 None,
@@ -1077,6 +1090,7 @@ fn agent_summary_segments(
         segments.push((
             agent_summary_text(
                 indicator_style,
+                symbols,
                 AgentState::Idle,
                 true,
                 None,
@@ -1091,6 +1105,7 @@ fn agent_summary_segments(
 
 fn agent_summary_text(
     indicator_style: StatusIndicatorStyle,
+    symbols: &crate::app::state::StateIconSymbols<'_>,
     state: AgentState,
     seen: bool,
     dot_style_symbol: Option<&str>,
@@ -1099,7 +1114,7 @@ fn agent_summary_text(
 ) -> String {
     let symbol = match indicator_style {
         StatusIndicatorStyle::Dots => dot_style_symbol,
-        StatusIndicatorStyle::Symbols => Some(state_icon_symbol(state, seen, indicator_style)),
+        StatusIndicatorStyle::Symbols => Some(symbols.symbol(state, seen)),
     };
     match symbol {
         Some(symbol) => format!("{symbol} {count} {label}"),
@@ -1131,7 +1146,11 @@ fn fit_summary_segments(
 }
 
 fn agent_summary_line(app: &AppState, p: &Palette, max_width: u16) -> Line<'static> {
-    let segments = agent_summary_segments(global_agent_counts(app), app.status_indicators);
+    let segments = agent_summary_segments(
+        global_agent_counts(app),
+        app.status_indicators,
+        &app.state_icon_symbols(),
+    );
     let (shown, truncated) = fit_summary_segments(segments, max_width as usize);
 
     let mut spans = vec![Span::styled(" ", Style::default().bg(p.panel_bg))];
@@ -1282,7 +1301,11 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let segments = agent_summary_segments(counts, StatusIndicatorStyle::Dots);
+        let segments = agent_summary_segments(
+            counts,
+            StatusIndicatorStyle::Dots,
+            &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Dots),
+        );
         let labels: Vec<&str> = segments.iter().map(|(text, _)| text.as_str()).collect();
         assert_eq!(
             labels,
@@ -1299,10 +1322,14 @@ mod tests {
             working: 2,
             idle: 1,
         };
-        let labels: Vec<String> = agent_summary_segments(counts, StatusIndicatorStyle::Symbols)
-            .into_iter()
-            .map(|(text, _)| text)
-            .collect();
+        let labels: Vec<String> = agent_summary_segments(
+            counts,
+            StatusIndicatorStyle::Symbols,
+            &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Symbols),
+        )
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
         assert_eq!(
             labels,
             ["× 2 blocked", "□ 1 done", "◐ 2 working", "✓ 1 idle"]
@@ -1344,10 +1371,14 @@ mod tests {
             working: 2,
             ..Default::default()
         };
-        let labels: Vec<String> = agent_summary_segments(counts, StatusIndicatorStyle::Dots)
-            .into_iter()
-            .map(|(text, _)| text)
-            .collect();
+        let labels: Vec<String> = agent_summary_segments(
+            counts,
+            StatusIndicatorStyle::Dots,
+            &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Dots),
+        )
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
         assert_eq!(
             labels,
             vec!["● 1 done".to_string(), "2 working".to_string()]
@@ -1361,7 +1392,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            agent_summary_segments(counts, StatusIndicatorStyle::Dots),
+            agent_summary_segments(
+                counts,
+                StatusIndicatorStyle::Dots,
+                &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Dots),
+            ),
             vec![("all idle".to_string(), SummaryTone::Muted)]
         );
     }
@@ -1375,7 +1410,11 @@ mod tests {
             idle: 1,
         };
         let (shown, truncated) = fit_summary_segments(
-            agent_summary_segments(counts, StatusIndicatorStyle::Dots),
+            agent_summary_segments(
+                counts,
+                StatusIndicatorStyle::Dots,
+                &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Dots),
+            ),
             24,
         );
         let labels: Vec<&str> = shown.iter().map(|(text, _)| text.as_str()).collect();
@@ -1392,7 +1431,11 @@ mod tests {
             idle: 1,
         };
         let (shown, truncated) = fit_summary_segments(
-            agent_summary_segments(counts, StatusIndicatorStyle::Dots),
+            agent_summary_segments(
+                counts,
+                StatusIndicatorStyle::Dots,
+                &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Dots),
+            ),
             60,
         );
         assert_eq!(shown.len(), 4);
@@ -1402,7 +1445,11 @@ mod tests {
     #[test]
     fn agent_summary_reports_no_agents_when_empty() {
         assert_eq!(
-            agent_summary_segments(GlobalAgentCounts::default(), StatusIndicatorStyle::Dots,),
+            agent_summary_segments(
+                GlobalAgentCounts::default(),
+                StatusIndicatorStyle::Dots,
+                &crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Dots),
+            ),
             vec![("no agents".to_string(), SummaryTone::Muted)]
         );
     }

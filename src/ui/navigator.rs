@@ -126,9 +126,17 @@ fn push_state_chip(
     label: &'static str,
     app: &AppState,
 ) {
-    let (icon, icon_style) =
-        state_icon(state, seen, app.status_indicators, &app.state_icon_colors());
-    spans.push(Span::styled(icon, icon_style.add_modifier(Modifier::BOLD)));
+    let (icon, icon_style) = state_icon(
+        state,
+        seen,
+        &app.state_icon_symbols(),
+        &app.state_icon_colors(),
+    );
+    // The chip row is `'static`; one short allocation per navigator chip.
+    spans.push(Span::styled(
+        icon.to_string(),
+        icon_style.add_modifier(Modifier::BOLD),
+    ));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         label,
@@ -225,7 +233,7 @@ fn render_row(
     let (status_icon, status_style) = state_icon(
         row.status,
         row.seen,
-        app.status_indicators,
+        &app.state_icon_symbols(),
         &app.state_icon_colors(),
     );
     let status_style = if selected {

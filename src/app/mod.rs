@@ -299,6 +299,20 @@ fn sort_motion_bubble_from_config(motion: crate::config::SortMotionConfig) -> bo
     matches!(motion, crate::config::SortMotionConfig::Bubble)
 }
 
+fn state_symbol_overrides_from_config(
+    symbols: &crate::config::StateSymbolsConfig,
+) -> state::StateSymbolOverrides {
+    let valid =
+        |value: &Option<String>| crate::config::StateSymbolsConfig::valid(value).map(str::to_owned);
+    state::StateSymbolOverrides {
+        working: valid(&symbols.working),
+        idle: valid(&symbols.idle),
+        done: valid(&symbols.done),
+        blocked: valid(&symbols.blocked),
+        unknown: valid(&symbols.unknown),
+    }
+}
+
 fn state_color_overrides_from_config(
     colors: &crate::config::StateColorsConfig,
 ) -> state::StateColorOverrides {
@@ -749,6 +763,7 @@ impl App {
             agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
             sidebar_style: config.ui.sidebar_style,
             state_color_overrides: state_color_overrides_from_config(&config.ui.state_colors),
+            state_symbol_overrides: state_symbol_overrides_from_config(&config.ui.state_symbols),
             notification_center_position: config.ui.notification_center_position,
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
@@ -1623,6 +1638,7 @@ impl App {
                 diagnostics.push(format!("{diagnostic}; keeping previous [ui] settings"));
             } else {
                 diagnostics.extend(config.ui.sound.diagnostics());
+                diagnostics.extend(config.ui.state_symbols.diagnostics());
                 diagnostics.extend(crate::config::tab_bar_right_diagnostics(
                     &config.ui.tab_bar_right,
                 ));
@@ -1700,6 +1716,8 @@ impl App {
                 self.state.sidebar_style = config.ui.sidebar_style;
                 self.state.state_color_overrides =
                     state_color_overrides_from_config(&config.ui.state_colors);
+                self.state.state_symbol_overrides =
+                    state_symbol_overrides_from_config(&config.ui.state_symbols);
                 self.state.notification_center_position = config.ui.notification_center_position;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 self.state.workspace_number_color = config
@@ -4207,6 +4225,37 @@ mod tests {
             app.state.config_diagnostic.as_deref(),
             Some("config.toml has unknown keys; herdr config check")
         );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_state_symbol_overrides_and_drops_wide_ones() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-state-symbols");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        assert_eq!(app.state.state_icon_symbols().done, "●");
+        std::fs::write(
+            &path,
+            "[ui]\nstatus_indicators = \"symbols\"\n[ui.state_symbols]\ndone = \"◆\"\nworking = \"⠋⠙\"\n",
+        )
+        .unwrap();
+
+        let report = app.reload_config();
+
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Partial);
+        assert_eq!(
+            report.diagnostics,
+            vec!["ui.state_symbols.working = \"⠋⠙\" must be exactly one terminal cell wide; ignoring"]
+        );
+        let symbols = app.state.state_icon_symbols();
+        assert_eq!(symbols.done, "◆");
+        assert_eq!(symbols.working, "◐");
+        assert_eq!(symbols.idle, "✓");
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

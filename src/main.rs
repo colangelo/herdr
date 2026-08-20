@@ -463,6 +463,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # blocked = "#f38ba8"
 # unknown = "#6c7086"
 
+# Per-state glyph overrides for sidebar state icons, layered on top of
+# status_indicators. Each value must be exactly one terminal cell wide.
+# "done" is a finished agent you have not looked at yet; "idle" is one you have.
+# [ui.state_symbols]
+# working = "◐"
+# idle = "✓"
+# done = "□"
+# blocked = "×"
+# unknown = "·"
+
 # Notification center position: "top-right" keeps the indicator in the tab
 # bar with the dropdown under it; "bottom-right" floats the indicator in the
 # frame's bottom-right corner with the dropdown opening above it.
