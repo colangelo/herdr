@@ -309,6 +309,14 @@ status_indicators = "symbols"
 
 The symbols are static, so this option does not enable spinner animation.
 
+The symbols style draws `×` blocked, `◐` working, `□` done (finished, not looked at yet), `✓` idle (finished and seen), and `·` unknown. Either style can be adjusted per state with `[ui.state_symbols]`; unset states keep the style's glyph. A value must be exactly one terminal cell wide so the icon column stays aligned — wider or empty values are reported as a config diagnostic and ignored.
+
+```toml
+[ui.state_symbols]
+done = "●"
+idle = "✔"
+```
+
 ### Sidebar row layouts
 
 The expanded desktop sidebar renders each inner array in `rows` as one line. These are the complete default layouts:
