@@ -83,6 +83,65 @@ pub struct StateIconColors {
     pub unknown: Color,
 }
 
+/// Parsed `[ui.state_symbols]` overrides; `None` slots fall back to the glyph
+/// the active indicator style draws, resolved by
+/// [`AppState::state_icon_symbols`]. Every stored value is one cell wide.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StateSymbolOverrides {
+    pub working: Option<String>,
+    pub idle: Option<String>,
+    pub done: Option<String>,
+    pub blocked: Option<String>,
+    pub unknown: Option<String>,
+}
+
+/// Resolved per-state glyphs for sidebar state icons, each one cell wide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateIconSymbols<'a> {
+    pub working: &'a str,
+    pub idle: &'a str,
+    pub done: &'a str,
+    pub blocked: &'a str,
+    pub unknown: &'a str,
+}
+
+impl StateIconSymbols<'static> {
+    /// The glyph set a `ui.status_indicators` style draws before overrides.
+    pub const fn for_style(style: crate::config::StatusIndicatorStyle) -> Self {
+        match style {
+            crate::config::StatusIndicatorStyle::Dots => Self {
+                working: "●",
+                idle: "○",
+                done: "●",
+                blocked: "●",
+                unknown: "·",
+            },
+            // A finished, not-yet-seen agent is an unchecked box the user still
+            // has to look at; once seen it is checked off. Keeps the checkmark
+            // meaning "handled", as in any todo list and the pre-v0.8.0 icons.
+            crate::config::StatusIndicatorStyle::Symbols => Self {
+                working: "◐",
+                idle: "✓",
+                done: "□",
+                blocked: "×",
+                unknown: "·",
+            },
+        }
+    }
+}
+
+impl<'a> StateIconSymbols<'a> {
+    pub fn symbol(&self, state: AgentState, seen: bool) -> &'a str {
+        match (state, seen) {
+            (AgentState::Blocked, _) => self.blocked,
+            (AgentState::Working, _) => self.working,
+            (AgentState::Idle, false) => self.done,
+            (AgentState::Idle, true) => self.idle,
+            (AgentState::Unknown, _) => self.unknown,
+        }
+    }
+}
+
 /// All colors used by the UI. Derived from a base accent color for now,
 /// but structured so a full theme system can replace it later.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2379,6 +2438,8 @@ pub struct AppState {
     /// Parsed `[ui.state_colors]` overrides; unset slots fall back to the
     /// theme palette in `state_icon_colors()`.
     pub state_color_overrides: StateColorOverrides,
+    /// `[ui.state_symbols]` glyph overrides layered over `status_indicators`.
+    pub state_symbol_overrides: StateSymbolOverrides,
     /// Where the notification center dropdown anchors (TUI presentation).
     pub notification_center_position: crate::config::NotificationCenterPositionConfig,
     pub next_agent_state_change_seq: u64,
@@ -3102,6 +3163,20 @@ impl AppState {
         }
     }
 
+    /// Per-state glyphs for sidebar state icons: the active
+    /// `ui.status_indicators` set with `[ui.state_symbols]` overrides on top.
+    pub fn state_icon_symbols(&self) -> StateIconSymbols<'_> {
+        let defaults = StateIconSymbols::for_style(self.status_indicators);
+        let overrides = &self.state_symbol_overrides;
+        StateIconSymbols {
+            working: overrides.working.as_deref().unwrap_or(defaults.working),
+            idle: overrides.idle.as_deref().unwrap_or(defaults.idle),
+            done: overrides.done.as_deref().unwrap_or(defaults.done),
+            blocked: overrides.blocked.as_deref().unwrap_or(defaults.blocked),
+            unknown: overrides.unknown.as_deref().unwrap_or(defaults.unknown),
+        }
+    }
+
     pub(crate) fn pane_exposes_host_cursor(
         &self,
         _ws_idx: usize,
@@ -3377,6 +3452,7 @@ impl AppState {
             agent_panel_motion: crate::ui::list_motion::ListMotion::new(),
             sidebar_style: crate::config::SidebarStyleConfig::Default,
             state_color_overrides: StateColorOverrides::default(),
+            state_symbol_overrides: StateSymbolOverrides::default(),
             notification_center_position: crate::config::NotificationCenterPositionConfig::TopRight,
             next_agent_state_change_seq: 0,
             mouse_capture: true,

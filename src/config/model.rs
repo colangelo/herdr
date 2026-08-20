@@ -174,6 +174,55 @@ pub struct StateColorsConfig {
     pub unknown: Option<String>,
 }
 
+/// Per-state override glyphs for the sidebar state icons. Unset values fall
+/// back to the glyph the active `ui.status_indicators` style draws for that
+/// state. A value must be exactly one terminal cell wide so the icon column
+/// never shifts; anything else is reported as a diagnostic and ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(default)]
+pub struct StateSymbolsConfig {
+    pub working: Option<String>,
+    pub idle: Option<String>,
+    pub done: Option<String>,
+    pub blocked: Option<String>,
+    pub unknown: Option<String>,
+}
+
+impl StateSymbolsConfig {
+    fn entries(&self) -> [(&'static str, Option<&str>); 5] {
+        [
+            ("working", self.working.as_deref()),
+            ("idle", self.idle.as_deref()),
+            ("done", self.done.as_deref()),
+            ("blocked", self.blocked.as_deref()),
+            ("unknown", self.unknown.as_deref()),
+        ]
+    }
+
+    /// The override when it is a usable single-cell glyph.
+    pub fn valid(value: &Option<String>) -> Option<&str> {
+        value.as_deref().filter(|glyph| is_single_cell(glyph))
+    }
+
+    pub fn diagnostics(&self) -> Vec<String> {
+        self.entries()
+            .into_iter()
+            .filter_map(|(name, value)| {
+                let value = value?;
+                (!is_single_cell(value)).then(|| {
+                    format!(
+                        "ui.state_symbols.{name} = {value:?} must be exactly one terminal cell wide; ignoring"
+                    )
+                })
+            })
+            .collect()
+    }
+}
+
+fn is_single_cell(glyph: &str) -> bool {
+    unicode_width::UnicodeWidthStr::width(glyph) == 1
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SortMotionEasingConfig {
@@ -1221,6 +1270,8 @@ pub struct UiConfig {
     /// Per-state color overrides for sidebar state glyphs and state text
     /// (working/idle/done/blocked/unknown). Same syntax as `accent`.
     pub state_colors: StateColorsConfig,
+    /// Per-state sidebar icon glyph overrides; see `StateSymbolsConfig`.
+    pub state_symbols: StateSymbolsConfig,
     /// Notification center position. "top-right" puts the indicator in the
     /// tab bar with the dropdown under its right edge; "bottom-right" floats
     /// the indicator in the frame's bottom-right corner with the dropdown
@@ -1533,6 +1584,7 @@ impl Default for UiConfig {
             sort_motion_easing: SortMotionEasingConfig::Linear,
             sidebar_style: SidebarStyleConfig::Default,
             state_colors: StateColorsConfig::default(),
+            state_symbols: StateSymbolsConfig::default(),
             notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
@@ -1969,6 +2021,44 @@ idle = "#4ade80"
         assert_eq!(config.ui.state_colors.idle.as_deref(), Some("#4ade80"));
         assert_eq!(config.ui.state_colors.done, None);
         assert_eq!(config.ui.state_colors.blocked, None);
+    }
+
+    #[test]
+    fn state_symbols_parse_default_and_reject_multi_cell_glyphs() {
+        assert_eq!(
+            Config::default().ui.state_symbols,
+            StateSymbolsConfig::default()
+        );
+
+        let toml = r##"
+[ui.state_symbols]
+done = "●"
+idle = "✔"
+working = "⠋⠙"
+blocked = ""
+unknown = "日"
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        let symbols = &config.ui.state_symbols;
+        assert_eq!(StateSymbolsConfig::valid(&symbols.done), Some("●"));
+        assert_eq!(StateSymbolsConfig::valid(&symbols.idle), Some("✔"));
+        // Two cells, zero cells, and a double-width CJK glyph would all shift
+        // the icon column, so they are reported and dropped.
+        assert_eq!(StateSymbolsConfig::valid(&symbols.working), None);
+        assert_eq!(StateSymbolsConfig::valid(&symbols.blocked), None);
+        assert_eq!(StateSymbolsConfig::valid(&symbols.unknown), None);
+        assert_eq!(
+            symbols.diagnostics(),
+            vec![
+                "ui.state_symbols.working = \"⠋⠙\" must be exactly one terminal cell wide; ignoring",
+                "ui.state_symbols.blocked = \"\" must be exactly one terminal cell wide; ignoring",
+                "ui.state_symbols.unknown = \"日\" must be exactly one terminal cell wide; ignoring",
+            ]
+        );
+        assert!(config
+            .collect_diagnostics()
+            .iter()
+            .any(|diag| diag.starts_with("ui.state_symbols.working")));
     }
 
     #[test]

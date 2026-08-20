@@ -10,7 +10,7 @@ use super::text::display_width_u16;
 use super::widgets::panel_contrast_fg;
 use crate::{
     app::state::{CopyFeedback, Palette, ToastKind, ToastNotification},
-    config::{StatusIndicatorStyle, ToastClipboardPosition, ToastHerdrPosition, ToastHerdrSize},
+    config::{ToastClipboardPosition, ToastHerdrPosition, ToastHerdrSize},
     detect::AgentState,
 };
 
@@ -238,36 +238,14 @@ pub(super) fn render_config_diagnostic(frame: &mut Frame, area: Rect, message: &
     }
 }
 
-pub(super) fn state_icon_symbol(
+pub(super) fn state_icon<'a>(
     state: AgentState,
     seen: bool,
-    indicator_style: StatusIndicatorStyle,
-) -> &'static str {
-    match (indicator_style, state, seen) {
-        (StatusIndicatorStyle::Dots, AgentState::Blocked, _) => "●",
-        (StatusIndicatorStyle::Dots, AgentState::Working, _) => "●",
-        (StatusIndicatorStyle::Dots, AgentState::Idle, false) => "●",
-        (StatusIndicatorStyle::Dots, AgentState::Idle, true) => "○",
-        (StatusIndicatorStyle::Dots, AgentState::Unknown, _) => "·",
-        (StatusIndicatorStyle::Symbols, AgentState::Blocked, _) => "×",
-        (StatusIndicatorStyle::Symbols, AgentState::Working, _) => "◐",
-        // A finished, not-yet-seen agent is an unchecked box the user still has
-        // to look at; once seen it is checked off. Keeps the checkmark meaning
-        // "handled", as in any todo list and in the pre-v0.8.0 icon set.
-        (StatusIndicatorStyle::Symbols, AgentState::Idle, false) => "□",
-        (StatusIndicatorStyle::Symbols, AgentState::Idle, true) => "✓",
-        (StatusIndicatorStyle::Symbols, AgentState::Unknown, _) => "·",
-    }
-}
-
-pub(super) fn state_icon(
-    state: AgentState,
-    seen: bool,
-    indicator_style: StatusIndicatorStyle,
+    symbols: &crate::app::state::StateIconSymbols<'a>,
     colors: &crate::app::state::StateIconColors,
-) -> (&'static str, Style) {
+) -> (&'a str, Style) {
     (
-        state_icon_symbol(state, seen, indicator_style),
+        symbols.symbol(state, seen),
         Style::default().fg(state_label_color(state, seen, colors)),
     )
 }
@@ -299,6 +277,7 @@ pub(super) fn state_label_color(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StatusIndicatorStyle;
     use crate::config::{ToastClipboardPosition, ToastHerdrPosition};
 
     fn toast() -> ToastNotification {
@@ -331,6 +310,7 @@ mod tests {
             (StatusIndicatorStyle::Dots, ["●", "●", "●", "○", "·"]),
             (StatusIndicatorStyle::Symbols, ["×", "◐", "□", "✓", "·"]),
         ] {
+            let symbols = crate::app::state::StateIconSymbols::for_style(indicator_style);
             for ((state, seen, color), expected_symbol) in [
                 (AgentState::Blocked, true, palette.red),
                 (AgentState::Working, true, palette.yellow),
@@ -341,7 +321,7 @@ mod tests {
             .into_iter()
             .zip(expected_symbols)
             {
-                let (actual_symbol, style) = state_icon(state, seen, indicator_style, &colors);
+                let (actual_symbol, style) = state_icon(state, seen, &symbols, &colors);
                 assert_eq!(actual_symbol, expected_symbol);
                 assert_eq!(display_width_u16(actual_symbol), 1);
                 assert_eq!(style.fg, Some(color));

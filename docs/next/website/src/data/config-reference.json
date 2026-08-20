@@ -1080,7 +1080,7 @@
           "key": "ui.state_colors.idle",
           "type": "color",
           "default": "unset",
-          "description": "Color for idle (seen) state glyphs and state text (idle circle, done check). Same syntax as `accent`; unset follows the theme."
+          "description": "Color for idle (finished and seen) state glyphs and state text. Same syntax as `accent`; unset follows the theme."
         },
         {
           "key": "ui.state_colors.done",
@@ -1099,6 +1099,36 @@
           "type": "color",
           "default": "unset",
           "description": "Color for unknown state glyphs and state text. Same syntax as `accent`; unset follows the theme."
+        },
+        {
+          "key": "ui.state_symbols.working",
+          "type": "string",
+          "default": "unset",
+          "description": "Glyph for the working state icon. Exactly one terminal cell wide; unset keeps the glyph from `ui.status_indicators`."
+        },
+        {
+          "key": "ui.state_symbols.idle",
+          "type": "string",
+          "default": "unset",
+          "description": "Glyph for the idle (finished and seen) state icon. Exactly one terminal cell wide; unset keeps the glyph from `ui.status_indicators`."
+        },
+        {
+          "key": "ui.state_symbols.done",
+          "type": "string",
+          "default": "unset",
+          "description": "Glyph for the done (finished, not yet seen) state icon. Exactly one terminal cell wide; unset keeps the glyph from `ui.status_indicators`."
+        },
+        {
+          "key": "ui.state_symbols.blocked",
+          "type": "string",
+          "default": "unset",
+          "description": "Glyph for the blocked state icon. Exactly one terminal cell wide; unset keeps the glyph from `ui.status_indicators`."
+        },
+        {
+          "key": "ui.state_symbols.unknown",
+          "type": "string",
+          "default": "unset",
+          "description": "Glyph for the unknown state icon. Exactly one terminal cell wide; unset keeps the glyph from `ui.status_indicators`."
         },
         {
           "key": "ui.notification_center_position",

@@ -966,7 +966,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         let (icon, icon_style) = state_icon(
             agg_state,
             agg_seen,
-            app.status_indicators,
+            &app.state_icon_symbols(),
             &app.state_icon_colors(),
         );
         let symbol = crate::config::jump_symbol(visible_idx).unwrap_or(' ');
@@ -1063,7 +1063,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             let (icon, icon_style) = state_icon(
                 detail.state,
                 detail.seen,
-                app.status_indicators,
+                &app.state_icon_symbols(),
                 &app.state_icon_colors(),
             );
 
@@ -1728,7 +1728,7 @@ fn render_workspace_list(
         let state_icon = state_icon(
             display_state,
             display_seen,
-            app.status_indicators,
+            &app.state_icon_symbols(),
             &app.state_icon_colors(),
         );
         let state_text_style = Style::default()
@@ -2062,7 +2062,7 @@ fn render_agent_detail(
         let state_icon = state_icon(
             detail.state,
             detail.seen,
-            app.status_indicators,
+            &app.state_icon_symbols(),
             &app.state_icon_colors(),
         );
 
@@ -2380,6 +2380,39 @@ mod tests {
     }
 
     #[test]
+    fn state_icon_symbols_layer_overrides_on_the_active_style() {
+        let mut app = crate::app::state::AppState::test_new();
+        let dots = app.state_icon_symbols();
+        assert_eq!(
+            (
+                dots.blocked,
+                dots.working,
+                dots.done,
+                dots.idle,
+                dots.unknown
+            ),
+            ("●", "●", "●", "○", "·")
+        );
+
+        app.state_symbol_overrides.done = Some("◆".into());
+        app.state_symbol_overrides.idle = Some("✔".into());
+        let resolved = app.state_icon_symbols();
+        assert_eq!(resolved.done, "◆");
+        assert_eq!(resolved.idle, "✔");
+        assert_eq!(resolved.working, "●");
+
+        // The same overrides sit on top of whichever style is active.
+        app.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+        let resolved = app.state_icon_symbols();
+        assert_eq!(resolved.done, "◆");
+        assert_eq!(resolved.idle, "✔");
+        assert_eq!(resolved.working, "◐");
+        assert_eq!(resolved.blocked, "×");
+        assert_eq!(resolved.symbol(AgentState::Idle, false), "◆");
+        assert_eq!(resolved.symbol(AgentState::Idle, true), "✔");
+    }
+
+    #[test]
     fn state_icon_colors_resolve_overrides_with_theme_fallback() {
         use ratatui::style::Color;
         let mut app = crate::app::state::AppState::test_new();
@@ -2397,19 +2430,12 @@ mod tests {
         assert_eq!(resolved.idle, Color::Rgb(74, 222, 128));
         assert_eq!(resolved.done, app.palette.teal);
 
-        let (_, working_style) = state_icon(
-            AgentState::Working,
-            true,
+        let symbols = crate::app::state::StateIconSymbols::for_style(
             crate::config::StatusIndicatorStyle::Dots,
-            &resolved,
         );
+        let (_, working_style) = state_icon(AgentState::Working, true, &symbols, &resolved);
         assert_eq!(working_style.fg, Some(Color::Rgb(255, 200, 50)));
-        let (_, idle_style) = state_icon(
-            AgentState::Idle,
-            true,
-            crate::config::StatusIndicatorStyle::Dots,
-            &resolved,
-        );
+        let (_, idle_style) = state_icon(AgentState::Idle, true, &symbols, &resolved);
         assert_eq!(idle_style.fg, Some(Color::Rgb(74, 222, 128)));
     }
 
