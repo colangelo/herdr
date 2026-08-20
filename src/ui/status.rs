@@ -251,8 +251,11 @@ pub(super) fn state_icon_symbol(
         (StatusIndicatorStyle::Dots, AgentState::Unknown, _) => "·",
         (StatusIndicatorStyle::Symbols, AgentState::Blocked, _) => "×",
         (StatusIndicatorStyle::Symbols, AgentState::Working, _) => "◐",
-        (StatusIndicatorStyle::Symbols, AgentState::Idle, false) => "✓",
-        (StatusIndicatorStyle::Symbols, AgentState::Idle, true) => "○",
+        // A finished, not-yet-seen agent is an unchecked box the user still has
+        // to look at; once seen it is checked off. Keeps the checkmark meaning
+        // "handled", as in any todo list and in the pre-v0.8.0 icon set.
+        (StatusIndicatorStyle::Symbols, AgentState::Idle, false) => "□",
+        (StatusIndicatorStyle::Symbols, AgentState::Idle, true) => "✓",
         (StatusIndicatorStyle::Symbols, AgentState::Unknown, _) => "·",
     }
 }
@@ -326,7 +329,7 @@ mod tests {
         };
         for (indicator_style, expected_symbols) in [
             (StatusIndicatorStyle::Dots, ["●", "●", "●", "○", "·"]),
-            (StatusIndicatorStyle::Symbols, ["×", "◐", "✓", "○", "·"]),
+            (StatusIndicatorStyle::Symbols, ["×", "◐", "□", "✓", "·"]),
         ] {
             for ((state, seen, color), expected_symbol) in [
                 (AgentState::Blocked, true, palette.red),
