@@ -307,7 +307,7 @@ Agent status uses compact colored dots by default. To distinguish blocked, worki
 status_indicators = "symbols"
 ```
 
-The symbols are static, so this option does not enable spinner animation.
+The symbols themselves are static. In the sidebar's agent rows the working icon can still move: with `status_spinner = "agent"` (the default) Herdr steps its own spinner each time the agent's terminal-title spinner ticks, so the motion follows the agent's pace with no timer of its own. Claude Code and Codex animate their titles; an agent whose title holds still keeps the static working glyph, and space rows never animate. Set `status_spinner = "off"` to keep every working icon static.
 
 The symbols style draws `×` blocked, `◐` working, `□` done (finished, not looked at yet), `✓` idle (finished and seen), and `·` unknown. Either style can be adjusted per state with `[ui.state_symbols]`; unset states keep the style's glyph. A value must be exactly one terminal cell wide so the icon column stays aligned — wider or empty values are reported as a config diagnostic and ignored.
 
