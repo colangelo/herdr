@@ -90,6 +90,9 @@ pub struct EffectiveStateChange {
 pub(crate) struct TerminalTitleChange {
     pub(crate) raw_changed: bool,
     pub(crate) stripped_changed: bool,
+    /// The leading activity glyph moved to a different glyph, so the agent's
+    /// title spinner ticked; see `TerminalState::title_activity_frame`.
+    pub(crate) activity_advanced: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -128,6 +131,12 @@ pub struct TerminalState {
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
     pub terminal_title: Option<String>,
+    /// Steps once each time the title's leading activity glyph changes to a
+    /// different glyph, which is how an agent's own title spinner ticks. `None`
+    /// until the glyph has changed at least once, or when the title carries no
+    /// glyph: a single static glyph is not evidence of a spinner. Clients read
+    /// it as a clock for their own working animation, so no timer is needed.
+    pub title_activity_frame: Option<u8>,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
     agent_name_owner: Option<AgentNameOwner>,
@@ -163,6 +172,7 @@ impl TerminalState {
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             persisted_agent_session: None,
             terminal_title: None,
+            title_activity_frame: None,
             manual_label: None,
             agent_name: None,
             agent_name_owner: None,
@@ -185,6 +195,12 @@ impl TerminalState {
         }
     }
 
+    fn leading_activity_glyph(&self) -> Option<char> {
+        self.terminal_title
+            .as_deref()
+            .and_then(super::leading_activity_glyph)
+    }
+
     pub(crate) fn terminal_title_stripped(&self) -> Option<String> {
         self.terminal_title
             .as_deref()
@@ -196,14 +212,30 @@ impl TerminalState {
             return TerminalTitleChange::default();
         }
         let previous_stripped = self.terminal_title_stripped();
+        let previous_glyph = self.leading_activity_glyph();
         self.terminal_title = title;
         let stripped_changed = previous_stripped != self.terminal_title_stripped();
         if stripped_changed {
             self.revision = self.revision.wrapping_add(1);
         }
+        let activity_advanced = match (previous_glyph, self.leading_activity_glyph()) {
+            (_, None) => {
+                self.title_activity_frame = None;
+                false
+            }
+            (Some(previous), Some(current)) if previous != current => {
+                self.title_activity_frame = Some(
+                    self.title_activity_frame
+                        .map_or(0, |frame| frame.wrapping_add(1)),
+                );
+                true
+            }
+            _ => false,
+        };
         TerminalTitleChange {
             raw_changed: true,
             stripped_changed,
+            activity_advanced,
         }
     }
 
@@ -2117,6 +2149,56 @@ pub(crate) fn stabilize_agent_detection(detection: crate::detect::AgentDetection
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_activity_frame_steps_only_when_the_leading_glyph_changes() {
+        let mut terminal = TerminalState::new(TerminalId::alloc(), "/tmp".into());
+        assert_eq!(terminal.title_activity_frame, None);
+
+        // One static glyph is not a spinner yet.
+        let change = terminal.set_terminal_title(Some("◐ task".into()));
+        assert!(change.raw_changed && !change.activity_advanced);
+        assert_eq!(terminal.title_activity_frame, None);
+
+        // The glyph moved: the spinner is live, frame 0.
+        let change = terminal.set_terminal_title(Some("◑ task".into()));
+        assert!(change.activity_advanced && !change.stripped_changed);
+        assert_eq!(terminal.title_activity_frame, Some(0));
+
+        // Text changes under the same glyph do not step it.
+        let change = terminal.set_terminal_title(Some("◑ other task".into()));
+        assert!(change.stripped_changed && !change.activity_advanced);
+        assert_eq!(terminal.title_activity_frame, Some(0));
+
+        let change = terminal.set_terminal_title(Some("◐ other task".into()));
+        assert!(change.activity_advanced);
+        assert_eq!(terminal.title_activity_frame, Some(1));
+
+        // Same title again is a no-op.
+        let change = terminal.set_terminal_title(Some("◐ other task".into()));
+        assert_eq!(change, TerminalTitleChange::default());
+        assert_eq!(terminal.title_activity_frame, Some(1));
+
+        // Losing the glyph forgets the spinner.
+        let change = terminal.set_terminal_title(Some("plain".into()));
+        assert!(!change.activity_advanced);
+        assert_eq!(terminal.title_activity_frame, None);
+        terminal.set_terminal_title(None);
+        assert_eq!(terminal.title_activity_frame, None);
+    }
+
+    #[test]
+    fn title_activity_frame_wraps_instead_of_overflowing() {
+        let mut terminal = TerminalState::new(TerminalId::alloc(), "/tmp".into());
+        terminal.set_terminal_title(Some("⠋ t".into()));
+        let steps = 300u32;
+        for step in 0..steps {
+            let glyph = if step % 2 == 0 { "⠙" } else { "⠋" };
+            terminal.set_terminal_title(Some(format!("{glyph} t")));
+        }
+        // Frame 0 is the first step, so `steps` steps end on frame `steps - 1`.
+        assert_eq!(terminal.title_activity_frame, Some((steps - 1) as u8));
+    }
     use crate::detect::AgentDetection;
 
     fn test_terminal() -> TerminalState {

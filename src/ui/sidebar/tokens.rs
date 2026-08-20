@@ -167,6 +167,7 @@ mod tests {
             pane_label: None,
             terminal_title: None,
             terminal_title_stripped: None,
+            title_activity_frame: None,
             agent_label: Some("pi".into()),
             agent_kind_label: Some("pi".into()),
             agent: Some(crate::detect::Agent::Pi),

@@ -25,8 +25,8 @@ pub use self::{
         NotificationCenterPositionConfig, PaneBorderActiveStyleConfig, ShellModeConfig,
         SidebarActiveBorderConfig, SidebarCollapsedModeConfig, SidebarStyleConfig,
         SortMotionConfig, SortMotionEasingConfig, StateColorsConfig, StateSymbolsConfig,
-        StatusIndicatorStyle, TabBarPositionConfig, ToastClipboardPosition, ToastConfig,
-        ToastDelivery, ToastHerdrPosition, ToastHerdrSize, UpdateChannelConfig,
+        StatusIndicatorStyle, StatusSpinnerConfig, TabBarPositionConfig, ToastClipboardPosition,
+        ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize, UpdateChannelConfig,
         WorkspaceSortConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{

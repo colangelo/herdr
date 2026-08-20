@@ -1248,6 +1248,7 @@ mod tests {
             pane_label: None,
             terminal_title: None,
             terminal_title_stripped: None,
+            title_activity_frame: None,
             agent_label: agent_label.map(str::to_string),
             agent_kind_label: agent_label.map(str::to_string),
             agent: agent_label.and_then(crate::detect::parse_agent_label),

@@ -10,7 +10,7 @@ use ratatui::{
 
 use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
-use super::status::{state_icon, state_label, state_label_color};
+use super::status::{agent_state_icon, state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
 use crate::agent_priority::{attention_priority, display_priority};
 use crate::app::state::{AgentPanelSort, Palette, WorkspaceSort};
@@ -30,6 +30,8 @@ pub(crate) struct AgentPanelEntry {
     pub pane_label: Option<String>,
     pub terminal_title: Option<String>,
     pub terminal_title_stripped: Option<String>,
+    /// See `TerminalState::title_activity_frame`.
+    pub title_activity_frame: Option<u8>,
     pub agent_label: Option<String>,
     pub agent_kind_label: Option<String>,
     pub agent: Option<crate::detect::Agent>,
@@ -173,6 +175,7 @@ fn collect_agent_panel_entries_with_runtimes(
                         pane_label: detail.pane_label,
                         terminal_title: detail.terminal_title,
                         terminal_title_stripped: detail.terminal_title_stripped,
+                        title_activity_frame: detail.title_activity_frame,
                         agent_label: Some(detail.agent_label),
                         agent_kind_label: detail.agent_kind_label,
                         agent: detail.agent,
@@ -1060,9 +1063,11 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             } else {
                 Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0))
             };
-            let (icon, icon_style) = state_icon(
+            let (icon, icon_style) = agent_state_icon(
                 detail.state,
                 detail.seen,
+                detail.title_activity_frame,
+                app.status_spinner,
                 &app.state_icon_symbols(),
                 &app.state_icon_colors(),
             );
@@ -2059,9 +2064,11 @@ fn render_agent_detail(
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
         };
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
-        let state_icon = state_icon(
+        let state_icon = agent_state_icon(
             detail.state,
             detail.seen,
+            detail.title_activity_frame,
+            app.status_spinner,
             &app.state_icon_symbols(),
             &app.state_icon_colors(),
         );
@@ -3459,6 +3466,78 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let agent_row = detail_area.y + active_idx as u16;
         assert_eq!(buffer[(detail_area.x, agent_row)].symbol(), "│");
         assert_eq!(buffer[(detail_area.x, agent_row)].style().fg, Some(accent));
+    }
+
+    #[test]
+    fn agent_rows_step_the_working_spinner_from_the_title_and_spaces_stay_static() {
+        let workspace = Workspace::test_new("one");
+        let pane_id = workspace.tabs[0].root_pane;
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        {
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+            terminal.set_terminal_title(Some("◐ task".into()));
+        }
+
+        let area = Rect::new(0, 0, 4, 16);
+        let (ws_area, _, detail_area) = collapsed_sidebar_sections(area);
+        let icon_at = |app: &crate::app::state::AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+                .expect("test terminal should initialize");
+            terminal
+                .draw(|frame| render_sidebar_collapsed(app, frame, area))
+                .expect("collapsed sidebar should render");
+            let buffer = terminal.backend().buffer();
+            (
+                buffer[(detail_area.x + 2, detail_area.y)]
+                    .symbol()
+                    .to_string(),
+                buffer[(ws_area.x + 2, ws_area.y)].symbol().to_string(),
+            )
+        };
+
+        // A single static glyph is not a spinner: static working mark.
+        assert_eq!(icon_at(&app), ("◐".to_string(), "◐".to_string()));
+
+        // Each title flip steps the agent row; the space row never moves.
+        app.terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_terminal_title(Some("◑ task".into()));
+        assert_eq!(icon_at(&app), ("⠋".to_string(), "◐".to_string()));
+        app.terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_terminal_title(Some("◐ task".into()));
+        assert_eq!(icon_at(&app), ("⠙".to_string(), "◐".to_string()));
+
+        // Off pins the static glyph even with a live frame.
+        app.status_spinner = crate::config::StatusSpinnerConfig::Off;
+        assert_eq!(icon_at(&app), ("◐".to_string(), "◐".to_string()));
+
+        // The expanded agent panel uses the same frame.
+        app.status_spinner = crate::config::StatusSpinnerConfig::Agent;
+        let wide = Rect::new(0, 0, 30, 16);
+        let mut terminal = Terminal::new(TestBackend::new(wide.width, wide.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, wide))
+            .expect("expanded sidebar should render");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().to_string())
+            .collect::<String>();
+        assert!(rendered.contains('⠙'), "expanded sidebar: {rendered}");
     }
 
     #[test]

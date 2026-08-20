@@ -14,4 +14,4 @@ pub use state::{
     AgentMetadataReport, EffectivePresentation, EffectiveStateChange, TerminalState,
     TerminalStateMutation,
 };
-pub(crate) use title::stripped_terminal_title;
+pub(crate) use title::{leading_activity_glyph, stripped_terminal_title};

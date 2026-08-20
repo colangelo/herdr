@@ -590,11 +590,17 @@ impl HeadlessServer {
                 needs_render = true;
                 crate::render_prof::event("render.request.signal");
             }
-            let terminal_title_changed = self.app.sync_terminal_titles();
-            if terminal_title_changed && self.app.terminal_title_sidebar_configured() {
+            let title_change = self.app.sync_terminal_titles();
+            if title_change.raw_changed && self.app.terminal_title_sidebar_configured() {
                 needs_render = true;
                 needs_full_render = true;
                 crate::render_prof::event("full_render_cause.terminal_title");
+            } else if title_change.activity_advanced
+                && self.app.state.status_spinner == crate::config::StatusSpinnerConfig::Agent
+            {
+                needs_render = true;
+                needs_full_render = true;
+                crate::render_prof::event("full_render_cause.title_activity");
             }
 
             // 2. Drain a bounded internal-event batch. API handlers perform an

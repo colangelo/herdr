@@ -16,6 +16,8 @@ pub struct PaneDetail {
     pub pane_label: Option<String>,
     pub terminal_title: Option<String>,
     pub terminal_title_stripped: Option<String>,
+    /// See `TerminalState::title_activity_frame`.
+    pub title_activity_frame: Option<u8>,
     pub agent_label: String,
     pub agent_kind_label: Option<String>,
     pub agent: Option<Agent>,
@@ -78,6 +80,7 @@ impl Tab {
                         .or_else(|| terminal.manual_label.clone()),
                     terminal_title: terminal.terminal_title.clone(),
                     terminal_title_stripped: terminal.terminal_title_stripped(),
+                    title_activity_frame: terminal.title_activity_frame,
                     agent_label,
                     agent_kind_label,
                     agent: terminal.effective_known_agent(),

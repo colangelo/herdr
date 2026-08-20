@@ -1,5 +1,15 @@
 use super::App;
 
+/// What one pass over the live terminal titles changed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TerminalTitleSync {
+    /// Some raw title differs from the last pass; matters only when a title
+    /// token is on a sidebar row.
+    pub(crate) raw_changed: bool,
+    /// A working agent's title spinner ticked; the agent row's icon moved.
+    pub(crate) activity_advanced: bool,
+}
+
 impl App {
     pub(crate) fn terminal_title_sidebar_configured(&self) -> bool {
         let config = &self.state.sidebar_agents;
@@ -16,7 +26,7 @@ impl App {
             })
     }
 
-    pub(crate) fn sync_terminal_titles(&mut self) -> bool {
+    pub(crate) fn sync_terminal_titles(&mut self) -> TerminalTitleSync {
         let mut observations = Vec::new();
         for (ws_idx, workspace) in self.state.workspaces.iter().enumerate() {
             for tab in &workspace.tabs {
@@ -35,14 +45,18 @@ impl App {
             }
         }
 
-        let mut raw_changed = false;
+        let mut sync = TerminalTitleSync::default();
         let mut publish = Vec::new();
         for (ws_idx, pane_id, terminal_id, title) in observations {
             let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
                 continue;
             };
             let change = terminal.set_terminal_title(title);
-            raw_changed |= change.raw_changed;
+            sync.raw_changed |= change.raw_changed;
+            // Only a working agent draws the spinner, so an idle title flip
+            // (Claude's ◐ → ✳ at the end of a turn) must not cost a frame.
+            sync.activity_advanced |=
+                change.activity_advanced && terminal.state == crate::detect::AgentState::Working;
             if change.stripped_changed {
                 publish.push((ws_idx, pane_id));
             }
@@ -52,7 +66,7 @@ impl App {
             self.emit_pane_updated(ws_idx, pane_id);
         }
 
-        raw_changed
+        sync
     }
 }
 
@@ -81,7 +95,8 @@ mod tests {
         runtime.test_process_pty_bytes("\x1b]0;⠋ 修复🙂标题\x07".as_bytes());
         app.terminal_runtimes.insert(terminal_id.clone(), runtime);
 
-        assert!(app.sync_terminal_titles());
+        let sync = app.sync_terminal_titles();
+        assert!(sync.raw_changed && !sync.activity_advanced);
         let pane = app.pane_info(0, pane_id).unwrap();
         assert_eq!(pane.terminal_title.as_deref(), Some("⠋ 修复🙂标题"));
         assert_eq!(pane.terminal_title_stripped.as_deref(), Some("修复🙂标题"));
@@ -96,7 +111,9 @@ mod tests {
             .get(&terminal_id)
             .unwrap()
             .test_process_pty_bytes("\x1b]2;⠙ 修复🙂标题\x1b\\".as_bytes());
-        assert!(app.sync_terminal_titles());
+        // The braille glyph moved under a working agent: the icon should step.
+        let sync = app.sync_terminal_titles();
+        assert!(sync.raw_changed && sync.activity_advanced);
         let pane = app.pane_info(0, pane_id).unwrap();
         assert_eq!(pane.terminal_title.as_deref(), Some("⠙ 修复🙂标题"));
         assert_eq!(pane.terminal_title_stripped.as_deref(), Some("修复🙂标题"));
@@ -107,14 +124,15 @@ mod tests {
             .get(&terminal_id)
             .unwrap()
             .test_process_pty_bytes(b"\x1b]0;Done reviewing\x07");
-        assert!(app.sync_terminal_titles());
+        let sync = app.sync_terminal_titles();
+        assert!(sync.raw_changed && !sync.activity_advanced);
         assert_eq!(pane_updated_events(&event_hub), 2);
 
         app.terminal_runtimes
             .get(&terminal_id)
             .unwrap()
             .test_process_pty_bytes(b"\x1b]0;\x07");
-        assert!(app.sync_terminal_titles());
+        assert!(app.sync_terminal_titles().raw_changed);
         let pane = app.pane_info(0, pane_id).unwrap();
         assert_eq!(pane.terminal_title, None);
         assert_eq!(pane.terminal_title_stripped, None);
@@ -136,6 +154,48 @@ mod tests {
         );
 
         assert!(app.terminal_title_sidebar_configured());
+    }
+
+    #[tokio::test]
+    async fn idle_title_flip_does_not_request_a_spinner_frame() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Claude);
+        terminal.state = AgentState::Idle;
+        let runtime = crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"");
+        runtime.test_process_pty_bytes(b"\x1b]0;\xe2\x97\x90 task\x07"); // "◐ task"
+        app.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        app.sync_terminal_titles();
+
+        // Claude's end-of-turn ◐ → ✳ flip steps the terminal's frame, but an
+        // idle row never draws the spinner, so it must not cost a redraw.
+        app.terminal_runtimes
+            .get(&terminal_id)
+            .unwrap()
+            .test_process_pty_bytes("\x1b]0;✳ task\x07".as_bytes());
+        let sync = app.sync_terminal_titles();
+        assert!(sync.raw_changed);
+        assert!(!sync.activity_advanced);
+        assert_eq!(
+            app.state.terminals[&terminal_id].title_activity_frame,
+            Some(0)
+        );
+
+        // Once working, the next flip is a frame.
+        app.state.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Working;
+        app.terminal_runtimes
+            .get(&terminal_id)
+            .unwrap()
+            .test_process_pty_bytes("\x1b]0;◐ task\x07".as_bytes());
+        assert!(app.sync_terminal_titles().activity_advanced);
     }
 
     fn pane_updated_events(event_hub: &crate::api::EventHub) -> usize {

@@ -143,6 +143,19 @@ impl StatusIndicatorStyle {
     }
 }
 
+/// How the working state icon moves in the sidebar's agent rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusSpinnerConfig {
+    /// Step Herdr's spinner each time the agent's own terminal-title spinner
+    /// ticks. No timer: the redraw rides on a title change Herdr already
+    /// observes. Agents that do not animate their title keep the static glyph.
+    #[default]
+    Agent,
+    /// Always draw the static working glyph.
+    Off,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceSortConfig {
@@ -1272,6 +1285,8 @@ pub struct UiConfig {
     pub state_colors: StateColorsConfig,
     /// Per-state sidebar icon glyph overrides; see `StateSymbolsConfig`.
     pub state_symbols: StateSymbolsConfig,
+    /// Working-icon animation in agent rows. Saved values are "agent" or "off". Default: "agent".
+    pub status_spinner: StatusSpinnerConfig,
     /// Notification center position. "top-right" puts the indicator in the
     /// tab bar with the dropdown under its right edge; "bottom-right" floats
     /// the indicator in the frame's bottom-right corner with the dropdown
@@ -1585,6 +1600,7 @@ impl Default for UiConfig {
             sidebar_style: SidebarStyleConfig::Default,
             state_colors: StateColorsConfig::default(),
             state_symbols: StateSymbolsConfig::default(),
+            status_spinner: StatusSpinnerConfig::default(),
             notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
