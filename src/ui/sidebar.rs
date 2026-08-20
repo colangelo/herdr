@@ -3615,7 +3615,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             buffer[(detail_area.x + 2, detail_area.y)].style().fg,
             Some(app.palette.red)
         );
-        assert_eq!(buffer[(detail_area.x + 2, detail_area.y + 1)].symbol(), "✓");
+        assert_eq!(buffer[(detail_area.x + 2, detail_area.y + 1)].symbol(), "□");
         assert_eq!(
             buffer[(detail_area.x + 2, detail_area.y + 1)].style().fg,
             Some(app.palette.teal)

@@ -1305,7 +1305,7 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            ["× 2 blocked", "✓ 1 done", "◐ 2 working", "○ 1 idle"]
+            ["× 2 blocked", "□ 1 done", "◐ 2 working", "✓ 1 idle"]
         );
     }
 

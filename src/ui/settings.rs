@@ -118,7 +118,7 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
                 "choose color dots or distinct symbols for each state",
                 &[
                     ("color dots  ● ● ● ○ ·", StatusIndicatorStyle::Dots),
-                    ("distinct symbols  × ◐ ✓ ○ ·", StatusIndicatorStyle::Symbols),
+                    ("distinct symbols  × ◐ □ ✓ ·", StatusIndicatorStyle::Symbols),
                 ],
                 app.status_indicators,
                 settings.list.selected,
