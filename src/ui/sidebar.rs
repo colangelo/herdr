@@ -43,6 +43,17 @@ pub(crate) struct AgentPanelEntry {
     pub tokens: std::collections::HashMap<String, String>,
 }
 
+impl AgentPanelEntry {
+    /// The shared spinner frame shifted by when this agent last changed
+    /// state, so rows that started working at different moments sit at
+    /// different frames instead of marching in lockstep. Same tick, same
+    /// cost; only the phase differs.
+    fn spinner_frame(&self, shared: Option<u8>) -> Option<u8> {
+        let phase = self.last_agent_state_change_seq.unwrap_or(0) as u8;
+        shared.map(|frame| frame.wrapping_add(phase))
+    }
+}
+
 fn sidebar_section_heights(total_h: u16, split_ratio: f32) -> (u16, u16) {
     if total_h == 0 {
         return (0, 0);
@@ -1077,7 +1088,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             let (icon, icon_style) = agent_state_icon(
                 detail.state,
                 detail.seen,
-                app.working_spinner_frame(),
+                detail.spinner_frame(app.working_spinner_frame()),
                 &app.state_icon_symbols(),
                 &app.state_icon_colors(),
             );
@@ -2102,7 +2113,7 @@ fn render_agent_detail(
         let state_icon = agent_state_icon(
             detail.state,
             detail.seen,
-            app.working_spinner_frame(),
+            detail.spinner_frame(app.working_spinner_frame()),
             &app.state_icon_symbols(),
             &app.state_icon_colors(),
         );
@@ -3072,7 +3083,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.ensure_test_terminals();
         app.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
         app.active = Some(0);
-        for workspace in &app.workspaces {
+        for (workspace, seq) in app.workspaces.iter().zip([10u64, 13]) {
             let pane_id = workspace.tabs[0].root_pane;
             let terminal_id = workspace.tabs[0].panes[&pane_id]
                 .attached_terminal_id
@@ -3080,6 +3091,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             let terminal = app.terminals.get_mut(&terminal_id).unwrap();
             terminal.detected_agent = Some(Agent::Claude);
             terminal.state = AgentState::Working;
+            // When each agent last changed state sets its phase.
+            terminal.last_agent_state_change_seq = Some(seq);
         }
 
         let area = Rect::new(0, 0, 4, 16);
@@ -3102,12 +3115,13 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             )
         };
 
-        // Focused or not, both working rows show the same frame; the space
-        // row keeps the static mark.
+        // Focused or not, both working rows move on the same tick, each
+        // from its own phase (frame 3 + 10 → ⠸, 3 + 13 → ⠦); the space row
+        // keeps the static mark.
         app.spinner_frame = 3;
-        assert_eq!(icons(&app), ("⠸".into(), "⠸".into(), "◐".into()));
+        assert_eq!(icons(&app), ("⠸".into(), "⠦".into(), "◐".into()));
         app.spinner_frame = 4;
-        assert_eq!(icons(&app), ("⠼".into(), "⠼".into(), "◐".into()));
+        assert_eq!(icons(&app), ("⠼".into(), "⠧".into(), "◐".into()));
 
         // Off pins the static glyph.
         app.status_spinner = crate::config::StatusSpinnerConfig::Off;
