@@ -893,6 +893,8 @@ impl App {
                 .resolved_identity_cwd_from(&state.terminals, &restored_terminal_runtimes);
             state.workspaces[ws_idx].cached_git_branch =
                 cwd.as_deref().and_then(crate::workspace::git_branch);
+            state.workspaces[ws_idx].cached_git_detached_head =
+                cwd.as_deref().and_then(crate::workspace::git_detached_head);
         }
 
         // Background auto-update is disabled in monolithic no-session mode
@@ -2885,6 +2887,7 @@ mod tests {
                 demand: crate::workspace::GitStatusRefreshDemand::ALL,
                 auto_label: "one".into(),
                 branch: Some("render-dirty-test".into()),
+                detached_head: None,
                 ahead_behind: Some((1, 0)),
                 space: None,
             }],
