@@ -1513,9 +1513,9 @@ fn editorial_number_label(jump_number: Option<char>, prefix: &str) -> String {
 }
 
 /// The agent row's todo count, `τ N`, shown at the right edge of the entry's
-/// second row — under the editorial jump label — so the open work on a pane
-/// is visible without opening it. Empty when nothing is outstanding: the row
-/// is for counts, the pane border keeps the always-present handle.
+/// name row — the editorial jump label moves under it — so the open work on
+/// a pane is visible without opening it. Empty when nothing is outstanding:
+/// the row is for counts, the pane border keeps the always-present handle.
 fn agent_todo_label(outstanding: usize) -> String {
     match outstanding {
         0 => String::new(),
@@ -2029,13 +2029,15 @@ fn render_agent_detail(
             .flatten();
         let has_second_row = rows.len() >= 2;
         let number_label = editorial_number_label(jump_number, &app.agent_number_prefix);
-        // The todo count sits at the right edge of the second row in both
-        // styles; a one-row entry has no room for it and shows none.
+        // The todo count sits at the right edge of the name row in both
+        // styles, with the editorial jump label under it on the second row.
+        // A one-row entry keeps its jump label and has no room for the count.
         let todo_label = if has_second_row {
             agent_todo_label(detail.outstanding_todos)
         } else {
             String::new()
         };
+        let editorial_number_row = u16::from(has_second_row);
 
         let gap = agent_entry_gap(app, index, details.len());
         // Active-agent border lines live in blank spacer rows between entries,
@@ -2114,14 +2116,14 @@ fn render_agent_detail(
                 spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
             }
             let prefix_width = bar_reserve + if row_index == 0 { 1 } else { 3 };
-            // Editorial: the name row reserves the right edge for the jump
-            // label so long names truncate before reaching it.
+            // Each row reserves the right edge for the label drawn there so
+            // long text truncates before reaching it.
             let number_reserve = editorial_number_reserve(
-                editorial && row_index == 0,
+                editorial && row_index as u16 == editorial_number_row,
                 &number_label,
                 app.sidebar_active_border,
             ) + editorial_number_reserve(
-                row_index == 1,
+                row_index == 0,
                 &todo_label,
                 app.sidebar_active_border,
             );
@@ -2144,7 +2146,7 @@ fn render_agent_detail(
             draw_editorial_number(
                 frame,
                 Rect::new(body.x, row_y, body.width, height),
-                row_y,
+                row_y + editorial_number_row,
                 body_bottom,
                 &number_label,
                 Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
@@ -2155,7 +2157,7 @@ fn render_agent_detail(
             draw_editorial_number(
                 frame,
                 Rect::new(body.x, row_y, body.width, height),
-                row_y + 1,
+                row_y,
                 body_bottom,
                 &todo_label,
                 Style::default().fg(app.pane_todo_indicator_color(detail.highest_todo_priority)),
@@ -3037,24 +3039,21 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .unwrap();
         let buffer = terminal.backend().buffer();
 
-        // Two open todos (the done one does not count), under the jump label,
-        // coloured by the highest open priority.
+        // Two open todos (the done one does not count) on the name row,
+        // coloured by the highest open priority; the jump label sits under it.
         let first_name = row_text(buffer, body.y, body.width);
         let first_second = row_text(buffer, body.y + 1, body.width);
         assert!(
-            first_name.ends_with('1'),
-            "jump label on the name row: {first_name:?}"
+            first_name.ends_with("τ 2"),
+            "count on the name row: {first_name:?}"
         );
         assert!(
-            first_second.ends_with("τ 2"),
-            "count on the second row: {first_second:?}"
+            first_second.ends_with('1'),
+            "jump label on the second row: {first_second:?}"
         );
         let tau_x = body.x + body.width - 3;
-        assert_eq!(buffer[(tau_x, body.y + 1)].symbol(), "τ");
-        assert_eq!(
-            buffer[(tau_x, body.y + 1)].style().fg,
-            Some(app.palette.red)
-        );
+        assert_eq!(buffer[(tau_x, body.y)].symbol(), "τ");
+        assert_eq!(buffer[(tau_x, body.y)].style().fg, Some(app.palette.red));
 
         // Everything done: no count at all.
         let second_second = row_text(buffer, body.y + 3, body.width);
@@ -3063,7 +3062,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             "no count once all done: {second_second:?}"
         );
 
-        // A one-row entry has nowhere to put it.
+        // A one-row entry keeps its jump label on the name row and has
+        // nowhere to put the count.
         app.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Workspace]];
         let mut terminal = Terminal::new(TestBackend::new(24, 10)).unwrap();
         terminal
@@ -3077,6 +3077,11 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .map(|cell| cell.symbol().to_string())
             .collect::<String>();
         assert!(!rendered.contains('τ'), "{rendered}");
+        let first_name = row_text(terminal.backend().buffer(), body.y, body.width);
+        assert!(
+            first_name.ends_with('1'),
+            "jump label stays on the one row: {first_name:?}"
+        );
     }
 
     #[test]
