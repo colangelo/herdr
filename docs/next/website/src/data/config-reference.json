@@ -947,16 +947,6 @@
           ]
         },
         {
-          "key": "ui.status_spinner",
-          "type": "enum",
-          "default": "\"agent\"",
-          "description": "Working icon motion in sidebar agent rows. `agent` steps Herdr's spinner each time the agent's own terminal-title spinner ticks (no timer; still titles stay static); `off` always draws the static working glyph.",
-          "values": [
-            "agent",
-            "off"
-          ]
-        },
-        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

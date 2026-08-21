@@ -1248,7 +1248,6 @@ mod tests {
             pane_label: None,
             terminal_title: None,
             terminal_title_stripped: None,
-            title_activity_frame: None,
             outstanding_todos: 0,
             highest_todo_priority: None,
             agent_label: agent_label.map(str::to_string),

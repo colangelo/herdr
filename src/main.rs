@@ -379,11 +379,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
-# Working icon in agent rows: "agent" steps a spinner each time the agent's own
-# terminal-title spinner ticks (no timer; agents with a still title stay static);
-# "off" always draws the static working glyph.
-# status_spinner = "agent"
-
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.

@@ -725,7 +725,6 @@ impl App {
             sidebar_section_split,
             agent_panel_sort,
             status_indicators: config.ui.status_indicators,
-            status_spinner: config.ui.status_spinner,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
@@ -1105,11 +1104,8 @@ impl App {
             if self.render_dirty.is_pending() {
                 needs_render = true;
             }
-            let title_change = self.sync_terminal_titles();
-            if (title_change.raw_changed && self.terminal_title_sidebar_configured())
-                || (title_change.activity_advanced
-                    && self.state.status_spinner == crate::config::StatusSpinnerConfig::Agent)
-            {
+            let terminal_title_changed = self.sync_terminal_titles();
+            if terminal_title_changed && self.terminal_title_sidebar_configured() {
                 needs_render = true;
             }
 
@@ -1662,7 +1658,6 @@ impl App {
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.status_indicators = config.ui.status_indicators;
-                self.state.status_spinner = config.ui.status_spinner;
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;

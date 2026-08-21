@@ -250,32 +250,6 @@ pub(super) fn state_icon<'a>(
     )
 }
 
-/// Herdr's working spinner, stepped by the agent's own title activity rather
-/// than a timer: frame `n` is `ACTIVITY_FRAMES[n % 10]`.
-const ACTIVITY_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-/// The icon for an agent row: the working glyph animates when the agent's
-/// title spinner has ticked (`activity_frame`) and the spinner is enabled;
-/// every other state, and a working agent with a still title, falls through
-/// to [`state_icon`].
-pub(super) fn agent_state_icon<'a>(
-    state: AgentState,
-    seen: bool,
-    activity_frame: Option<u8>,
-    spinner: crate::config::StatusSpinnerConfig,
-    symbols: &crate::app::state::StateIconSymbols<'a>,
-    colors: &crate::app::state::StateIconColors,
-) -> (&'a str, Style) {
-    let (glyph, style) = state_icon(state, seen, symbols, colors);
-    match (state, spinner, activity_frame) {
-        (AgentState::Working, crate::config::StatusSpinnerConfig::Agent, Some(frame)) => (
-            ACTIVITY_FRAMES[usize::from(frame) % ACTIVITY_FRAMES.len()],
-            style,
-        ),
-        _ => (glyph, style),
-    }
-}
-
 pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     match (state, seen) {
         (AgentState::Blocked, _) => "blocked",
@@ -320,69 +294,6 @@ mod tests {
         CopyFeedback {
             message: "copied to clipboard".to_string(),
         }
-    }
-
-    #[test]
-    fn agent_state_icon_animates_only_a_working_agent_with_a_live_title_spinner() {
-        use crate::config::StatusSpinnerConfig;
-        let palette = Palette::catppuccin();
-        let colors = crate::app::state::StateIconColors {
-            working: palette.yellow,
-            idle: palette.green,
-            done: palette.teal,
-            blocked: palette.red,
-            unknown: palette.overlay0,
-        };
-        let symbols = crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Symbols);
-        let icon = |state, seen, frame, spinner| {
-            agent_state_icon(state, seen, frame, spinner, &symbols, &colors)
-        };
-
-        let (glyph, style) = icon(
-            AgentState::Working,
-            true,
-            Some(3),
-            StatusSpinnerConfig::Agent,
-        );
-        assert_eq!(glyph, "⠸");
-        assert_eq!(style.fg, Some(palette.yellow));
-        assert_eq!(display_width_u16(glyph), 1);
-        // Frames wrap around the ten-cell snake.
-        assert_eq!(
-            icon(
-                AgentState::Working,
-                true,
-                Some(13),
-                StatusSpinnerConfig::Agent
-            )
-            .0,
-            "⠸"
-        );
-        // A still title keeps the static working glyph.
-        assert_eq!(
-            icon(AgentState::Working, true, None, StatusSpinnerConfig::Agent).0,
-            "◐"
-        );
-        // Off always draws the static glyph.
-        assert_eq!(
-            icon(AgentState::Working, true, Some(3), StatusSpinnerConfig::Off).0,
-            "◐"
-        );
-        // Other states ignore the frame entirely.
-        assert_eq!(
-            icon(AgentState::Idle, false, Some(3), StatusSpinnerConfig::Agent).0,
-            "□"
-        );
-        assert_eq!(
-            icon(
-                AgentState::Blocked,
-                true,
-                Some(3),
-                StatusSpinnerConfig::Agent
-            )
-            .0,
-            "×"
-        );
     }
 
     #[test]
