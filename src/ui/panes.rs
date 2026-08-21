@@ -848,13 +848,24 @@ fn render_pane_border_titles(
         }
 
         if let Some(indicator) = indicator {
+            let style = Style::default().fg(indicator.state.color(app));
             buf.set_stringn(
                 indicator.rect.x,
                 indicator.rect.y,
                 &indicator.label,
                 indicator.rect.width as usize,
-                Style::default().fg(indicator.state.color(app)),
+                style,
             );
+            // With work outstanding the count is what matters: `τ N` goes
+            // bold, the `▾` handle in front of it stays plain. The handle
+            // and its padding are the first three cells of the label.
+            if matches!(indicator.state, PaneTodoIndicatorState::Outstanding { .. }) {
+                let count_x = indicator.rect.x.saturating_add(3);
+                let count_end = indicator.rect.x.saturating_add(indicator.rect.width);
+                for x in count_x..count_end {
+                    buf[(x, indicator.rect.y)].set_style(style.add_modifier(Modifier::BOLD));
+                }
+            }
         }
     }
 }
@@ -1914,6 +1925,42 @@ mod tests {
                 count: 3,
                 priority: Some(TodoPriority::High),
             }
+        );
+    }
+
+    /// With work outstanding the `τ N` is bold and the `▾` handle is not;
+    /// once everything is done nothing on the badge is bold.
+    #[test]
+    fn the_outstanding_count_is_bold_and_the_handle_is_not() {
+        let app = app_with_pane_todos(&[(false, TodoPriority::High), (false, TodoPriority::Low)]);
+        let indicator =
+            pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
+        assert_eq!(indicator.label, " ▾ τ 2 ");
+        let buffer = draw_pane_borders(&app);
+        let (x, y) = (indicator.rect.x, indicator.rect.y);
+        let bold = |dx: u16| {
+            buffer[(x + dx, y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        };
+        assert_eq!(buffer[(x + 1, y)].symbol(), "▾");
+        assert!(!bold(1), "the handle stays plain");
+        assert_eq!(buffer[(x + 3, y)].symbol(), "τ");
+        assert!(bold(3), "tau is bold");
+        assert_eq!(buffer[(x + 5, y)].symbol(), "2");
+        assert!(bold(5), "the count is bold");
+        assert_eq!(buffer[(x + 3, y)].style().fg, Some(app.palette.red));
+
+        let done = app_with_pane_todos(&[(true, TodoPriority::High)]);
+        let indicator = pane_todo_indicator(&done, &done.view.pane_infos[0]).expect("indicator");
+        let buffer = draw_pane_borders(&done);
+        assert!(
+            (0..indicator.rect.width).all(|dx| !buffer[(indicator.rect.x + dx, indicator.rect.y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)),
+            "nothing bold once all todos are done"
         );
     }
 
