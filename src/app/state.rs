@@ -2417,6 +2417,11 @@ pub struct AppState {
     pub sidebar_section_split: f32,
     pub agent_panel_sort: AgentPanelSort,
     pub status_indicators: crate::config::StatusIndicatorStyle,
+    pub status_spinner: crate::config::StatusSpinnerConfig,
+    /// Interval between working-spinner frames; see `ui.status_spinner_ms`.
+    pub status_spinner_interval: std::time::Duration,
+    /// Current working-spinner frame, stepped by `App::advance_spinner`.
+    pub spinner_frame: u8,
     /// Transient session-wide projection override for the built-in Agents view.
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
@@ -3188,6 +3193,24 @@ impl AppState {
         }
     }
 
+    /// Whether the working spinner should be ticking: it is on, the sidebar
+    /// is on screen, and at least one agent is working. Cheap — one pass over
+    /// the terminal table, which is tens of entries at most.
+    pub fn spinner_active(&self) -> bool {
+        self.status_spinner == crate::config::StatusSpinnerConfig::On
+            && self
+                .terminals
+                .values()
+                .any(|terminal| terminal.state == crate::detect::AgentState::Working)
+    }
+
+    /// The frame agent rows draw for a working agent, or `None` when the
+    /// spinner is off and the static glyph should show.
+    pub fn working_spinner_frame(&self) -> Option<u8> {
+        (self.status_spinner == crate::config::StatusSpinnerConfig::On)
+            .then_some(self.spinner_frame)
+    }
+
     pub(crate) fn pane_exposes_host_cursor(
         &self,
         _ws_idx: usize,
@@ -3449,6 +3472,11 @@ impl AppState {
             sidebar_section_split: 0.5,
             agent_panel_sort: AgentPanelSort::Spaces,
             status_indicators: crate::config::StatusIndicatorStyle::Dots,
+            status_spinner: crate::config::StatusSpinnerConfig::On,
+            status_spinner_interval: std::time::Duration::from_millis(
+                crate::config::DEFAULT_STATUS_SPINNER_MS,
+            ),
+            spinner_frame: 0,
             agent_view_override: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),

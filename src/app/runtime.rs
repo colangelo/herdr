@@ -387,6 +387,7 @@ impl App {
         changed |= self.expire_due_metadata(now);
         changed |= self.handle_tab_bar_status_tasks(now);
         changed |= self.advance_sort_motion(now);
+        changed |= self.advance_spinner(now);
 
         if geometry_dirty || resized {
             self.pending_agent_resume_deadline = None;
@@ -614,6 +615,7 @@ impl App {
             self.selection_highlight_clear_deadline,
             self.next_tab_bar_status_deadline(),
             self.sort_motion_next_due(),
+            self.spinner_next_due(),
             render_deadline,
         ]
         .into_iter()
@@ -639,6 +641,38 @@ impl App {
         .into_iter()
         .flatten()
         .min()
+    }
+
+    /// When the working spinner's next frame is due, for the loop-deadline
+    /// aggregator. `None` while no working agent is on screen, so an idle
+    /// session never wakes for it.
+    pub(crate) fn spinner_next_due(&self) -> Option<Instant> {
+        if !self.state.spinner_active() {
+            return None;
+        }
+        Some(self.last_spinner_tick.map_or_else(Instant::now, |last| {
+            last + self.state.status_spinner_interval
+        }))
+    }
+
+    /// Steps the working spinner when its interval has elapsed. Returns true
+    /// when the frame changed and the sidebar needs a redraw. The only place
+    /// the frame mutates, so every agent row on screen shows the same frame.
+    pub(crate) fn advance_spinner(&mut self, now: Instant) -> bool {
+        if !self.state.spinner_active() {
+            // Restart from a fresh interval when an agent next starts working.
+            self.last_spinner_tick = None;
+            return false;
+        }
+        let due = self.last_spinner_tick.is_none_or(|last| {
+            now.saturating_duration_since(last) >= self.state.status_spinner_interval
+        });
+        if !due {
+            return false;
+        }
+        self.last_spinner_tick = Some(now);
+        self.state.spinner_frame = self.state.spinner_frame.wrapping_add(1);
+        true
     }
 
     /// Advances sidebar bubble motion toward the live priority order. Returns

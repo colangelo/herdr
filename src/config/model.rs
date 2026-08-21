@@ -143,6 +143,26 @@ impl StatusIndicatorStyle {
     }
 }
 
+/// Whether the working state icon in the sidebar's agent rows animates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusSpinnerConfig {
+    /// Step a spinner on a slow shared tick while any agent is working. The
+    /// tick is armed only while a working agent is on screen, so an idle
+    /// session costs nothing.
+    #[default]
+    #[serde(alias = "agent")]
+    On,
+    /// Always draw the static working glyph.
+    Off,
+}
+
+/// Bounds for `ui.status_spinner_ms`: fast enough to read as motion, slow
+/// enough that the tick stays a rounding error next to PTY output.
+pub const MIN_STATUS_SPINNER_MS: u64 = 50;
+pub const MAX_STATUS_SPINNER_MS: u64 = 2000;
+pub const DEFAULT_STATUS_SPINNER_MS: u64 = 200;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceSortConfig {
@@ -1272,6 +1292,10 @@ pub struct UiConfig {
     pub state_colors: StateColorsConfig,
     /// Per-state sidebar icon glyph overrides; see `StateSymbolsConfig`.
     pub state_symbols: StateSymbolsConfig,
+    /// Working-icon animation in agent rows. Saved values are "on" or "off". Default: "on".
+    pub status_spinner: StatusSpinnerConfig,
+    /// Milliseconds between spinner frames, clamped to 50..=2000. Default: 200.
+    pub status_spinner_ms: u64,
     /// Notification center position. "top-right" puts the indicator in the
     /// tab bar with the dropdown under its right edge; "bottom-right" floats
     /// the indicator in the frame's bottom-right corner with the dropdown
@@ -1585,6 +1609,8 @@ impl Default for UiConfig {
             sidebar_style: SidebarStyleConfig::Default,
             state_colors: StateColorsConfig::default(),
             state_symbols: StateSymbolsConfig::default(),
+            status_spinner: StatusSpinnerConfig::default(),
+            status_spinner_ms: DEFAULT_STATUS_SPINNER_MS,
             notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
@@ -2021,6 +2047,22 @@ idle = "#4ade80"
         assert_eq!(config.ui.state_colors.idle.as_deref(), Some("#4ade80"));
         assert_eq!(config.ui.state_colors.done, None);
         assert_eq!(config.ui.state_colors.blocked, None);
+    }
+
+    #[test]
+    fn status_spinner_parses_with_its_beta_alias_and_defaults_on() {
+        let defaults = Config::default();
+        assert_eq!(defaults.ui.status_spinner, StatusSpinnerConfig::On);
+        assert_eq!(defaults.ui.status_spinner_ms, DEFAULT_STATUS_SPINNER_MS);
+
+        let config: Config =
+            toml::from_str("[ui]\nstatus_spinner = \"off\"\nstatus_spinner_ms = 125\n").unwrap();
+        assert_eq!(config.ui.status_spinner, StatusSpinnerConfig::Off);
+        assert_eq!(config.ui.status_spinner_ms, 125);
+
+        // The two betas that shipped the title-clocked spinner wrote "agent".
+        let config: Config = toml::from_str("[ui]\nstatus_spinner = \"agent\"\n").unwrap();
+        assert_eq!(config.ui.status_spinner, StatusSpinnerConfig::On);
     }
 
     #[test]

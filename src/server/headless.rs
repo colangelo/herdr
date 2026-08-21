@@ -618,6 +618,11 @@ impl HeadlessServer {
                 needs_full_render = true;
                 crate::render_prof::event("full_render_cause.sort_motion");
             }
+            if self.app.advance_spinner(Instant::now()) {
+                needs_render = true;
+                needs_full_render = true;
+                crate::render_prof::event("full_render_cause.spinner");
+            }
 
             // 3. Drain API requests.
             if self.pane_graphics_runtime_active() {

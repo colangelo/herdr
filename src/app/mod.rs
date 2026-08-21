@@ -138,6 +138,9 @@ pub struct App {
     pub(crate) selection_autoscroll_deadline: Option<Instant>,
     pub(crate) selection_highlight_clear_deadline: Option<Instant>,
     pub(crate) session_save_deadline: Option<Instant>,
+    /// When the working spinner last stepped; the next step is due one
+    /// `status_spinner_interval` later while `AppState::spinner_active`.
+    pub(crate) last_spinner_tick: Option<Instant>,
     pub(crate) session_save_thread: Option<std::thread::JoinHandle<()>>,
     pub(crate) detached_custom_command_children: Vec<std::process::Child>,
     tab_bar_status_generation: u64,
@@ -290,6 +293,13 @@ fn workspace_sort_from_config(sort: crate::config::WorkspaceSortConfig) -> state
 
 fn sort_motion_bubble_from_config(motion: crate::config::SortMotionConfig) -> bool {
     matches!(motion, crate::config::SortMotionConfig::Bubble)
+}
+
+fn status_spinner_interval_from_config(ms: u64) -> Duration {
+    Duration::from_millis(ms.clamp(
+        crate::config::MIN_STATUS_SPINNER_MS,
+        crate::config::MAX_STATUS_SPINNER_MS,
+    ))
 }
 
 fn state_symbol_overrides_from_config(
@@ -725,6 +735,11 @@ impl App {
             sidebar_section_split,
             agent_panel_sort,
             status_indicators: config.ui.status_indicators,
+            status_spinner: config.ui.status_spinner,
+            status_spinner_interval: status_spinner_interval_from_config(
+                config.ui.status_spinner_ms,
+            ),
+            spinner_frame: 0,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
@@ -934,6 +949,7 @@ impl App {
             agent_metadata_deadline: None,
             pending_agent_resume_deadline: None,
             session_save_deadline: None,
+            last_spinner_tick: None,
             session_save_thread: None,
             detached_custom_command_children: Vec::new(),
             tab_bar_status_generation: 0,
@@ -1658,6 +1674,9 @@ impl App {
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.status_indicators = config.ui.status_indicators;
+                self.state.status_spinner = config.ui.status_spinner;
+                self.state.status_spinner_interval =
+                    status_spinner_interval_from_config(config.ui.status_spinner_ms);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
@@ -5730,6 +5749,93 @@ mod tests {
         app.sync_session_save_schedule();
         let deadline = app.session_save_deadline.expect("a save is scheduled");
         assert!(deadline > Instant::now() + SESSION_SAVE_DEBOUNCE / 2);
+    }
+
+    fn app_with_working_agent() -> App {
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(crate::detect::Agent::Claude);
+        terminal.state = crate::detect::AgentState::Working;
+        app
+    }
+
+    #[test]
+    fn spinner_ticks_only_while_an_agent_is_working_and_the_spinner_is_on() {
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        app.state.ensure_test_terminals();
+        let now = Instant::now();
+
+        // Nothing working: no deadline, no tick, no frame.
+        assert_eq!(app.spinner_next_due(), None);
+        assert!(!app.advance_spinner(now));
+        assert_eq!(app.state.spinner_frame, 0);
+
+        let mut app = app_with_working_agent();
+        let interval = app.state.status_spinner_interval;
+        // First tick is immediate so a freshly working agent moves at once.
+        assert!(app
+            .spinner_next_due()
+            .is_some_and(|due| due <= Instant::now()));
+        assert!(app.advance_spinner(now));
+        assert_eq!(app.state.spinner_frame, 1);
+        // Then one frame per interval, not per loop pass.
+        assert!(!app.advance_spinner(now + interval / 2));
+        assert_eq!(app.spinner_next_due(), Some(now + interval));
+        assert!(app.advance_spinner(now + interval));
+        assert_eq!(app.state.spinner_frame, 2);
+
+        // Off: no tick even with a working agent, and the rows get no frame.
+        app.state.status_spinner = crate::config::StatusSpinnerConfig::Off;
+        assert_eq!(app.spinner_next_due(), None);
+        assert!(!app.advance_spinner(now + interval * 2));
+        assert_eq!(app.state.working_spinner_frame(), None);
+        app.state.status_spinner = crate::config::StatusSpinnerConfig::On;
+        assert_eq!(app.state.working_spinner_frame(), Some(2));
+    }
+
+    #[test]
+    fn spinner_frame_wraps_and_the_interval_is_clamped_from_config() {
+        let mut app = app_with_working_agent();
+        app.state.spinner_frame = u8::MAX;
+        assert!(app.advance_spinner(Instant::now()));
+        assert_eq!(app.state.spinner_frame, 0);
+
+        assert_eq!(
+            status_spinner_interval_from_config(1),
+            Duration::from_millis(crate::config::MIN_STATUS_SPINNER_MS)
+        );
+        assert_eq!(
+            status_spinner_interval_from_config(10_000),
+            Duration::from_millis(crate::config::MAX_STATUS_SPINNER_MS)
+        );
+        assert_eq!(
+            status_spinner_interval_from_config(333),
+            Duration::from_millis(333)
+        );
+    }
+
+    #[test]
+    fn next_loop_deadline_includes_the_spinner_tick() {
+        let mut app = app_with_working_agent();
+        let now = Instant::now();
+        app.last_spinner_tick = Some(now);
+        app.next_resize_poll = now + Duration::from_secs(5);
+        app.next_auto_update_check = Some(now + Duration::from_secs(6));
+        app.next_agent_manifest_update_check = None;
+        // A populated session has a git refresh due at once; park it.
+        app.git_refresh_in_flight = true;
+
+        assert_eq!(
+            app.next_loop_deadline(now, false),
+            Some(now + app.state.status_spinner_interval)
+        );
     }
 
     #[test]
