@@ -1211,6 +1211,22 @@
           ]
         },
         {
+          "key": "ui.status_spinner",
+          "type": "enum",
+          "default": "\"on\"",
+          "description": "Working icon motion in sidebar agent rows: `on` steps a spinner on a slow shared tick while any agent is working; `off` keeps the static working glyph.",
+          "values": [
+            "on",
+            "off"
+          ]
+        },
+        {
+          "key": "ui.status_spinner_ms",
+          "type": "integer",
+          "default": "200",
+          "description": "Milliseconds between working-spinner frames, clamped to 50..=2000."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

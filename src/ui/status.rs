@@ -250,6 +250,29 @@ pub(super) fn state_icon<'a>(
     )
 }
 
+/// Herdr's working spinner, stepped by `App::advance_spinner` on a slow
+/// shared tick: frame `n` is `ACTIVITY_FRAMES[n % 10]`.
+const ACTIVITY_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/// The icon for an agent row: the working glyph animates when the spinner is
+/// on (`frame` is `Some`); every other state falls through to [`state_icon`].
+pub(super) fn agent_state_icon<'a>(
+    state: AgentState,
+    seen: bool,
+    frame: Option<u8>,
+    symbols: &crate::app::state::StateIconSymbols<'a>,
+    colors: &crate::app::state::StateIconColors,
+) -> (&'a str, Style) {
+    let (glyph, style) = state_icon(state, seen, symbols, colors);
+    match (state, frame) {
+        (AgentState::Working, Some(frame)) => (
+            ACTIVITY_FRAMES[usize::from(frame) % ACTIVITY_FRAMES.len()],
+            style,
+        ),
+        _ => (glyph, style),
+    }
+}
+
 pub(super) fn state_label(state: AgentState, seen: bool) -> &'static str {
     match (state, seen) {
         (AgentState::Blocked, _) => "blocked",
@@ -294,6 +317,32 @@ mod tests {
         CopyFeedback {
             message: "copied to clipboard".to_string(),
         }
+    }
+
+    #[test]
+    fn agent_state_icon_animates_only_the_working_state_when_a_frame_is_given() {
+        let palette = Palette::catppuccin();
+        let colors = crate::app::state::StateIconColors {
+            working: palette.yellow,
+            idle: palette.green,
+            done: palette.teal,
+            blocked: palette.red,
+            unknown: palette.overlay0,
+        };
+        let symbols = crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Symbols);
+        let icon = |state, seen, frame| agent_state_icon(state, seen, frame, &symbols, &colors);
+
+        let (glyph, style) = icon(AgentState::Working, true, Some(3));
+        assert_eq!(glyph, "⠸");
+        assert_eq!(style.fg, Some(palette.yellow));
+        assert_eq!(display_width_u16(glyph), 1);
+        // Frames wrap around the ten-cell snake.
+        assert_eq!(icon(AgentState::Working, true, Some(13)).0, "⠸");
+        // Spinner off: the static working glyph.
+        assert_eq!(icon(AgentState::Working, true, None).0, "◐");
+        // Other states ignore the frame entirely.
+        assert_eq!(icon(AgentState::Idle, false, Some(3)).0, "□");
+        assert_eq!(icon(AgentState::Blocked, true, Some(3)).0, "×");
     }
 
     #[test]

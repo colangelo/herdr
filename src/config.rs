@@ -26,9 +26,9 @@ pub use self::{
         NotificationCenterPositionConfig, PaneBorderActiveStyleConfig, ShellModeConfig,
         SidebarActiveBorderConfig, SidebarCollapsedModeConfig, SidebarStyleConfig,
         SortMotionConfig, SortMotionEasingConfig, StateColorsConfig, StateSymbolsConfig,
-        StatusIndicatorStyle, TabBarPositionConfig, ToastClipboardPosition, ToastConfig,
-        ToastDelivery, ToastHerdrPosition, ToastHerdrSize, UpdateChannelConfig,
-        WorkspaceSortConfig, MAX_TOAST_DELAY_SECONDS,
+        StatusIndicatorStyle, StatusSpinnerConfig, TabBarPositionConfig, ToastClipboardPosition,
+        ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize, UpdateChannelConfig,
+        WorkspaceSortConfig, MAX_STATUS_SPINNER_MS, MAX_TOAST_DELAY_SECONDS, MIN_STATUS_SPINNER_MS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
@@ -41,6 +41,10 @@ pub use self::{
 };
 
 pub(crate) use self::keybinds::parse_key_combo;
+// `AppState::test_new` seeds the spinner interval from the default; production
+// construction reads the value from `Config` instead.
+#[cfg(test)]
+pub use self::model::DEFAULT_STATUS_SPINNER_MS;
 pub(crate) use self::{
     io::upsert_top_level_bool,
     tab_bar::{
