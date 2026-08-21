@@ -722,14 +722,16 @@ impl PaneTodoIndicatorState {
     }
 }
 
-/// `▾ N` for N outstanding todos and a bare `▾` otherwise. Every pane gets one
-/// so the control sits in the same place on all of them; the empty and
-/// all-done states are told apart by [`PaneTodoIndicatorState::color`], not by
-/// width. Same spacing grammar as the notification `и`. The count is at most
-/// two digits because `add_todo` caps a pane at `MAX_TODOS_PER_PANE` (50).
+/// `▾ τ N` for N outstanding todos and a bare `▾` otherwise: `▾` is the
+/// handle that marks the place on the pane, `τ` names the count the way the
+/// tab-bar corner does. Every pane gets one so the control sits in the same
+/// place on all of them; the empty and all-done states are told apart by
+/// [`PaneTodoIndicatorState::color`], not by width. Same spacing grammar as
+/// the notification `и`. The count is at most two digits because `add_todo`
+/// caps a pane at `MAX_TODOS_PER_PANE` (50).
 fn pane_todo_indicator_label(state: PaneTodoIndicatorState) -> String {
     match state {
-        PaneTodoIndicatorState::Outstanding { count, .. } => format!(" ▾ {count} "),
+        PaneTodoIndicatorState::Outstanding { count, .. } => format!(" ▾ τ {count} "),
         PaneTodoIndicatorState::AllDone | PaneTodoIndicatorState::Empty => " ▾ ".to_string(),
     }
 }
@@ -1905,7 +1907,7 @@ mod tests {
         let indicator =
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
 
-        assert_eq!(indicator.label, " ▾ 3 ");
+        assert_eq!(indicator.label, " ▾ τ 3 ");
         assert_eq!(
             indicator.state,
             PaneTodoIndicatorState::Outstanding {
@@ -2070,23 +2072,23 @@ mod tests {
     }
 
     /// Spec: "when pane width forces a choice, the indicator SHALL be laid out
-    /// before the pane title". At 8 columns the 5-cell label still fits, so
+    /// before the pane title". At 10 columns the 7-cell label still fits, so
     /// the title is what has to give way — not the other way round.
     #[test]
     fn a_squeezed_pane_keeps_the_control_and_drops_the_title() {
         let mut app = app_with_pane_todos(&[(false, TodoPriority::High)]);
         set_manual_pane_label(&mut app, "label");
-        app.view.pane_infos[0].rect = Rect::new(0, 0, 8, 4);
-        app.view.pane_infos[0].inner_rect = Rect::new(1, 1, 6, 2);
+        app.view.pane_infos[0].rect = Rect::new(0, 0, 10, 4);
+        app.view.pane_infos[0].inner_rect = Rect::new(1, 1, 8, 2);
 
         let indicator =
             pane_todo_indicator(&app, &app.view.pane_infos[0]).expect("indicator should exist");
-        assert_eq!(indicator.label, " ▾ 1 ");
+        assert_eq!(indicator.label, " ▾ τ 1 ");
 
         let buffer = draw_pane_borders(&app);
         assert_eq!(
-            row_text(&buffer, 0, 8),
-            "┌─ ▾ 1 ┐",
+            row_text(&buffer, 0, 10),
+            "┌─ ▾ τ 1 ┐",
             "the control survives whole and the title drops out"
         );
     }
