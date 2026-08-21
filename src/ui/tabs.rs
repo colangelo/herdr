@@ -553,11 +553,10 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         == crate::config::NotificationCenterPositionConfig::TopRight;
     if indicator_in_tab_bar && app.view.notification_hit_area.width > 0 {
         let unread = app.notification_log.unread_count();
+        // Same weight as the todo indicator beside it: accent text on the bar,
+        // not an inverse pill, so the two corners read as one family.
         let style = if unread > 0 {
-            Style::default()
-                .fg(panel_contrast_fg(p))
-                .bg(p.accent)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.overlay1)
         };
@@ -945,6 +944,12 @@ mod tests {
 
         let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
         assert!(row.contains("и 2"), "tab row: {row:?}");
+        // Accent text, no inverse pill: the same treatment as the todo
+        // indicator next to it.
+        let cell = &terminal.backend().buffer()[(app.view.notification_hit_area.x + 1, 0)];
+        assert_eq!(cell.symbol(), "и");
+        assert_eq!(cell.style().fg, Some(app.palette.accent));
+        assert_ne!(cell.style().bg, Some(app.palette.accent));
     }
 
     #[test]
