@@ -7,8 +7,9 @@ use super::{
     config::{read_branch_config, upstream_full_ref},
     discovery::{
         automatic_workspace_label, canonicalize_best_effort_path, fallback_label_from_cwd,
-        git_ref_storage_is_reftable, git_rev_parse_verify, git_space_metadata_from_info,
-        git_symbolic_head_full, git_worktree_info, read_ref_oid, GitWorktreeInfo,
+        git_operation_in_progress, git_ref_storage_is_reftable, git_rev_parse_verify,
+        git_space_metadata_from_info, git_symbolic_head_full, git_worktree_info, read_ref_oid,
+        short_oid, DetachedHead, GitWorktreeInfo,
     },
 };
 
@@ -99,6 +100,7 @@ pub fn git_status_snapshot_for_cwd_with_demand(
         let snapshot = WorkspaceGitStatusSnapshot {
             auto_label: fallback_label_from_cwd(cwd),
             branch: None,
+            detached_head: None,
             ahead_behind: None,
             space: None,
         };
@@ -115,19 +117,16 @@ pub fn git_status_snapshot_for_cwd_with_demand(
     let space = git_space_metadata_from_info(&info);
 
     if !demand.ahead_behind {
-        let branch = demand
+        let (branch, detached_head) = demand
             .branch
-            .then(|| {
-                read_head_identity(&info).and_then(|head| match head {
-                    GitHeadIdentity::Branch { short_name, .. } => Some(short_name),
-                    GitHeadIdentity::Detached { .. } => None,
-                })
-            })
-            .flatten();
+            .then(|| read_head_identity(&info).map(|head| head_facts(&head, &info)))
+            .flatten()
+            .unwrap_or((None, None));
         return (
             WorkspaceGitStatusSnapshot {
                 auto_label,
                 branch,
+                detached_head,
                 ahead_behind: None,
                 space: Some(space),
             },
@@ -140,18 +139,20 @@ pub fn git_status_snapshot_for_cwd_with_demand(
             WorkspaceGitStatusSnapshot {
                 auto_label,
                 branch: None,
+                detached_head: None,
                 ahead_behind: None,
                 space: Some(space),
             },
             None,
         );
     };
-    let branch = fingerprint.branch_name().map(str::to_string);
+    let (branch, detached_head) = head_facts(&fingerprint.head, &info);
 
     if let Some(cached) = cached.filter(|entry| entry.fingerprint.as_ref() == Some(&fingerprint)) {
         let snapshot = WorkspaceGitStatusSnapshot {
             auto_label,
             branch,
+            detached_head,
             ahead_behind: cached.snapshot.ahead_behind,
             space: Some(space),
         };
@@ -172,6 +173,7 @@ pub fn git_status_snapshot_for_cwd_with_demand(
     let snapshot = WorkspaceGitStatusSnapshot {
         auto_label,
         branch,
+        detached_head,
         ahead_behind,
         space: Some(space),
     };
@@ -183,6 +185,24 @@ pub fn git_status_snapshot_for_cwd_with_demand(
             snapshot,
         }),
     )
+}
+
+/// The branch name when HEAD is on one, else the detached-HEAD fact — never
+/// both, so `branch` stays a branch name.
+fn head_facts(
+    head: &GitHeadIdentity,
+    info: &GitWorktreeInfo,
+) -> (Option<String>, Option<DetachedHead>) {
+    match head {
+        GitHeadIdentity::Branch { short_name, .. } => (Some(short_name.clone()), None),
+        GitHeadIdentity::Detached { oid } => (
+            None,
+            Some(DetachedHead {
+                short_oid: short_oid(oid),
+                operation: git_operation_in_progress(&info.git_dir),
+            }),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -207,13 +227,6 @@ fn git_status_fingerprint_from_info(info: &GitWorktreeInfo) -> Option<GitStatusF
 }
 
 impl GitStatusFingerprint {
-    fn branch_name(&self) -> Option<&str> {
-        match &self.head {
-            GitHeadIdentity::Branch { short_name, .. } => Some(short_name.as_str()),
-            GitHeadIdentity::Detached { .. } => None,
-        }
-    }
-
     fn head_oid(&self) -> Option<&str> {
         match &self.head {
             GitHeadIdentity::Branch { oid, .. } => oid.as_deref(),
@@ -434,6 +447,7 @@ mod tests {
             snapshot: WorkspaceGitStatusSnapshot {
                 auto_label: "repo".into(),
                 branch: Some("main".into()),
+                detached_head: None,
                 ahead_behind: Some((2, 1)),
                 space: git_space_metadata(&root),
             },
@@ -459,6 +473,7 @@ mod tests {
             snapshot: WorkspaceGitStatusSnapshot {
                 auto_label: "repo".into(),
                 branch: Some("main".into()),
+                detached_head: None,
                 ahead_behind: Some((4, 0)),
                 space: git_space_metadata(&root),
             },
@@ -494,6 +509,7 @@ mod tests {
             snapshot: WorkspaceGitStatusSnapshot {
                 auto_label: "repo".into(),
                 branch: Some("main".into()),
+                detached_head: None,
                 ahead_behind: Some((0, 3)),
                 space: git_space_metadata(&root),
             },

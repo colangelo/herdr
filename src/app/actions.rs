@@ -3059,6 +3059,10 @@ impl AppState {
                 ws.cached_git_branch = result.branch;
                 changed = true;
             }
+            if result.demand.branch && ws.cached_git_detached_head != result.detached_head {
+                ws.cached_git_detached_head = result.detached_head;
+                changed = true;
+            }
             if result.demand.ahead_behind && ws.cached_git_ahead_behind != result.ahead_behind {
                 ws.cached_git_ahead_behind = result.ahead_behind;
                 changed = true;
@@ -4856,6 +4860,7 @@ mod tests {
                 demand: crate::workspace::GitStatusRefreshDemand::ALL,
                 auto_label: "one".into(),
                 branch: Some("main".into()),
+                detached_head: None,
                 ahead_behind: Some((2, 1)),
                 space: None,
             }],
@@ -4885,6 +4890,7 @@ mod tests {
                 demand: crate::workspace::GitStatusRefreshDemand::ALL,
                 auto_label: "stale".into(),
                 branch: Some("main".into()),
+                detached_head: None,
                 ahead_behind: Some((0, 1)),
                 space: None,
             }],
@@ -4916,6 +4922,7 @@ mod tests {
                 },
                 auto_label: "one".into(),
                 branch: Some("new".into()),
+                detached_head: None,
                 ahead_behind: None,
                 space: None,
             }],
@@ -4943,6 +4950,7 @@ mod tests {
                 demand: crate::workspace::GitStatusRefreshDemand::ALL,
                 auto_label: "one".into(),
                 branch: None,
+                detached_head: None,
                 ahead_behind: None,
                 space: None,
             }],
@@ -4951,6 +4959,45 @@ mod tests {
         assert!(changed);
         assert_eq!(state.workspaces[0].branch(), None);
         assert_eq!(state.workspaces[0].git_ahead_behind(), None);
+    }
+
+    #[test]
+    fn apply_workspace_git_statuses_swaps_branch_for_detached_head_and_back() {
+        let mut state = app_with_workspaces(&["one"]);
+        let workspace_id = state.workspaces[0].id.clone();
+        let cwd = state.workspaces[0].resolved_identity_cwd().unwrap();
+        state.workspaces[0].cached_git_branch = Some("main".into());
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let status = |branch: Option<&str>, detached: Option<&str>| WorkspaceGitStatus {
+            workspace_id: workspace_id.clone(),
+            resolved_identity_cwd: cwd.clone(),
+            status_cache_key: cwd.clone(),
+            demand: crate::workspace::GitStatusRefreshDemand::ALL,
+            auto_label: "one".into(),
+            branch: branch.map(str::to_string),
+            detached_head: detached.map(|oid| crate::workspace::DetachedHead {
+                short_oid: oid.into(),
+                operation: None,
+            }),
+            ahead_behind: None,
+            space: None,
+        };
+
+        // `git checkout <sha>`: the branch goes, the detached fact arrives,
+        // and the row keeps something to say.
+        assert!(state
+            .apply_workspace_git_statuses(&terminal_runtimes, vec![status(None, Some("a620c06"))]));
+        assert_eq!(state.workspaces[0].branch(), None);
+        assert_eq!(
+            state.workspaces[0].head_label().as_deref(),
+            Some("@a620c06")
+        );
+
+        // Back on a branch: the detached fact is cleared, not left stale.
+        assert!(state
+            .apply_workspace_git_statuses(&terminal_runtimes, vec![status(Some("main"), None)]));
+        assert_eq!(state.workspaces[0].head_label().as_deref(), Some("main"));
+        assert_eq!(state.workspaces[0].cached_git_detached_head, None);
     }
 
     #[test]
@@ -4971,6 +5018,7 @@ mod tests {
                 demand: crate::workspace::GitStatusRefreshDemand::ALL,
                 auto_label: "other".into(),
                 branch: Some("scratch".into()),
+                detached_head: None,
                 ahead_behind: None,
                 space: Some(crate::workspace::GitSpaceMetadata {
                     key: "other-repo-key".into(),

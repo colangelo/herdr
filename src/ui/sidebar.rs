@@ -252,7 +252,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
     let label = if indented {
         grouped_child_display_label(
             &ws.display_name_from_terminals(&app.terminals),
-            ws.branch().as_deref(),
+            ws.head_label().as_deref(),
             ws.custom_name.is_some(),
         )
     } else {
@@ -263,7 +263,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
         &app.sidebar_spaces,
         SpaceTokenContext {
             workspace: &label,
-            branch: ws.branch().as_deref(),
+            branch: ws.head_label().as_deref(),
             state_text: state_label(state, seen),
             ahead_behind: ws.git_ahead_behind(),
             tokens: &token_values,
@@ -1735,7 +1735,11 @@ fn render_workspace_list(
 
         let label = ws.display_name_from(&app.terminals, terminal_runtimes);
         let display_label = if card.indented {
-            grouped_child_display_label(&label, ws.branch().as_deref(), ws.custom_name.is_some())
+            grouped_child_display_label(
+                &label,
+                ws.head_label().as_deref(),
+                ws.custom_name.is_some(),
+            )
         } else {
             label
         };
@@ -1779,7 +1783,7 @@ fn render_workspace_list(
             &app.sidebar_spaces,
             SpaceTokenContext {
                 workspace: &display_label,
-                branch: ws.branch().as_deref(),
+                branch: ws.head_label().as_deref(),
                 state_text: state_label(display_state, display_seen),
                 ahead_behind: ws.git_ahead_behind(),
                 tokens: &token_values,
@@ -3883,6 +3887,80 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 render_workspace_list(&app, &runtimes, frame, Rect::new(0, 0, 15, 6), false)
             })
             .expect("workspace list should render");
+    }
+
+    /// A detached checkout used to lose its whole second row (branch `None`
+    /// resolved to no token, and an empty row is dropped). It now says where
+    /// it is instead, and names the operation holding it there.
+    #[test]
+    fn detached_head_workspace_keeps_its_second_row_and_says_where_it_is() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut detached = Workspace::test_new("herdr");
+        detached.cached_git_branch = None;
+        detached.cached_git_detached_head = Some(crate::workspace::DetachedHead {
+            short_oid: "a620c06".into(),
+            operation: Some(crate::workspace::GitOperation::Rebase),
+        });
+        let on_branch = Workspace::test_new("infra");
+        let mut no_repo = Workspace::test_new("notes");
+        no_repo.cached_git_branch = None;
+        app.workspaces = vec![detached, on_branch, no_repo];
+        app.workspaces[1].cached_git_branch = Some("main".into());
+        app.active = Some(0);
+        app.mode = Mode::Terminal;
+
+        assert_eq!(workspace_row_height(&app, &app.workspaces[0], false), 2);
+        assert_eq!(workspace_row_height(&app, &app.workspaces[1], false), 2);
+        assert_eq!(
+            workspace_row_height(&app, &app.workspaces[2], false),
+            1,
+            "outside a repo there is still nothing to say"
+        );
+
+        let area = Rect::new(0, 0, 30, 12);
+        app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
+        let list_area = workspace_list_rect(area, app.sidebar_section_split);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_list(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    list_area,
+                    false,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let card = app.view.workspace_card_areas[0].rect;
+        let second = row_text(buffer, card.y + 1, card.width);
+        assert!(
+            second.contains("rebase @a620c06"),
+            "detached row: {second:?}"
+        );
+
+        // Off the rebase, just the commit.
+        app.workspaces[0]
+            .cached_git_detached_head
+            .as_mut()
+            .unwrap()
+            .operation = None;
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_list(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    list_area,
+                    false,
+                )
+            })
+            .unwrap();
+        let second = row_text(terminal.backend().buffer(), card.y + 1, card.width);
+        assert!(second.contains("@a620c06"), "detached row: {second:?}");
+        assert!(!second.contains("rebase"), "detached row: {second:?}");
     }
 
     fn workspace_with_worktree_space(
