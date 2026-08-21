@@ -881,6 +881,7 @@ impl App {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             host_mouse_pixels: None,
             session_dirty: false,
+            session_save_urgent: false,
             terminal_runtime_shutdowns: Vec::new(),
             confirm_close_workspace_id: None,
         };
@@ -5814,6 +5815,30 @@ mod tests {
 
         assert!(!app.state.session_dirty);
         assert!(app.session_save_deadline.is_some());
+    }
+
+    #[test]
+    fn urgent_session_dirty_flag_schedules_an_immediate_save() {
+        let mut app = test_app();
+        app.no_session = false;
+        let before = Instant::now();
+        app.state.mark_session_dirty_urgent();
+
+        app.sync_session_save_schedule();
+
+        assert!(!app.state.session_dirty);
+        assert!(!app.state.session_save_urgent);
+        let deadline = app.session_save_deadline.expect("a save is scheduled");
+        assert!(
+            deadline <= Instant::now() && deadline >= before,
+            "an urgent save is due now, not after the debounce"
+        );
+
+        // The flag is consumed: the next ordinary mutation debounces again.
+        app.state.mark_session_dirty();
+        app.sync_session_save_schedule();
+        let deadline = app.session_save_deadline.expect("a save is scheduled");
+        assert!(deadline > Instant::now() + SESSION_SAVE_DEBOUNCE / 2);
     }
 
     #[test]

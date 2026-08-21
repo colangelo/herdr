@@ -104,10 +104,11 @@ impl App {
         });
     }
 
-    /// Marks the snapshot stale and tells subscribers which pane changed.
-    /// Every mutating handler ends here.
+    /// Marks the snapshot stale — urgently, so the todo reaches disk on the
+    /// next loop pass instead of after the save debounce — and tells
+    /// subscribers which pane changed. Every mutating handler ends here.
     fn after_todo_mutation(&mut self, pane_id: &str) {
-        self.state.mark_session_dirty();
+        self.state.mark_session_dirty_urgent();
         self.emit_todo_changed(pane_id);
     }
 
@@ -565,6 +566,7 @@ mod tests {
         for method in mutations {
             let before = app.event_hub.current_sequence();
             app.state.session_dirty = false;
+            app.state.session_save_urgent = false;
 
             let response = request_json(&mut app, method);
             assert!(
@@ -574,6 +576,10 @@ mod tests {
             assert!(
                 app.state.session_dirty,
                 "mutation must mark the session dirty or todos never persist: {response:?}"
+            );
+            assert!(
+                app.state.session_save_urgent,
+                "todo mutations must skip the save debounce: {response:?}"
             );
 
             let emitted = app

@@ -2689,6 +2689,11 @@ pub struct AppState {
     pub(crate) host_mouse_pixels: Option<crate::input::mouse::HostPixels>,
     /// Set when a persisted session snapshot would change.
     pub session_dirty: bool,
+    /// Set alongside `session_dirty` by mutations that must reach disk
+    /// without the debounce: pane todos are small, rare, user-authored, and
+    /// the only session content that exists nowhere else, so a forced
+    /// shutdown inside the debounce window must not lose them.
+    pub session_save_urgent: bool,
     /// Terminal runtimes that should be shut down by the app/runtime layer
     /// after state has detached their terminal metadata.
     pub(crate) terminal_runtime_shutdowns: Vec<crate::terminal::TerminalId>,
@@ -2697,6 +2702,12 @@ pub struct AppState {
 impl AppState {
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
+    }
+
+    /// [`Self::mark_session_dirty`] for content that skips the save debounce.
+    pub(crate) fn mark_session_dirty_urgent(&mut self) {
+        self.session_dirty = true;
+        self.session_save_urgent = true;
     }
 
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
@@ -3678,6 +3689,7 @@ impl AppState {
             host_cell_size: crate::kitty_graphics::HostCellSize::default(),
             host_mouse_pixels: None,
             session_dirty: false,
+            session_save_urgent: false,
             terminal_runtime_shutdowns: Vec::new(),
         }
     }
