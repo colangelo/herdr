@@ -16,6 +16,9 @@ pub struct PaneDetail {
     pub pane_label: Option<String>,
     pub terminal_title: Option<String>,
     pub terminal_title_stripped: Option<String>,
+    /// Not-yet-done todos on the pane, and the highest priority among them.
+    pub outstanding_todos: usize,
+    pub highest_todo_priority: Option<crate::terminal::todo::TodoPriority>,
     pub agent_label: String,
     pub agent_kind_label: Option<String>,
     pub agent: Option<Agent>,
@@ -78,6 +81,8 @@ impl Tab {
                         .or_else(|| terminal.manual_label.clone()),
                     terminal_title: terminal.terminal_title.clone(),
                     terminal_title_stripped: terminal.terminal_title_stripped(),
+                    outstanding_todos: terminal.outstanding_todo_count(),
+                    highest_todo_priority: terminal.highest_outstanding_todo_priority(),
                     agent_label,
                     agent_kind_label,
                     agent: terminal.effective_known_agent(),
