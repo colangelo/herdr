@@ -354,7 +354,7 @@ Space rows accept these built-in tokens:
 - `state_icon` — colored icon for the space's rolled-up agent state.
 - `state_text` — text for the rolled-up agent state.
 - `workspace` — workspace name.
-- `branch` — Git branch when available.
+- `branch` — Git branch when available. A checkout on no branch shows where it is instead — `@a620c06`, or `rebase @a620c06` / `bisect @a620c06` while that operation runs — so the row stays; outside a repository the token is empty.
 - `git_status` — Git ahead and behind counts when nonzero.
 - `$name` — custom workspace metadata named `name`.
 
