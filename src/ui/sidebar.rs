@@ -32,6 +32,9 @@ pub(crate) struct AgentPanelEntry {
     pub terminal_title_stripped: Option<String>,
     /// See `TerminalState::title_activity_frame`.
     pub title_activity_frame: Option<u8>,
+    /// Not-yet-done todos on the pane, and the highest priority among them.
+    pub outstanding_todos: usize,
+    pub highest_todo_priority: Option<crate::terminal::todo::TodoPriority>,
     pub agent_label: Option<String>,
     pub agent_kind_label: Option<String>,
     pub agent: Option<crate::detect::Agent>,
@@ -176,6 +179,8 @@ fn collect_agent_panel_entries_with_runtimes(
                         terminal_title: detail.terminal_title,
                         terminal_title_stripped: detail.terminal_title_stripped,
                         title_activity_frame: detail.title_activity_frame,
+                        outstanding_todos: detail.outstanding_todos,
+                        highest_todo_priority: detail.highest_todo_priority,
                         agent_label: Some(detail.agent_label),
                         agent_kind_label: detail.agent_kind_label,
                         agent: detail.agent,
@@ -1511,6 +1516,18 @@ fn editorial_number_label(jump_number: Option<char>, prefix: &str) -> String {
     }
 }
 
+/// The agent row's todo count, `τ N`, shown at the right edge of the entry's
+/// second row — under the editorial jump label — so the open work on a pane
+/// is visible without opening it. Empty when nothing is outstanding: the row
+/// is for counts, the pane border keeps the always-present handle.
+fn agent_todo_label(outstanding: usize) -> String {
+    match outstanding {
+        0 => String::new(),
+        n if n > 99 => "τ 99+".to_string(),
+        n => format!("τ {n}"),
+    }
+}
+
 /// Columns reserved at the right edge of an editorial name row for the jump
 /// label (its display width + one-cell gap, plus the right active-bar column
 /// when that border mode is on).
@@ -2012,6 +2029,13 @@ fn render_agent_detail(
             .flatten();
         let has_second_row = rows.len() >= 2;
         let number_label = editorial_number_label(jump_number, &app.agent_number_prefix);
+        // The todo count sits at the right edge of the second row in both
+        // styles; a one-row entry has no room for it and shows none.
+        let todo_label = if has_second_row {
+            agent_todo_label(detail.outstanding_todos)
+        } else {
+            String::new()
+        };
 
         let gap = agent_entry_gap(app, index, details.len());
         // Active-agent border lines live in blank spacer rows between entries,
@@ -2097,6 +2121,10 @@ fn render_agent_detail(
                 editorial && row_index == 0,
                 &number_label,
                 app.sidebar_active_border,
+            ) + editorial_number_reserve(
+                row_index == 1,
+                &todo_label,
+                app.sidebar_active_border,
             );
             spans.extend(resolved_token_spans(
                 resolved,
@@ -2121,6 +2149,17 @@ fn render_agent_detail(
                 body_bottom,
                 &number_label,
                 Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
+                app.sidebar_active_border,
+            );
+        }
+        if !todo_label.is_empty() {
+            draw_editorial_number(
+                frame,
+                Rect::new(body.x, row_y, body.width, height),
+                row_y + 1,
+                body_bottom,
+                &todo_label,
+                Style::default().fg(app.pane_todo_indicator_color(detail.highest_todo_priority)),
                 app.sidebar_active_border,
             );
         }
@@ -2895,6 +2934,101 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(metrics.max_offset_from_bottom, 0);
         assert_eq!(row_text(buffer, body.y, body.width), " pi");
         assert_eq!(row_text(buffer, body.y + 1, body.width), " claude");
+    }
+
+    #[test]
+    fn agent_rows_show_the_open_todo_count_under_the_jump_label() {
+        use crate::terminal::todo::TodoPriority;
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        app.sidebar_style = crate::config::SidebarStyleConfig::Editorial;
+        app.sidebar_agents.rows = vec![
+            vec![crate::config::AgentSidebarToken::Workspace],
+            vec![crate::config::AgentSidebarToken::Agent],
+        ];
+        for (workspace, todos) in app.workspaces.iter().zip([
+            vec![
+                (false, TodoPriority::Normal),
+                (false, TodoPriority::High),
+                (true, TodoPriority::High),
+            ],
+            vec![(true, TodoPriority::Low)],
+        ]) {
+            let pane_id = workspace.tabs[0].root_pane;
+            let terminal_id = workspace.tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            for (index, (done, priority)) in todos.iter().enumerate() {
+                let todo = terminal
+                    .add_todo(&format!("todo {index}"), *priority, None, 100)
+                    .unwrap();
+                if *done {
+                    terminal
+                        .update_todo(
+                            todo.id,
+                            crate::terminal::todo::TodoUpdate {
+                                done: Some(true),
+                                ..Default::default()
+                            },
+                            200,
+                        )
+                        .unwrap();
+                }
+            }
+        }
+
+        app.show_agent_numbers = true;
+        let area = Rect::new(0, 0, 24, 10);
+        let body = agent_panel_body_rect(area, false);
+        let mut terminal = Terminal::new(TestBackend::new(24, 10)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        // Two open todos (the done one does not count), under the jump label,
+        // coloured by the highest open priority.
+        let first_name = row_text(buffer, body.y, body.width);
+        let first_second = row_text(buffer, body.y + 1, body.width);
+        assert!(
+            first_name.ends_with('1'),
+            "jump label on the name row: {first_name:?}"
+        );
+        assert!(
+            first_second.ends_with("τ 2"),
+            "count on the second row: {first_second:?}"
+        );
+        let tau_x = body.x + body.width - 3;
+        assert_eq!(buffer[(tau_x, body.y + 1)].symbol(), "τ");
+        assert_eq!(
+            buffer[(tau_x, body.y + 1)].style().fg,
+            Some(app.palette.red)
+        );
+
+        // Everything done: no count at all.
+        let second_second = row_text(buffer, body.y + 3, body.width);
+        assert!(
+            !second_second.contains('τ'),
+            "no count once all done: {second_second:?}"
+        );
+
+        // A one-row entry has nowhere to put it.
+        app.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Workspace]];
+        let mut terminal = Terminal::new(TestBackend::new(24, 10)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol().to_string())
+            .collect::<String>();
+        assert!(!rendered.contains('τ'), "{rendered}");
     }
 
     #[test]

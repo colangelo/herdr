@@ -168,6 +168,8 @@ mod tests {
             terminal_title: None,
             terminal_title_stripped: None,
             title_activity_frame: None,
+            outstanding_todos: 0,
+            highest_todo_priority: None,
             agent_label: Some("pi".into()),
             agent_kind_label: Some("pi".into()),
             agent: Some(crate::detect::Agent::Pi),
