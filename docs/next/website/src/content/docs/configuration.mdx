@@ -353,7 +353,7 @@ Agent status uses compact colored dots by default. To distinguish blocked, worki
 status_indicators = "symbols"
 ```
 
-The symbols are static, so this option does not enable spinner animation.
+The symbols themselves are static. In the sidebar's agent rows the working icon still moves: with `status_spinner = "on"` (the default) every working agent's icon steps through a spinner on one shared tick, `status_spinner_ms` apart (default 200, clamped to 50–2000). The tick is armed only while an agent is working, so an idle session never wakes for it, and the agent's own terminal title is not involved — agents freeze their title spinner when a pane is unfocused, so the title cannot clock the rows that are not focused. Space rows keep the static working glyph. Set `status_spinner = "off"` to keep every working icon static.
 
 The symbols style draws `×` blocked, `◐` working, `□` done (finished, not looked at yet), `✓` idle (finished and seen), and `·` unknown. Either style can be adjusted per state with `[ui.state_symbols]`; unset states keep the style's glyph. A value must be exactly one terminal cell wide so the icon column stays aligned — wider or empty values are reported as a config diagnostic and ignored.
 
