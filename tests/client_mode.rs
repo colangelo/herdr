@@ -368,8 +368,8 @@ fn client_connects_and_receives_frame() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     // Connect and handshake.
     let mut stream = UnixStream::connect(&client_socket).expect("should connect to client socket");
@@ -408,8 +408,8 @@ fn direct_attach_initial_mouse_capture_follows_config() {
         &client_socket,
         "onboarding = false\n[ui]\nmouse_capture = false\n",
     );
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
     let created = send_json_request(
         &api_socket,
         &serde_json::json!({
@@ -557,8 +557,8 @@ fn client_sees_headless_startup_config_diagnostic() {
         _master: Some(pair.master),
         child,
     };
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     let mut stream = UnixStream::connect(&client_socket).expect("should connect to client socket");
     let (version, error) =
@@ -660,8 +660,8 @@ fn server_crash_after_attach_causes_lost_connection_error() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let mut spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     // Attach a real thin client (client subcommand) through PTY so handshake and
     // terminal setup paths are exercised.
@@ -843,8 +843,8 @@ fn attach_thin_client_with_config(
 ) -> (SpawnedHerdr, SpawnedHerdr, SharedOutput) {
     let spawned_server =
         spawn_server_with_config(config_home, runtime_dir, api_socket, client_socket, config);
-    wait_for_socket(api_socket, Duration::from_secs(10));
-    wait_for_socket(client_socket, Duration::from_secs(10));
+    wait_for_socket(api_socket);
+    wait_for_socket(client_socket);
 
     let thin_client = spawn_client_process(config_home, runtime_dir, api_socket);
     let reader = thin_client
@@ -1211,8 +1211,8 @@ fn client_exits_cleanly_when_terminal_and_transport_hang_up() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let mut spawned_server = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     let mut thin_client = spawn_client_process(&config_home, &runtime_dir, &api_socket);
     read_until_client_attaches(&thin_client);
@@ -1270,8 +1270,8 @@ fn client_exits_cleanly_when_terminal_hangs_up() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let spawned_server = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     let mut thin_client = spawn_client_process(&config_home, &runtime_dir, &api_socket);
     let attached_output = read_until_client_attaches(&thin_client);
@@ -1324,8 +1324,8 @@ fn client_receives_frame_after_pane_output() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     // Connect and handshake.
     let mut stream = UnixStream::connect(&client_socket).expect("should connect to client socket");
@@ -1393,8 +1393,8 @@ fn pane_spawn_cwd_fallback_in_server() {
     .unwrap();
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     let workspaces = send_json_request(
         &api_socket,
@@ -1439,8 +1439,8 @@ fn graceful_shutdown_sends_server_shutdown_to_client() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let mut spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     // Connect and handshake.
     let mut stream = UnixStream::connect(&client_socket).expect("should connect to client socket");
@@ -1538,8 +1538,8 @@ fn client_receives_notify_on_agent_state_change() {
         _master: Some(pair.master),
         child,
     };
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     // Connect as a client and perform handshake.
     let mut stream = UnixStream::connect(&client_socket).expect("should connect");

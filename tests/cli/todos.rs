@@ -39,7 +39,7 @@ fn todo_cli_round_trips_through_the_server() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let _herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = run_cli(
         &socket_path,
@@ -157,7 +157,7 @@ fn todo_cli_reports_errors_from_the_server() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let _herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let unknown_pane = run_todo_cli_without_pane(
         &socket_path,
