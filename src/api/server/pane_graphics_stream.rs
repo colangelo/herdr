@@ -649,6 +649,8 @@ mod tests {
         line
     }
 
+    // Every caller is a Unix-only test; on Windows nothing reaches it.
+    #[cfg(unix)]
     fn assert_server_stream_owner(owner: &str) {
         assert!(owner.starts_with("pane.graphics.stream:"));
     }

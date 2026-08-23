@@ -80,8 +80,7 @@ Invoke-Checked rustup @("target", "add", "x86_64-pc-windows-msvc")
 Invoke-Checked cargo @("fmt", "--check")
 Invoke-CargoWithZigCacheRecovery @(
     "clippy",
-    "--bin",
-    "herdr",
+    "--all-targets",
     "--locked",
     "--target",
     "x86_64-pc-windows-msvc",

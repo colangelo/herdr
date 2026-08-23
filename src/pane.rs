@@ -2770,7 +2770,8 @@ impl PaneRuntime {
         self.detect_reset_notify.clone()
     }
 
-    #[cfg(test)]
+    // Only the Unix-only input tests ask.
+    #[cfg(all(test, unix))]
     pub(crate) fn agent_detection_enabled_for_test(&self) -> bool {
         self.detect_handle.is_some()
     }

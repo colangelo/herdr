@@ -1,3 +1,7 @@
+// The harness drives a real server over a Unix socket; there is no Windows
+// equivalent, so the whole binary is Unix-only rather than each test.
+#![cfg(unix)]
+
 mod support;
 
 use std::fs;

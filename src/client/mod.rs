@@ -2539,7 +2539,9 @@ fn resize_poll_loop(
 // Logging
 // ---------------------------------------------------------------------------
 
-#[cfg(any(not(windows), test))]
+// The `test` arm outlived its callers: every one is `not(windows)` or a
+// Unix-only test, so on Windows this was compiled into test builds unused.
+#[cfg(not(windows))]
 fn query_host_terminal_appearance() {
     let _ = write_host_terminal_appearance_query(io::stdout());
 }
@@ -2587,7 +2589,7 @@ fn write_host_cell_size_query(mut writer: impl io::Write) -> io::Result<()> {
     writer.flush()
 }
 
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn store_reported_cell_size(reported_cell_size: &AtomicU64, width_px: u32, height_px: u32) {
     let packed = pack_cell_size(width_px, height_px);
     if reported_cell_size.swap(packed, Ordering::AcqRel) != packed {
