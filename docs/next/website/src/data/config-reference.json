@@ -1381,6 +1381,12 @@
           "description": "Color for unknown state glyphs and state text. Same syntax as `accent`; unset follows the theme."
         },
         {
+          "key": "ui.state_colors.background",
+          "type": "color",
+          "default": "unset",
+          "description": "Color for agents parked at their prompt while work they launched keeps running (state glyph and state text). Same syntax as `accent`; unset follows `working`."
+        },
+        {
           "key": "ui.state_symbols.working",
           "type": "string",
           "default": "unset",

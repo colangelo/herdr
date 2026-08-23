@@ -270,7 +270,10 @@ pub(super) fn agent_state_icon<'a>(
     match (state, background_work, frame) {
         // The pulse is drawn whether or not the spinner ticks: with it off the
         // first frame stands as a static mark that still tells the two apart.
-        (AgentState::Working, true, frame) => (symbols.background_frame(frame), style),
+        (AgentState::Working, true, frame) => (
+            symbols.background_frame(frame),
+            Style::default().fg(colors.background),
+        ),
         (AgentState::Working, false, Some(frame)) => (
             ACTIVITY_FRAMES[usize::from(frame) % ACTIVITY_FRAMES.len()],
             style,
@@ -334,6 +337,7 @@ mod tests {
             done: palette.teal,
             blocked: palette.red,
             unknown: palette.overlay0,
+            background: palette.teal,
         };
         let symbols = crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Symbols);
         let icon =
@@ -362,7 +366,11 @@ mod tests {
             assert_eq!(background(Some(frame)).0, "◈", "frame {frame}");
         }
         assert_eq!(background(Some(8)).0, "◇");
-        assert_eq!(background(Some(3)).1.fg, Some(palette.yellow));
+        assert_eq!(
+            background(Some(3)).1.fg,
+            Some(palette.teal),
+            "the pulse follows [ui.state_colors] background, not working"
+        );
         assert_eq!(display_width_u16(background(Some(3)).0), 1);
         // Spinner off: the pulse holds its first frame, still distinct from
         // an agent mid-turn.
@@ -378,6 +386,7 @@ mod tests {
             done: palette.teal,
             blocked: palette.red,
             unknown: palette.overlay0,
+            background: palette.teal,
         };
         for (indicator_style, expected_symbols) in [
             (StatusIndicatorStyle::Dots, ["●", "●", "●", "○", "·"]),

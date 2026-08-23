@@ -196,6 +196,9 @@ pub struct StateColorsConfig {
     pub done: Option<String>,
     pub blocked: Option<String>,
     pub unknown: Option<String>,
+    /// Agents parked at their prompt behind work they launched. Unset follows
+    /// `working`, which is the state they are still reported in.
+    pub background: Option<String>,
 }
 
 /// Per-state override glyphs for the sidebar state icons. Unset values fall
