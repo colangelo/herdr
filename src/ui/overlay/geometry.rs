@@ -50,6 +50,11 @@ pub(crate) struct AnchoredPanelSpec {
     /// Rows reserved below the list, normally [`crate::ui::FOOTER_ROWS`]. Zero
     /// for a panel with no footer to show.
     pub footer_rows: u16,
+    /// Rows reserved between the list and the footer for a detail block, rule
+    /// row included. Zero for a panel that shows no detail, which is every
+    /// panel whose selection has nothing more to say — the block appears only
+    /// when it has something to hold.
+    pub detail_rows: u16,
     /// Where the panel's top edge comes from.
     pub vertical: VerticalAnchor,
 }
@@ -66,9 +71,21 @@ pub(crate) struct PanelGeometry {
     /// The footer's button row, absent when there is no room for the whole
     /// footer block or nothing to put in it.
     pub footer_row: Option<Rect>,
+    /// The detail block between list and footer, absent when the panel asked
+    /// for none or there was no room. Its first row is a rule.
+    pub detail: Option<Rect>,
 }
 
 impl AnchoredPanelSpec {
+    /// The width `resolve` will settle on, for a caller that has to lay text
+    /// out inside the panel before it can say how many rows that text needs.
+    pub(crate) fn resolved_width(&self) -> u16 {
+        let (min_width, max_width) = self.width_bounds;
+        self.content_width
+            .clamp(min_width, max_width)
+            .min(self.screen.width.max(1))
+    }
+
     /// Resolve the panel's placement, or `None` when there is no screen to
     /// place it on — render and hit-test go quiet together.
     pub(crate) fn resolve(&self) -> Option<PanelGeometry> {
@@ -77,13 +94,9 @@ impl AnchoredPanelSpec {
             return None;
         }
 
-        let (min_width, max_width) = self.width_bounds;
-        let width = self
-            .content_width
-            .clamp(min_width, max_width)
-            .min(screen.width.max(1));
+        let width = self.resolved_width();
         let rows = self.rows.max(1).min(self.max_rows);
-        let height = (rows + 2 + self.footer_rows).min(screen.height.max(1));
+        let height = (rows + 2 + self.footer_rows + self.detail_rows).min(screen.height.max(1));
 
         let right = self.anchor.x.saturating_add(self.anchor.width);
         let x = right.saturating_sub(width).max(screen.x);
@@ -113,11 +126,31 @@ impl AnchoredPanelSpec {
         let footer_row =
             has_footer.then(|| Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1));
 
+        // The detail block is carved off the bottom of the list, directly
+        // above the footer. It yields to the list rather than the other way
+        // round: a panel squeezed to nothing shows its todos, not a detail of
+        // one of them.
+        let detail_rows = self.detail_rows.min(list.height.saturating_sub(1));
+        let (list, detail) = if detail_rows > 0 {
+            (
+                Rect::new(list.x, list.y, list.width, list.height - detail_rows),
+                Some(Rect::new(
+                    list.x,
+                    list.y + list.height - detail_rows,
+                    list.width,
+                    detail_rows,
+                )),
+            )
+        } else {
+            (list, None)
+        };
+
         Some(PanelGeometry {
             outer,
             inner,
             list,
             footer_row,
+            detail,
         })
     }
 }
@@ -142,6 +175,7 @@ mod tests {
             rows: 3,
             max_rows: 12,
             footer_rows: crate::ui::FOOTER_ROWS,
+            detail_rows: 0,
             vertical,
         }
     }

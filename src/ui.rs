@@ -94,7 +94,8 @@ use self::todo_panel::render_pane_todo_panel;
 // cells the renderer did not draw: the renderer reaches it inside the module
 // and the mouse hit-test reaches it through this re-export.
 pub(crate) use self::todo_panel::{
-    pane_todo_link_chip, pane_todo_link_chip_text, pane_todo_row_chip_area, pane_todo_row_id_text,
+    pane_todo_detail_rows, pane_todo_link_chip, pane_todo_link_chip_text, pane_todo_row_chip_area,
+    pane_todo_row_id_text,
 };
 pub(crate) use self::{
     dialogs::{

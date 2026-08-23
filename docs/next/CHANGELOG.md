@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- The pane todo panel now shows the selected todo's full text under the list when it has more lines than its row can hold (the ones marked `⏎`). Rows stay one line each, so scrolling, selection, and mouse hit-testing keep their one-row-per-todo mapping; the block appears only for a selection that has something more to say, and yields to the list when the panel is short.
 - The desktop tab bar now has configurable right-aligned status entries for zoom state, hostname, date/time, literal text, and asynchronously refreshed command output.
 - Optional `keys.move_tab_previous` and `keys.move_tab_next` bindings now reorder the active tab in place, wrapping at either end.
 - Optional `keys.resize_pane_left`, `keys.resize_pane_down`, `keys.resize_pane_up`, and `keys.resize_pane_right` bindings now resize the focused pane in one keystroke without entering resize mode.
