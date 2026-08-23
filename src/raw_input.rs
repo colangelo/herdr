@@ -175,7 +175,7 @@ impl RawInputFramer {
         self.byte_framer.enable_host_color_scheme_change_tracking();
     }
 
-    #[cfg(any(not(windows), test))]
+    #[cfg(not(windows))]
     pub(crate) fn enable_host_appearance_query_on_focus(&mut self) {
         self.byte_framer.enable_host_appearance_query_on_focus();
     }
@@ -296,7 +296,7 @@ impl RawInputByteFramer {
         !self.buffer.is_empty()
     }
 
-    #[cfg(any(not(windows), test))]
+    #[cfg(not(windows))]
     pub(crate) fn has_pending_lone_escape(&self) -> bool {
         self.buffer.as_slice() == [ESC]
     }

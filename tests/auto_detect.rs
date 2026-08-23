@@ -1,5 +1,8 @@
 //! Integration tests for auto-detect launch behavior.
 
+// The harness drives a real server over a Unix socket; there is no Windows
+// equivalent, so the whole binary is Unix-only rather than each test.
+#![cfg(unix)]
 #![cfg(not(target_os = "macos"))]
 
 mod support;
