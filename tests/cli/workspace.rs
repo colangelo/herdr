@@ -8,7 +8,7 @@ fn workspace_and_pane_management_commands_work() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let reloaded = run_cli(&socket_path, &["server", "reload-config"]);
     assert!(
@@ -101,7 +101,7 @@ fn worktree_management_commands_work() {
     create_committed_repo(&repo);
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let branch = "worktree/cli-wrapper";
     let created = run_cli_json(
@@ -227,7 +227,7 @@ fn forced_worktree_remove_terminates_processes_inside_checkout() {
     create_committed_repo(&repo);
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = run_cli_json(
         &socket_path,
@@ -309,7 +309,7 @@ fn worktree_open_existing_checkout_by_path_and_branch() {
     );
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let opened = run_cli_json_in_dir(
         &socket_path,
@@ -629,7 +629,7 @@ fn tab_management_commands_work() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = run_cli(
         &socket_path,

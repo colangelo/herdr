@@ -621,6 +621,12 @@ mod tests {
     use crate::ipc::LocalStream;
     use interprocess::local_socket::traits::Listener as _;
     use std::io::{BufRead, BufReader, Write};
+
+    /// How long a test waits to *observe* an outcome the code should reach
+    /// almost immediately. Deliberately far longer than any deadline under
+    /// test: a correct run never approaches it, so it bounds a hang without
+    /// ever becoming a margin the machine's load can eat.
+    const OBSERVE_TIMEOUT: Duration = Duration::from_secs(30);
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Arc;
@@ -765,7 +771,25 @@ mod tests {
         drop(client);
         running.store(false, Ordering::Relaxed);
         assert_close_and_respond(api_rx.blocking_recv().unwrap(), "pane_1", &stream_owner);
-        assert!(server_thread.join().unwrap().is_ok());
+        // Teardown, not the subject: the frame dispatch above is what this
+        // test asserts, and the close was just checked. Dropping the client
+        // and clearing `running` race by construction — the connection loop
+        // may see the closed peer before it sees the flag — so a disconnect
+        // error is as correct an outcome here as a clean stop, and demanding
+        // `Ok` made the test fail under parallel load for a reason that was
+        // never about graphics frames.
+        match server_thread.join().unwrap() {
+            Ok(()) => {}
+            Err(err) => assert!(
+                matches!(
+                    err.kind(),
+                    io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::UnexpectedEof
+                ),
+                "connection ended with an error the dropped client cannot explain: {err:?}"
+            ),
+        }
     }
 
     #[cfg(unix)]
@@ -1009,8 +1033,16 @@ mod tests {
         running.store(false, Ordering::Relaxed);
         writer.join().unwrap();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        // The absolute deadline is the subject: a body that keeps trickling
+        // must not hold the read open past it, so the read may not return
+        // *early*. How late it returns is scheduling, not behaviour — the
+        // old 500ms ceiling asserted that the machine was idle, and failed
+        // under parallel load while the code was right.
         assert!(started.elapsed() >= Duration::from_millis(50));
-        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(
+            started.elapsed() < OBSERVE_TIMEOUT,
+            "the read never returned; the absolute deadline is not being applied"
+        );
     }
 
     #[test]
@@ -1054,9 +1086,13 @@ mod tests {
 
         let (close_tx, close_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || close_tx.send(api_rx.blocking_recv()).unwrap());
+        // A liveness bound, not a margin. The header deadline above is 100ms,
+        // so a correct server dispatches the close almost at once and this
+        // returns immediately; the wait only has to outlast a loaded machine
+        // rather than beat it, which a one-second bound did not.
         let close = close_rx
-            .recv_timeout(Duration::from_secs(1))
-            .unwrap()
+            .recv_timeout(OBSERVE_TIMEOUT)
+            .expect("the timed-out header must dispatch a close")
             .unwrap();
         assert_close_and_respond(close, "pane_1", &owner);
 

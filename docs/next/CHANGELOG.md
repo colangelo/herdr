@@ -56,6 +56,7 @@
 
 
 ### Fixed
+- The test suite's wall-clock races are gone: waits that had to *beat* a deadline are now bounds on observing an outcome that only one thing can cause, so a loaded machine makes them slower rather than red. The "must appear" helpers share one generous liveness bound instead of 166 hand-picked 5s and 10s deadlines, and five files that carried their own copy of them now use the shared one.
 - A remote client on local keybindings (the default) no longer loses the server's `[[keys.command]]` custom commands: they stopped firing and vanished from the `prefix+?` help, because the client profile replaced the server keybinds wholesale and a client profile deliberately carries no commands — a custom command runs a shell command on the server host, so its text may only come from the server's own config. The server's commands are now grafted back onto every client profile.
 - `just windows-lint` and the Windows CI check now lint test targets too, which had been skipped: two real clippy failures were sitting in `src/platform/windows.rs` unseen. The integration test binaries, which drive a real server over a Unix socket and never compiled on Windows, now say so with `#![cfg(unix)]` instead of failing the target build.
 - A workspace in detached HEAD keeps its second sidebar row and says where it is — `@a620c06`, or `rebase @a620c06` / `bisect @a620c06` while that operation runs — instead of silently collapsing to one row. The `branch` fact stays a branch name; the detached checkout is a separate fact refreshed alongside it.

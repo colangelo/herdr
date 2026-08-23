@@ -540,7 +540,7 @@ fn live_server_holds_one_pty_master_fd_per_pane() {
     let api_socket = runtime_dir.join("herdr.sock");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
     let server_pid = spawned
         .child
@@ -623,7 +623,7 @@ fn live_handoff_preserves_named_session_socket_paths() {
     let client_socket = session_dir.join("herdr-client.sock");
 
     let spawned = spawn_named_session_server(&config_home, &runtime_dir, "work");
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     assert_ok(request(
@@ -632,7 +632,7 @@ fn live_handoff_preserves_named_session_socket_paths() {
     ));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(5));
+    wait_for_socket(&client_socket);
     assert!(
         !config_home.join("herdr-dev/herdr.sock").exists(),
         "named handoff unexpectedly bound the default session API socket"
@@ -659,7 +659,7 @@ fn live_handoff_ignores_leaked_default_socket_env_for_named_session() {
     let work_client_socket = work_session_dir.join("herdr-client.sock");
 
     let default_spawned = spawn_default_session_server(&config_home, &runtime_dir);
-    wait_for_socket(&default_api_socket, Duration::from_secs(10));
+    wait_for_socket(&default_api_socket);
     register_runtime_dir(&runtime_dir);
 
     let work_spawned = spawn_server_with_args_and_socket_env(
@@ -669,7 +669,7 @@ fn live_handoff_ignores_leaked_default_socket_env_for_named_session() {
         Some(&default_api_socket),
         Some(&default_client_socket),
     );
-    wait_for_socket(&work_api_socket, Duration::from_secs(10));
+    wait_for_socket(&work_api_socket);
 
     assert_ok(request(
         &work_api_socket,
@@ -678,7 +678,7 @@ fn live_handoff_ignores_leaked_default_socket_env_for_named_session() {
     drop(work_spawned);
     wait_for_api(&default_api_socket, Duration::from_secs(10));
     wait_for_api(&work_api_socket, Duration::from_secs(10));
-    wait_for_socket(&work_client_socket, Duration::from_secs(5));
+    wait_for_socket(&work_client_socket);
 
     let _ = request(
         &work_api_socket,
@@ -708,8 +708,8 @@ fn live_handoff_preserves_client_socket_env_without_api_socket_env() {
         None,
         Some(&client_socket),
     );
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
     register_runtime_dir(&runtime_dir);
 
     assert_ok(request(
@@ -718,7 +718,7 @@ fn live_handoff_preserves_client_socket_env_without_api_socket_env() {
     ));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(5));
+    wait_for_socket(&client_socket);
 
     let _ = request(
         &api_socket,
@@ -741,7 +741,7 @@ fn live_handoff_preserves_installed_plugins() {
     write_plugin_manifest(&added_plugin, "test.live-handoff-added");
 
     let spawned = spawn_default_session_server(&config_home, &runtime_dir);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     link_plugin(&api_socket, &existing_plugin);
@@ -790,7 +790,7 @@ fn live_handoff_preserves_pane_process_io() {
     let second_received_marker = base.join("second-received");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -851,8 +851,8 @@ fn live_handoff_preserves_pane_process_io() {
             "params": {"pane_id": second_pane_id, "text": second_command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&marker, Duration::from_secs(5));
-    support::wait_for_file(&second_marker, Duration::from_secs(5));
+    support::wait_for_file(&marker);
+    support::wait_for_file(&second_marker);
     let pid_text = fs::read_to_string(&marker).unwrap();
     let child_pid: u32 = pid_text.split_whitespace().last().unwrap().parse().unwrap();
     let second_pid_text = fs::read_to_string(&second_marker).unwrap();
@@ -897,7 +897,7 @@ fn live_handoff_preserves_pane_process_io() {
     );
     thread::sleep(Duration::from_millis(300));
     wait_for_api(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(5));
+    wait_for_socket(&client_socket);
     assert_eq!(unsafe { libc::kill(child_pid as libc::pid_t, 0) }, 0);
     assert_eq!(unsafe { libc::kill(second_child_pid as libc::pid_t, 0) }, 0);
     assert!(
@@ -984,7 +984,7 @@ pathlib.Path({received:?}).write_text(data.hex())
     .unwrap();
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1007,7 +1007,7 @@ pathlib.Path({received:?}).write_text(data.hex())
             "params": {"pane_id": pane_id, "text": format!("python3 {}", script.display()), "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&ready_marker, Duration::from_secs(5));
+    support::wait_for_file(&ready_marker);
 
     let protocol = request(
         &api_socket,
@@ -1021,7 +1021,7 @@ pathlib.Path({received:?}).write_text(data.hex())
     ));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(5));
+    wait_for_socket(&client_socket);
 
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
     let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
@@ -1075,7 +1075,7 @@ pathlib.Path({received:?}).write_text(data.hex())
     .unwrap();
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1098,7 +1098,7 @@ pathlib.Path({received:?}).write_text(data.hex())
             "params": {"pane_id": pane_id, "text": format!("python3 {}", script.display()), "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&ready_marker, Duration::from_secs(5));
+    support::wait_for_file(&ready_marker);
 
     let protocol = request(
         &api_socket,
@@ -1112,7 +1112,7 @@ pathlib.Path({received:?}).write_text(data.hex())
     ));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(5));
+    wait_for_socket(&client_socket);
 
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
     let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
@@ -1143,7 +1143,7 @@ fn live_handoff_accepts_canonical_pane_id_from_child_env() {
     let pane_id_marker = base.join("pane-id");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1248,7 +1248,7 @@ fn live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session() {
     fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
     let created = request(
         &api_socket,
@@ -1270,7 +1270,7 @@ fn live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session() {
             "params": {"pane_id": pane_id, "text": fake_pi, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&started_marker, Duration::from_secs(5));
+    support::wait_for_file(&started_marker);
     assert_ok(request(
         &api_socket,
         serde_json::json!({
@@ -1389,15 +1389,23 @@ fn live_handoff_keeps_agent_started_pane_after_agent_exits() {
     let api_socket = runtime_dir.join("herdr.sock");
     let started_marker = base.join("agent-started");
     let exited_marker = base.join("agent-exited");
+    let release_marker = base.join("agent-may-exit");
     let shell_marker = base.join("shell-after-agent");
     let bin = base.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let fake_pi = bin.join("pi");
+    // The agent must still be alive when the handoff lands, or the test proves
+    // nothing about a pane surviving an agent that exits afterwards. It used to
+    // hold that window open with `/bin/sleep 1`, so the handoff and the API
+    // wait had to finish inside one second; under full-suite parallelism they
+    // sometimes did not, and a correct run failed. It now waits for the test to
+    // say when, which cannot be outrun.
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nexport HERDR_AGENT=pi\necho started > {}\n/bin/sleep 1\necho exited > {}\n",
+            "#!/bin/sh\nexport HERDR_AGENT=pi\necho started > {}\nwhile [ ! -f {} ]; do /bin/sleep 0.05; done\necho exited > {}\n",
             started_marker.display(),
+            release_marker.display(),
             exited_marker.display()
         ),
     )
@@ -1411,7 +1419,7 @@ fn live_handoff_keeps_agent_started_pane_after_agent_exits() {
         &api_socket,
         &[("PATH", path.as_str())],
     );
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
     let workspace = request(
         &api_socket,
@@ -1441,7 +1449,7 @@ fn live_handoff_keeps_agent_started_pane_after_agent_exits() {
         }),
     );
     assert_ok(started);
-    support::wait_for_file(&started_marker, Duration::from_secs(5));
+    support::wait_for_file(&started_marker);
 
     assert_ok(request(
         &api_socket,
@@ -1449,18 +1457,29 @@ fn live_handoff_keeps_agent_started_pane_after_agent_exits() {
     ));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
-    support::wait_for_file(&exited_marker, Duration::from_secs(5));
-    thread::sleep(Duration::from_millis(300));
+    // The handoff has landed with the agent still running, which is the point
+    // of the test. Let it go now.
+    fs::write(&release_marker, b"go").unwrap();
+    support::wait_for_file(&exited_marker);
 
-    assert_ok(request(
-        &api_socket,
-        serde_json::json!({
-            "id": "test:pane:shell-after-agent",
-            "method": "pane.send_input",
-            "params": {"pane_id": pane_id, "text": format!("echo alive > {}", shell_marker.display()), "keys": ["Enter"]}
+    // The shell that replaces the exited agent may not have its prompt up yet.
+    // Resending the line until it answers waits for the pane to be ready
+    // instead of assuming a fixed settle was long enough — the write is
+    // idempotent, so extra sends cost nothing.
+    assert!(
+        support::wait_until(support::APPEARS_TIMEOUT, Duration::from_millis(100), || {
+            let _ = request(
+                &api_socket,
+                serde_json::json!({
+                    "id": "test:pane:shell-after-agent",
+                    "method": "pane.send_input",
+                    "params": {"pane_id": pane_id, "text": format!("echo alive > {}", shell_marker.display()), "keys": ["Enter"]}
+                }),
+            );
+            shell_marker.exists()
         }),
-    ));
-    support::wait_for_file(&shell_marker, Duration::from_secs(5));
+        "the pane's shell never answered after the agent exited"
+    );
 
     let _ = request(
         &api_socket,
@@ -1481,7 +1500,7 @@ fn live_handoff_keeps_shell_pane_after_foreground_process_exits() {
     let shell_marker = base.join("shell-after-foreground");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1509,7 +1528,7 @@ fn live_handoff_keeps_shell_pane_after_foreground_process_exits() {
             "params": {"pane_id": pane_id, "text": command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&started_marker, Duration::from_secs(5));
+    support::wait_for_file(&started_marker);
 
     assert_ok(request(
         &api_socket,
@@ -1517,7 +1536,7 @@ fn live_handoff_keeps_shell_pane_after_foreground_process_exits() {
     ));
     drop(spawned);
     wait_for_api(&api_socket, Duration::from_secs(10));
-    support::wait_for_file(&exited_marker, Duration::from_secs(5));
+    support::wait_for_file(&exited_marker);
 
     assert_ok(request(
         &api_socket,
@@ -1527,7 +1546,7 @@ fn live_handoff_keeps_shell_pane_after_foreground_process_exits() {
             "params": {"pane_id": pane_id, "text": format!("echo alive > {}", shell_marker.display()), "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&shell_marker, Duration::from_secs(5));
+    support::wait_for_file(&shell_marker);
 
     let _ = request(
         &api_socket,
@@ -1554,7 +1573,7 @@ fn live_handoff_preserves_python_http_server() {
     let port = unused_local_port();
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1638,7 +1657,7 @@ fn live_handoff_preserves_http_servers_across_multiple_sessions() {
         } else {
             spawn_default_session_server(&config_home, &runtime_dir)
         };
-        wait_for_socket(api_socket, Duration::from_secs(10));
+        wait_for_socket(api_socket);
         let created = request(
             api_socket,
             serde_json::json!({
@@ -1712,7 +1731,7 @@ fn live_handoff_bad_expected_protocol_rolls_back_old_server() {
     let received_marker = base.join("received");
 
     let spawned = spawn_server(&config_home, &runtime_dir, &api_socket);
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1740,7 +1759,7 @@ fn live_handoff_bad_expected_protocol_rolls_back_old_server() {
             "params": {"pane_id": pane_id, "text": command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&marker, Duration::from_secs(5));
+    support::wait_for_file(&marker);
     let pid_text = fs::read_to_string(&marker).unwrap();
     let child_pid: u32 = pid_text.split_whitespace().last().unwrap().parse().unwrap();
 
@@ -1798,7 +1817,7 @@ fn live_handoff_import_failure_rolls_back_old_server_at(failure_point: &str) {
         &api_socket,
         &[("HERDR_TEST_HANDOFF_IMPORT_FAIL", failure_point)],
     );
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
     register_runtime_dir(&runtime_dir);
 
     let created = request(
@@ -1826,7 +1845,7 @@ fn live_handoff_import_failure_rolls_back_old_server_at(failure_point: &str) {
             "params": {"pane_id": pane_id, "text": command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&marker, Duration::from_secs(5));
+    support::wait_for_file(&marker);
     let pid_text = fs::read_to_string(&marker).unwrap();
     let child_pid: u32 = pid_text.split_whitespace().last().unwrap().parse().unwrap();
 
@@ -1839,7 +1858,7 @@ fn live_handoff_import_failure_rolls_back_old_server_at(failure_point: &str) {
         "{failure_point} handoff should fail: {failed}"
     );
     wait_for_api(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(5));
+    wait_for_socket(&client_socket);
     assert_eq!(unsafe { libc::kill(child_pid as libc::pid_t, 0) }, 0);
 
     assert_ok(request(

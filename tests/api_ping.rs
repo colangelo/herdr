@@ -65,15 +65,8 @@ fn test_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn wait_for_socket(path: &Path, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if path.exists() && UnixStream::connect(path).is_ok() {
-            return;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    panic!("socket did not appear at {}", path.display());
+fn wait_for_socket(path: &Path) {
+    support::wait_for_socket(path);
 }
 
 #[cfg(target_os = "linux")]
@@ -297,7 +290,7 @@ fn ping_over_socket_returns_version() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let value = send_request(
         &socket_path,
@@ -322,7 +315,7 @@ fn server_reload_agent_manifests_reports_runtime_override() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let override_dir = config_home.join("herdr-dev").join("agent-detection");
     fs::create_dir_all(&override_dir).unwrap();
@@ -368,7 +361,7 @@ fn workspace_list_and_create_round_trip() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let empty = send_request(
         &socket_path,
@@ -608,7 +601,7 @@ fn tab_methods_round_trip_over_socket() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -731,7 +724,7 @@ fn pane_info_reports_foreground_cwd_without_changing_pane_cwd() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr_with_shell(&config_home, &runtime_dir, &socket_path, "/bin/bash");
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -891,7 +884,7 @@ fn new_terminal_cwd_follow_ignores_nonleader_group_member_cwd() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr_with_shell(&config_home, &runtime_dir, &socket_path, "/bin/bash");
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1030,7 +1023,7 @@ fn agent_start_targets_existing_pane_over_socket() {
     fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
     let child = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
     let workspace = send_request(
         &socket_path,
         &serde_json::json!({
@@ -1104,7 +1097,7 @@ fn agent_methods_round_trip_over_socket() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1268,7 +1261,7 @@ fn tab_create_with_no_focus_preserves_active_tab() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1350,7 +1343,7 @@ fn events_subscribe_streams_workspace_tab_and_agent_events() {
         &socket_path,
         Some(Path::new(&path_override)),
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let mut reader = open_subscription(
         &socket_path,
@@ -1472,7 +1465,7 @@ fn events_subscribe_streams_pane_split_and_close_events() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1549,7 +1542,7 @@ fn events_subscribe_streams_tab_and_workspace_close_events() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1652,7 +1645,7 @@ fn pane_report_agent_updates_effective_state() {
         &socket_path,
         Some(Path::new(&path_override)),
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1850,7 +1843,7 @@ fn pane_report_agent_accepts_unknown_agent_labels() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -1923,7 +1916,7 @@ fn official_release_waits_for_confirmed_process_exit() {
         &socket_path,
         Some(Path::new(&path_override)),
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -2074,7 +2067,7 @@ fn pane_clear_agent_authority_restores_fallback_state() {
         &socket_path,
         Some(Path::new(&path_override)),
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -2199,7 +2192,7 @@ fn events_subscribe_streams_output_and_agent_status_events() {
         &socket_path,
         Some(Path::new(&path_override)),
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -2327,7 +2320,7 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
         &socket_path,
         Some(Path::new(&path_override)),
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
@@ -2450,7 +2443,7 @@ fn metadata_status_subscription_filter_and_ttl_expiry_are_observable() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,
