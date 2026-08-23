@@ -1191,11 +1191,12 @@ impl HeadlessServer {
         let host_terminal_appearance = client.host_terminal_appearance;
         let host_terminal_appearance_explicit = client.host_terminal_appearance_explicit;
         let uses_local_keybindings = client.keybindings.is_some();
-        let keybindings = client
-            .keybindings
-            .as_deref()
-            .unwrap_or(&self.server_keybindings)
-            .clone();
+        let keybindings = match client.keybindings.as_deref() {
+            Some(client_keybindings) => client_keybindings
+                .clone()
+                .with_server_custom_commands(&self.server_keybindings.keybinds),
+            None => self.server_keybindings.clone(),
+        };
 
         self.effective_size = terminal_size;
         self.app.state.outer_terminal_focus = outer_terminal_focus;

@@ -56,6 +56,7 @@
 
 
 ### Fixed
+- A remote client on local keybindings (the default) no longer loses the server's `[[keys.command]]` custom commands: they stopped firing and vanished from the `prefix+?` help, because the client profile replaced the server keybinds wholesale and a client profile deliberately carries no commands — a custom command runs a shell command on the server host, so its text may only come from the server's own config. The server's commands are now grafted back onto every client profile.
 - `just windows-lint` and the Windows CI check now lint test targets too, which had been skipped: two real clippy failures were sitting in `src/platform/windows.rs` unseen. The integration test binaries, which drive a real server over a Unix socket and never compiled on Windows, now say so with `#![cfg(unix)]` instead of failing the target build.
 - A workspace in detached HEAD keeps its second sidebar row and says where it is — `@a620c06`, or `rebase @a620c06` / `bisect @a620c06` while that operation runs — instead of silently collapsing to one row. The `branch` fact stays a branch name; the detached checkout is a separate fact refreshed alongside it.
 - Pane todo changes now reach the session file on the next loop pass instead of after the 5 s save debounce, so a forced shutdown or power cut right after `herdr todo add` no longer loses the note. Everything else keeps the debounce.

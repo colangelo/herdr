@@ -412,6 +412,11 @@ fn parse_client_keybindings(
         ClientKeybindings::Local { keys_toml } => {
             let mut config = toml::from_str::<crate::config::Config>(&keys_toml)
                 .map_err(|err| format!("invalid client keybindings: {err}"))?;
+            // A custom command binding runs a shell command on the *server*
+            // host, so a client never gets to name one. The server's own
+            // commands are grafted back on by
+            // `LiveKeybindConfig::with_server_custom_commands`, which is why
+            // dropping them here costs the user nothing.
             config.keys.command.clear();
             Ok(Some(Box::new(crate::config::LiveKeybindConfig {
                 prefix: config.prefix_key(),
@@ -1285,7 +1290,10 @@ command = "lazygit"
             .bindings
             .iter()
             .any(|binding| binding.label == "prefix+t"));
-        assert!(keybindings.keybinds.custom_commands.is_empty());
+        assert!(
+            keybindings.keybinds.custom_commands.is_empty(),
+            "a client never names a command that runs on the server host"
+        );
     }
 
     #[test]
