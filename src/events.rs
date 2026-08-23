@@ -63,6 +63,9 @@ pub enum AppEvent {
         state: AgentState,
         visible_blocker: bool,
         visible_working: bool,
+        /// Working because of work the agent launched, not work it is doing;
+        /// see `crate::detect::AgentDetection::background_work`.
+        background_work: bool,
         process_exited: bool,
         observed_at: Instant,
     },

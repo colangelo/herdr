@@ -453,6 +453,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # done = "□"
 # blocked = "×"
 # unknown = "·"
+# An agent parked at its prompt while work it launched keeps running (a
+# background shell, a background agent, an MCP task) pulses slowly between
+# these two instead of spinning.
+# background = "◇"
+# background_alt = "◈"
 
 # Notification center position: "top-right" keeps the indicator in the tab
 # bar with the dropdown under it; "bottom-right" floats the indicator in the

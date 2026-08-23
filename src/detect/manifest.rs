@@ -401,14 +401,29 @@ pub fn should_skip_state_update(agent: Agent, screen_content: &str) -> bool {
 
 impl DetectionExplain {
     fn into_detection(self) -> AgentDetection {
+        let background_work = self.state == AgentState::Working
+            && self
+                .matched_rule
+                .as_ref()
+                .is_some_and(|rule| is_background_work_rule(&rule.id));
         AgentDetection {
             state: self.state,
             skip_state_update: self.skip_state_update,
             visible_idle: self.visible_idle,
             visible_blocker: self.visible_blocker,
             visible_working: self.visible_working,
+            background_work,
         }
     }
+}
+
+/// Rules that report work the agent launched rather than work it is doing:
+/// the manifests name them `background_shell_working`,
+/// `background_agents_working`, `background_mcp_task_working`. Matching on the
+/// prefix keeps new siblings working without a code change; a manifest that
+/// renames them only costs the distinct icon, never correctness.
+fn is_background_work_rule(rule_id: &str) -> bool {
+    rule_id.starts_with("background_")
 }
 
 fn evaluate_loaded_manifest(

@@ -262,6 +262,7 @@ pub(super) enum DetectionPublishDecision {
         visible_idle: bool,
         visible_blocker: bool,
         visible_working: bool,
+        background_work: bool,
         process_exited: bool,
     },
 }
@@ -325,6 +326,7 @@ pub(super) fn decide_screen_detection_publish(
             visible_idle,
             visible_blocker,
             visible_working,
+            background_work: detection.background_work && new_state == AgentState::Working,
             process_exited: input.process_exited,
         },
     }
@@ -353,6 +355,7 @@ pub(super) fn detection_update_for_publish_with_osc(
             visible_idle: true,
             visible_blocker: false,
             visible_working: false,
+            background_work: false,
         });
     }
 
@@ -390,6 +393,7 @@ mod tests {
             visible_idle: state == AgentState::Idle,
             visible_blocker: false,
             visible_working: state == AgentState::Working,
+            background_work: false,
         }
     }
 
@@ -550,6 +554,7 @@ mod tests {
                 visible_idle: false,
                 visible_blocker: false,
                 visible_working: true,
+                background_work: false,
                 process_exited: false,
             }
         );
@@ -570,6 +575,7 @@ mod tests {
                 visible_idle: true,
                 visible_blocker: false,
                 visible_working: false,
+                background_work: false,
                 process_exited: false,
             }
         );

@@ -206,16 +206,21 @@ pub struct StateSymbolsConfig {
     pub done: Option<String>,
     pub blocked: Option<String>,
     pub unknown: Option<String>,
+    /// The two frames of the background-work pulse, in order.
+    pub background: Option<String>,
+    pub background_alt: Option<String>,
 }
 
 impl StateSymbolsConfig {
-    fn entries(&self) -> [(&'static str, Option<&str>); 5] {
+    fn entries(&self) -> [(&'static str, Option<&str>); 7] {
         [
             ("working", self.working.as_deref()),
             ("idle", self.idle.as_deref()),
             ("done", self.done.as_deref()),
             ("blocked", self.blocked.as_deref()),
             ("unknown", self.unknown.as_deref()),
+            ("background", self.background.as_deref()),
+            ("background_alt", self.background_alt.as_deref()),
         ]
     }
 
@@ -2076,6 +2081,8 @@ idle = "#4ade80"
 [ui.state_symbols]
 done = "●"
 idle = "✔"
+background = "⊙"
+background_alt = "⊚"
 working = "⠋⠙"
 blocked = ""
 unknown = "日"
@@ -2084,6 +2091,11 @@ unknown = "日"
         let symbols = &config.ui.state_symbols;
         assert_eq!(StateSymbolsConfig::valid(&symbols.done), Some("●"));
         assert_eq!(StateSymbolsConfig::valid(&symbols.idle), Some("✔"));
+        assert_eq!(StateSymbolsConfig::valid(&symbols.background), Some("⊙"));
+        assert_eq!(
+            StateSymbolsConfig::valid(&symbols.background_alt),
+            Some("⊚")
+        );
         // Two cells, zero cells, and a double-width CJK glyph would all shift
         // the icon column, so they are reported and dropped.
         assert_eq!(StateSymbolsConfig::valid(&symbols.working), None);
