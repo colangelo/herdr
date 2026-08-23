@@ -328,6 +328,7 @@ fn state_color_overrides_from_config(
         done: parse(&colors.done),
         blocked: parse(&colors.blocked),
         unknown: parse(&colors.unknown),
+        background: parse(&colors.background),
     }
 }
 

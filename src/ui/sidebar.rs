@@ -2027,7 +2027,14 @@ fn render_agent_detail(
     // spacer (only true when the previous entry left a `row_gap`).
     let mut prev_gap: u16 = 0;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
-        let label_color = state_label_color(detail.state, detail.seen, &app.state_icon_colors());
+        let colors = app.state_icon_colors();
+        // The row's state text follows its icon: an agent parked behind its own
+        // background work is coloured apart from one mid-turn.
+        let label_color = if detail.background_work {
+            colors.background
+        } else {
+            state_label_color(detail.state, detail.seen, &colors)
+        };
         let rows = resolved_agent_rows(app, detail);
         let height = (rows.len().max(1) as u16).min(body.height);
         if row_y.saturating_add(height) > body_bottom {
@@ -2486,12 +2493,24 @@ mod tests {
         assert_eq!(defaults.blocked, app.palette.red);
         assert_eq!(defaults.unknown, app.palette.overlay0);
 
+        assert_eq!(
+            defaults.background, app.palette.yellow,
+            "unset background follows the working colour"
+        );
+
         app.state_color_overrides.working = Some(Color::Rgb(255, 200, 50));
         app.state_color_overrides.idle = Some(Color::Rgb(74, 222, 128));
         let resolved = app.state_icon_colors();
         assert_eq!(resolved.working, Color::Rgb(255, 200, 50));
         assert_eq!(resolved.idle, Color::Rgb(74, 222, 128));
         assert_eq!(resolved.done, app.palette.teal);
+        assert_eq!(
+            resolved.background,
+            Color::Rgb(255, 200, 50),
+            "background still follows working until it is set itself"
+        );
+        app.state_color_overrides.background = Some(Color::Rgb(0, 200, 200));
+        assert_eq!(app.state_icon_colors().background, Color::Rgb(0, 200, 200));
 
         let symbols = crate::app::state::StateIconSymbols::for_style(
             crate::config::StatusIndicatorStyle::Dots,

@@ -443,6 +443,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # done = "#94e2d5"
 # blocked = "#f38ba8"
 # unknown = "#6c7086"
+# Agents parked at their prompt behind work they launched; unset follows working.
+# background = "#94e2d5"
 
 # Per-state glyph overrides for sidebar state icons, layered on top of
 # status_indicators. Each value must be exactly one terminal cell wide.

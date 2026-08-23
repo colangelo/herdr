@@ -71,6 +71,7 @@ pub struct StateColorOverrides {
     pub done: Option<Color>,
     pub blocked: Option<Color>,
     pub unknown: Option<Color>,
+    pub background: Option<Color>,
 }
 
 /// Resolved per-state colors for sidebar state glyphs and state text.
@@ -81,6 +82,9 @@ pub struct StateIconColors {
     pub done: Color,
     pub blocked: Color,
     pub unknown: Color,
+    /// Agents parked at their prompt behind work they launched; defaults to
+    /// `working`, since that is the state they are still reported in.
+    pub background: Color,
 }
 
 /// Parsed `[ui.state_symbols]` overrides; `None` slots fall back to the glyph
@@ -3200,6 +3204,10 @@ impl AppState {
             done: overrides.done.unwrap_or(self.palette.teal),
             blocked: overrides.blocked.unwrap_or(self.palette.red),
             unknown: overrides.unknown.unwrap_or(self.palette.overlay0),
+            background: overrides
+                .background
+                .or(overrides.working)
+                .unwrap_or(self.palette.yellow),
         }
     }
 
