@@ -1703,6 +1703,9 @@ impl AppState {
             rows: self.notification_log.len() as u16,
             max_rows: NOTIFICATION_PANEL_MAX_ROWS,
             footer_rows,
+            // The notification list has no detail block: a notification is
+            // already one line by construction.
+            detail_rows: 0,
             vertical: match self.notification_center_position {
                 crate::config::NotificationCenterPositionConfig::TopRight => {
                     crate::ui::overlay::VerticalAnchor::Below
@@ -1796,7 +1799,7 @@ impl AppState {
             })
             .max()
             .unwrap_or(16);
-        crate::ui::overlay::AnchoredPanelSpec {
+        let spec = crate::ui::overlay::AnchoredPanelSpec {
             anchor,
             screen: self.screen_rect(),
             // borders + state glyph block + trailing space
@@ -1808,9 +1811,28 @@ impl AppState {
             // add and close, and sizing it away is what made a quiet pane a
             // dead end.
             footer_rows: crate::ui::FOOTER_ROWS,
+            detail_rows: 0,
             vertical: crate::ui::overlay::VerticalAnchor::InsideTop,
+        };
+        // A row shows one line, so a todo carrying several says so with a `⏎`
+        // and keeps the rest to itself. The detail block is where the rest
+        // goes: only for a selection that has more than its first line, so a
+        // panel of one-line todos is exactly what it was.
+        let detail_rows = todos
+            .get(panel.list.selected)
+            .map(|todo| crate::ui::pane_todo_detail_rows(&todo.text, spec.resolved_width()))
+            .unwrap_or(0);
+        crate::ui::overlay::AnchoredPanelSpec {
+            detail_rows,
+            ..spec
         }
         .resolve()
+    }
+
+    /// The detail block under the list, when the selected todo has lines its
+    /// row could not show.
+    pub(crate) fn pane_todo_panel_detail_rect(&self) -> Option<Rect> {
+        self.pane_todo_panel_geometry()?.detail
     }
 
     pub(crate) fn pane_todo_panel_rect(&self) -> Option<Rect> {

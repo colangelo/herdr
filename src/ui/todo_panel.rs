@@ -137,6 +137,9 @@ pub(crate) fn pane_todo_link_chip_text(public_id: Option<&str>, label: &str) -> 
 /// What a todo shows on its single panel row. A todo may hold more than one
 /// line; the panel lists one row each, so the rest is signalled rather than
 /// shown.
+/// Text rows the detail block will draw at most.
+pub(crate) const PANE_TODO_DETAIL_MAX_TEXT_ROWS: u16 = 6;
+
 pub(crate) fn pane_todo_row_text(text: &str, budget: usize) -> String {
     let Some((first, _)) = text.split_once('\n') else {
         return truncate_end(text, budget);
@@ -144,6 +147,74 @@ pub(crate) fn pane_todo_row_text(text: &str, budget: usize) -> String {
     let marker = " ⏎";
     let first = truncate_end(first, budget.saturating_sub(display_width(marker)));
     format!("{first}{marker}")
+}
+
+/// Draws the selected todo's full text under the list: a rule, then the text
+/// wrapped to the panel. Rows stay one line each and keep their one-to-one
+/// mapping to items — this is where the lines a row cannot show go, so a
+/// multi-point todo is readable without leaving the panel.
+fn render_pane_todo_detail(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    p: &crate::app::state::Palette,
+) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(p.surface_dim)),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    let text_area = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(1),
+        area.height.saturating_sub(1),
+    );
+    if text_area.height == 0 || text_area.width == 0 {
+        return;
+    }
+    // `WrappedRow` offsets are into their own logical line, not the whole
+    // text, so the line has to be picked before the slice.
+    let lines: Vec<&str> = text.split('\n').collect();
+    let rows = crate::ui::text_wrap::wrap_layout(text, text_area.width as usize);
+    for (row, wrapped) in rows.iter().take(text_area.height as usize).enumerate() {
+        let Some(line) = lines.get(wrapped.line) else {
+            continue;
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                line[wrapped.start..wrapped.end].to_string(),
+                Style::default().fg(p.subtext0),
+            ))),
+            Rect::new(text_area.x, text_area.y + row as u16, text_area.width, 1),
+        );
+    }
+}
+
+/// Rows the detail block needs for `text` in a panel of `panel_width`: a rule
+/// row plus the wrapped text, or none at all when the todo is a single line
+/// and the row already showed all of it.
+///
+/// Capped so one long note cannot crowd out the list it belongs to; the text
+/// that does not fit is still there in `herdr todo list` and in the editor.
+pub(crate) fn pane_todo_detail_rows(text: &str, panel_width: u16) -> u16 {
+    if !text.contains('\n') {
+        return 0;
+    }
+    let width = detail_text_width(panel_width);
+    if width == 0 {
+        return 0;
+    }
+    let wrapped = crate::ui::text_wrap::wrap_layout(text, width).len() as u16;
+    1 + wrapped.min(PANE_TODO_DETAIL_MAX_TEXT_ROWS)
+}
+
+/// Text columns inside the detail block: the panel minus its borders and the
+/// one-column gutter the rows are drawn with.
+fn detail_text_width(panel_width: u16) -> usize {
+    usize::from(panel_width.saturating_sub(3))
 }
 
 /// Three-cell state block, mirroring the notification center's dot column.
@@ -289,6 +360,12 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
         }
     }
 
+    if let Some(detail) = app.pane_todo_panel_detail_rect() {
+        if let Some(todo) = todos.get(panel.list.selected) {
+            render_pane_todo_detail(frame, detail, &todo.text, p);
+        }
+    }
+
     if let Some(buttons) = app.pane_todo_panel_buttons() {
         let hovered = panel.hovered_button;
         let style_for = |button: PaneTodoPanelButton| {
@@ -374,6 +451,78 @@ mod tests {
         open.open_pane_todos(pane_id);
         test_support::layout_sized(&mut open, width, height);
         test_support::overlay_snapshot_sized(&base, &open, width, height)
+    }
+
+    /// A todo carrying several points is readable in the panel: its row still
+    /// shows one line and keeps its place in the list, and the lines it cannot
+    /// show render under the list for the selection.
+    #[test]
+    fn the_selected_multi_line_todo_renders_under_the_list() {
+        let multi = "your call: 3 open threads\n#68 the arrow-key queue needs one repro elsewhere\n#67 multi-point todos are parked";
+        let (mut app, pane_id) = app_with_todos(
+            &[
+                (multi, false, TodoPriority::High),
+                ("left undone: 7 flaky tests", false, TodoPriority::Normal),
+            ],
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        app.open_pane_todos(pane_id);
+        test_support::layout_sized(
+            &mut app,
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+
+        // Selection starts on the multi-line todo, so a detail block exists.
+        let detail = app
+            .pane_todo_panel_detail_rect()
+            .expect("a multi-line selection shows its rest");
+        let buffer = test_support::draw_sized(
+            &app,
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        // Joined and whitespace-normalised: the point is that the text is
+        // readable, not where the wrap happens to fall.
+        let rendered = test_support::rect_rows(&buffer, detail)
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            rendered.contains("#68 the arrow-key queue needs one repro elsewhere"),
+            "the second line is readable: {rendered}"
+        );
+        assert!(
+            rendered.contains("multi-point todos are parked"),
+            "the third line is readable: {rendered}"
+        );
+
+        // The list still maps one row to one todo — the reason the detail
+        // block exists rather than wrapping rows in place.
+        let list = app
+            .pane_todo_panel_list_window()
+            .expect("an open panel has a list")
+            .0;
+        assert_eq!(list.height as usize, 2, "one row per todo, still");
+        assert!(
+            detail.y >= list.y + list.height,
+            "the detail sits under the list, not inside it"
+        );
+
+        // Move to the single-line todo: nothing is being withheld, so the
+        // block goes away entirely and the panel is what it always was.
+        app.pane_todos_move_selection(1);
+        test_support::layout_sized(
+            &mut app,
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        assert!(
+            app.pane_todo_panel_detail_rect().is_none(),
+            "a single-line selection has nothing to add"
+        );
     }
 
     /// Wide enough for the whole footer: every box the panel can offer is on
