@@ -11553,6 +11553,7 @@ next_tab = ""
             state: crate::detect::AgentState::Blocked,
             visible_blocker: false,
             visible_working: false,
+            background_work: false,
             process_exited: false,
             observed_at: Instant::now(),
         });
@@ -11642,6 +11643,7 @@ next_tab = ""
                 state: crate::detect::AgentState::Blocked,
                 visible_blocker: false,
                 visible_working: false,
+                background_work: false,
                 process_exited: false,
                 observed_at: Instant::now(),
             })

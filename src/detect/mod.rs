@@ -36,6 +36,12 @@ pub struct AgentDetection {
     /// activity is the normal working authority; this remains diagnostic
     /// metadata and for non-PTY fallback paths.
     pub visible_working: bool,
+    /// True when the working state came from a rule about work the agent
+    /// *launched* rather than work it is doing: a background shell, a
+    /// background agent, an MCP task still running. The agent itself is
+    /// parked at its prompt and will wake when that work finishes, so the
+    /// sidebar draws it apart from an agent mid-turn.
+    pub background_work: bool,
 }
 
 /// Which agent we detected running in a pane.
@@ -328,6 +334,7 @@ pub fn detect_agent_with_osc(
             visible_idle: false,
             visible_blocker: false,
             visible_working: false,
+            background_work: false,
         };
     };
     manifest::detect_with_osc(

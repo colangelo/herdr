@@ -1411,6 +1411,18 @@
           "description": "Glyph for the unknown state icon. Exactly one terminal cell wide; unset keeps the glyph from `ui.status_indicators`."
         },
         {
+          "key": "ui.state_symbols.background",
+          "type": "string",
+          "default": "unset",
+          "description": "First frame of the pulse drawn for an agent parked at its prompt while work it launched keeps running. Exactly one terminal cell wide; unset keeps the built-in glyph."
+        },
+        {
+          "key": "ui.state_symbols.background_alt",
+          "type": "string",
+          "default": "unset",
+          "description": "Second frame of that pulse; the two swap once per four spinner ticks. Exactly one terminal cell wide; unset keeps the built-in glyph."
+        },
+        {
           "key": "ui.notification_center_position",
           "type": "enum",
           "default": "\"top-right\"",

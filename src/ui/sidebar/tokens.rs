@@ -167,6 +167,7 @@ mod tests {
             pane_label: None,
             terminal_title: None,
             terminal_title_stripped: None,
+            background_work: false,
             outstanding_todos: 0,
             highest_todo_priority: None,
             agent_label: Some("pi".into()),

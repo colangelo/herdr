@@ -928,3 +928,49 @@ fn codex_osc_working_beats_weak_blocker_screen() {
         Some("osc_title_working")
     );
 }
+
+#[test]
+fn background_work_flag_follows_the_matched_rule_not_the_state() {
+    with_manifest_dirs("background-work-flag", || {
+        // Shaped like upstream's `background_shell_working`: working state,
+        // but from work the agent launched rather than work it is doing.
+        write_local_codex(&rules_manifest(
+            r#"
+[[rules]]
+id = "background_shell_working"
+state = "working"
+priority = 965
+contains = ["1 shell"]
+
+[[rules]]
+id = "live_turn_working"
+state = "working"
+priority = 970
+contains = ["esc to interrupt"]
+
+[[rules]]
+id = "live_prompt_box"
+state = "idle"
+priority = 950
+contains = ["prompt"]
+"#,
+        ));
+
+        let detection = detect(Agent::Codex, "  ⏵⏵ bypass permissions on · 1 shell · ←");
+        assert_eq!(detection.state, AgentState::Working);
+        assert!(
+            detection.background_work,
+            "work the agent launched, not work it is doing"
+        );
+
+        // An agent mid-turn is working for its own sake.
+        let detection = detect(Agent::Codex, "esc to interrupt");
+        assert_eq!(detection.state, AgentState::Working);
+        assert!(!detection.background_work);
+
+        // And an idle agent is never background-working.
+        let detection = detect(Agent::Codex, "prompt");
+        assert_eq!(detection.state, AgentState::Idle);
+        assert!(!detection.background_work);
+    });
+}

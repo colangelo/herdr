@@ -320,6 +320,8 @@ fn state_symbol_overrides_from_config(
         done: valid(&symbols.done),
         blocked: valid(&symbols.blocked),
         unknown: valid(&symbols.unknown),
+        background: valid(&symbols.background),
+        background_alt: valid(&symbols.background_alt),
     }
 }
 
@@ -6138,6 +6140,7 @@ mod tests {
             state: AgentState::Working,
             visible_blocker: false,
             visible_working: false,
+            background_work: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6162,6 +6165,7 @@ mod tests {
             state: AgentState::Idle,
             visible_blocker: false,
             visible_working: false,
+            background_work: false,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });

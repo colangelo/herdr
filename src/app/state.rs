@@ -93,6 +93,9 @@ pub struct StateSymbolOverrides {
     pub done: Option<String>,
     pub blocked: Option<String>,
     pub unknown: Option<String>,
+    /// The two frames of the background-work pulse, in order.
+    pub background: Option<String>,
+    pub background_alt: Option<String>,
 }
 
 /// Resolved per-state glyphs for sidebar state icons, each one cell wide.
@@ -103,6 +106,11 @@ pub struct StateIconSymbols<'a> {
     pub done: &'a str,
     pub blocked: &'a str,
     pub unknown: &'a str,
+    /// Frames for an agent parked at its prompt while work it launched keeps
+    /// running: a slow two-frame pulse, so the row reads as a different kind
+    /// of busy than an agent mid-turn.
+    pub background: &'a str,
+    pub background_alt: &'a str,
 }
 
 impl StateIconSymbols<'static> {
@@ -115,6 +123,8 @@ impl StateIconSymbols<'static> {
                 done: "●",
                 blocked: "●",
                 unknown: "·",
+                background: "◇",
+                background_alt: "◈",
             },
             // A finished, not-yet-seen agent is an unchecked box the user still
             // has to look at; once seen it is checked off. Keeps the checkmark
@@ -125,12 +135,26 @@ impl StateIconSymbols<'static> {
                 done: "□",
                 blocked: "×",
                 unknown: "·",
+                background: "◇",
+                background_alt: "◈",
             },
         }
     }
 }
 
 impl<'a> StateIconSymbols<'a> {
+    /// The background-work pulse frame for a shared spinner frame: one swap
+    /// every [`Self::BACKGROUND_PULSE_TICKS`] frames, so it beats far slower
+    /// than the working spinner it sits beside.
+    pub const BACKGROUND_PULSE_TICKS: u8 = 4;
+
+    pub fn background_frame(&self, frame: Option<u8>) -> &'a str {
+        match frame {
+            Some(frame) if (frame / Self::BACKGROUND_PULSE_TICKS) % 2 == 1 => self.background_alt,
+            _ => self.background,
+        }
+    }
+
     pub fn symbol(&self, state: AgentState, seen: bool) -> &'a str {
         match (state, seen) {
             (AgentState::Blocked, _) => self.blocked,
@@ -3305,6 +3329,14 @@ impl AppState {
             done: overrides.done.as_deref().unwrap_or(defaults.done),
             blocked: overrides.blocked.as_deref().unwrap_or(defaults.blocked),
             unknown: overrides.unknown.as_deref().unwrap_or(defaults.unknown),
+            background: overrides
+                .background
+                .as_deref()
+                .unwrap_or(defaults.background),
+            background_alt: overrides
+                .background_alt
+                .as_deref()
+                .unwrap_or(defaults.background_alt),
         }
     }
 

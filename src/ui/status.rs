@@ -254,18 +254,24 @@ pub(super) fn state_icon<'a>(
 /// shared tick: frame `n` is `ACTIVITY_FRAMES[n % 10]`.
 const ACTIVITY_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// The icon for an agent row: the working glyph animates when the spinner is
-/// on (`frame` is `Some`); every other state falls through to [`state_icon`].
+/// The icon for an agent row. A working agent spins the snake while the
+/// spinner is on (`frame` is `Some`); one that is Working only because of work
+/// it launched — `background_work` — pulses slowly instead, so it reads as a
+/// different kind of busy. Every other state falls through to [`state_icon`].
 pub(super) fn agent_state_icon<'a>(
     state: AgentState,
     seen: bool,
+    background_work: bool,
     frame: Option<u8>,
     symbols: &crate::app::state::StateIconSymbols<'a>,
     colors: &crate::app::state::StateIconColors,
 ) -> (&'a str, Style) {
     let (glyph, style) = state_icon(state, seen, symbols, colors);
-    match (state, frame) {
-        (AgentState::Working, Some(frame)) => (
+    match (state, background_work, frame) {
+        // The pulse is drawn whether or not the spinner ticks: with it off the
+        // first frame stands as a static mark that still tells the two apart.
+        (AgentState::Working, true, frame) => (symbols.background_frame(frame), style),
+        (AgentState::Working, false, Some(frame)) => (
             ACTIVITY_FRAMES[usize::from(frame) % ACTIVITY_FRAMES.len()],
             style,
         ),
@@ -330,7 +336,10 @@ mod tests {
             unknown: palette.overlay0,
         };
         let symbols = crate::app::state::StateIconSymbols::for_style(StatusIndicatorStyle::Symbols);
-        let icon = |state, seen, frame| agent_state_icon(state, seen, frame, &symbols, &colors);
+        let icon =
+            |state, seen, frame| agent_state_icon(state, seen, false, frame, &symbols, &colors);
+        let background =
+            |frame| agent_state_icon(AgentState::Working, true, true, frame, &symbols, &colors);
 
         let (glyph, style) = icon(AgentState::Working, true, Some(3));
         assert_eq!(glyph, "⠸");
@@ -343,6 +352,21 @@ mod tests {
         // Other states ignore the frame entirely.
         assert_eq!(icon(AgentState::Idle, false, Some(3)).0, "□");
         assert_eq!(icon(AgentState::Blocked, true, Some(3)).0, "×");
+
+        // Background work pulses at a quarter of the spinner's rate: four
+        // frames on one glyph, four on the other, in the working colour.
+        for frame in 0..4 {
+            assert_eq!(background(Some(frame)).0, "◇", "frame {frame}");
+        }
+        for frame in 4..8 {
+            assert_eq!(background(Some(frame)).0, "◈", "frame {frame}");
+        }
+        assert_eq!(background(Some(8)).0, "◇");
+        assert_eq!(background(Some(3)).1.fg, Some(palette.yellow));
+        assert_eq!(display_width_u16(background(Some(3)).0), 1);
+        // Spinner off: the pulse holds its first frame, still distinct from
+        // an agent mid-turn.
+        assert_eq!(background(None).0, "◇");
     }
 
     #[test]

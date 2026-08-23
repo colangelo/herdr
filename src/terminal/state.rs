@@ -129,6 +129,11 @@ pub struct TerminalState {
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
     pub terminal_title: Option<String>,
+    /// Last screen-detection answer to "is this Working because the agent
+    /// launched background work rather than doing work itself"; read through
+    /// [`Self::background_work`], which also requires the live state to be
+    /// Working so a stale flag can never reach the UI.
+    background_work_observed: bool,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
     agent_name_owner: Option<AgentNameOwner>,
@@ -165,6 +170,7 @@ impl TerminalState {
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             persisted_agent_session: None,
             terminal_title: None,
+            background_work_observed: false,
             manual_label: None,
             agent_name: None,
             agent_name_owner: None,
@@ -218,6 +224,18 @@ impl TerminalState {
             self.agent_process_acquisition_pending = false;
         }
         suppress_completion
+    }
+
+    /// True when the agent is Working only because of work it launched — a
+    /// background shell, a background agent, an MCP task — and is itself
+    /// parked at its prompt. The state check keeps a stale observation from
+    /// outliving the Working state it belongs to.
+    pub fn background_work(&self) -> bool {
+        self.background_work_observed && self.state == AgentState::Working
+    }
+
+    pub(crate) fn set_background_work_observed(&mut self, observed: bool) {
+        self.background_work_observed = observed;
     }
 
     pub(crate) fn terminal_title_stripped(&self) -> Option<String> {
@@ -2286,6 +2304,7 @@ mod tests {
             visible_idle: false,
             visible_blocker: false,
             visible_working: false,
+            background_work: false,
         };
 
         assert_eq!(stabilize_agent_detection(detection), AgentState::Idle);

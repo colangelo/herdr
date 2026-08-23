@@ -30,6 +30,8 @@ pub(crate) struct AgentPanelEntry {
     pub pane_label: Option<String>,
     pub terminal_title: Option<String>,
     pub terminal_title_stripped: Option<String>,
+    /// See `TerminalState::background_work`.
+    pub background_work: bool,
     /// Not-yet-done todos on the pane, and the highest priority among them.
     pub outstanding_todos: usize,
     pub highest_todo_priority: Option<crate::terminal::todo::TodoPriority>,
@@ -187,6 +189,7 @@ fn collect_agent_panel_entries_with_runtimes(
                         pane_label: detail.pane_label,
                         terminal_title: detail.terminal_title,
                         terminal_title_stripped: detail.terminal_title_stripped,
+                        background_work: detail.background_work,
                         outstanding_todos: detail.outstanding_todos,
                         highest_todo_priority: detail.highest_todo_priority,
                         agent_label: Some(detail.agent_label),
@@ -1088,6 +1091,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             let (icon, icon_style) = agent_state_icon(
                 detail.state,
                 detail.seen,
+                detail.background_work,
                 detail.spinner_frame(app.working_spinner_frame()),
                 &app.state_icon_symbols(),
                 &app.state_icon_colors(),
@@ -2113,6 +2117,7 @@ fn render_agent_detail(
         let state_icon = agent_state_icon(
             detail.state,
             detail.seen,
+            detail.background_work,
             detail.spinner_frame(app.working_spinner_frame()),
             &app.state_icon_symbols(),
             &app.state_icon_colors(),
@@ -3126,6 +3131,67 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         // Off pins the static glyph.
         app.status_spinner = crate::config::StatusSpinnerConfig::Off;
         assert_eq!(icons(&app), ("◐".into(), "◐".into(), "◐".into()));
+    }
+
+    /// An agent parked at its prompt while a shell it launched keeps running
+    /// pulses instead of spinning, so it does not read as an agent mid-turn.
+    #[test]
+    fn background_work_rows_pulse_instead_of_spinning() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("cchv"), Workspace::test_new("infra")];
+        app.ensure_test_terminals();
+        app.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+        app.active = Some(0);
+        for (index, workspace) in app.workspaces.iter().enumerate() {
+            let pane_id = workspace.tabs[0].root_pane;
+            let terminal_id = workspace.tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+            // Only the first pane is working because of a background shell.
+            terminal.set_background_work_observed(index == 0);
+        }
+
+        let area = Rect::new(0, 0, 4, 16);
+        let (_, _, detail_area) = collapsed_sidebar_sections(area);
+        let icons = |app: &crate::app::state::AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+                .expect("test terminal should initialize");
+            terminal
+                .draw(|frame| render_sidebar_collapsed(app, frame, area))
+                .expect("collapsed sidebar should render");
+            let buffer = terminal.backend().buffer();
+            (
+                buffer[(detail_area.x + 2, detail_area.y)]
+                    .symbol()
+                    .to_string(),
+                buffer[(detail_area.x + 2, detail_area.y + 1)]
+                    .symbol()
+                    .to_string(),
+            )
+        };
+
+        // Four shared ticks per pulse frame, against one snake step per tick.
+        app.spinner_frame = 0;
+        assert_eq!(icons(&app), ("◇".into(), "⠋".into()));
+        app.spinner_frame = 3;
+        assert_eq!(icons(&app), ("◇".into(), "⠸".into()));
+        app.spinner_frame = 4;
+        assert_eq!(icons(&app), ("◈".into(), "⠼".into()));
+        app.spinner_frame = 8;
+        assert_eq!(icons(&app), ("◇".into(), "⠇".into()));
+
+        // With the spinner off the pulse still marks the row apart.
+        app.status_spinner = crate::config::StatusSpinnerConfig::Off;
+        assert_eq!(icons(&app), ("◇".into(), "◐".into()));
+
+        // Overridable like every other state glyph.
+        app.status_spinner = crate::config::StatusSpinnerConfig::On;
+        app.state_symbol_overrides.background = Some("⊙".into());
+        app.spinner_frame = 0;
+        assert_eq!(icons(&app).0, "⊙");
     }
 
     #[test]
