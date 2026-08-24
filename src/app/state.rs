@@ -150,7 +150,7 @@ impl<'a> StateIconSymbols<'a> {
     /// The background-work pulse frame for a shared spinner frame: one swap
     /// every [`Self::BACKGROUND_PULSE_TICKS`] frames, so it beats far slower
     /// than the working spinner it sits beside.
-    pub const BACKGROUND_PULSE_TICKS: u8 = 4;
+    pub const BACKGROUND_PULSE_TICKS: u8 = 8;
 
     pub fn background_frame(&self, frame: Option<u8>) -> &'a str {
         match frame {
