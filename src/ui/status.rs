@@ -357,15 +357,15 @@ mod tests {
         assert_eq!(icon(AgentState::Idle, false, Some(3)).0, "□");
         assert_eq!(icon(AgentState::Blocked, true, Some(3)).0, "×");
 
-        // Background work pulses at a quarter of the spinner's rate: four
-        // frames on one glyph, four on the other, in the working colour.
-        for frame in 0..4 {
+        // Background work pulses at an eighth of the spinner's rate: eight
+        // frames on one glyph, eight on the other, in the working colour.
+        for frame in 0..8 {
             assert_eq!(background(Some(frame)).0, "◇", "frame {frame}");
         }
-        for frame in 4..8 {
+        for frame in 8..16 {
             assert_eq!(background(Some(frame)).0, "◈", "frame {frame}");
         }
-        assert_eq!(background(Some(8)).0, "◇");
+        assert_eq!(background(Some(16)).0, "◇");
         assert_eq!(
             background(Some(3)).1.fg,
             Some(palette.teal),
