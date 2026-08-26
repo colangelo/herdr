@@ -176,7 +176,7 @@ def infer_protocol_from_notes(notes: str) -> int | None:
 def normalize_assets(
     value: Any,
     label: str,
-    required_targets: tuple[str, ...] = ASSET_TARGETS,
+    required_targets: tuple[str, ...] = CORE_ASSET_TARGETS,
 ) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ChangelogError(f"{label} must be an object")
@@ -199,7 +199,7 @@ def normalize_assets(
 def normalize_sha256(
     value: Any,
     label: str,
-    required_targets: tuple[str, ...] = ASSET_TARGETS,
+    required_targets: tuple[str, ...] = CORE_ASSET_TARGETS,
 ) -> dict[str, str]:
     if not isinstance(value, dict):
         raise ChangelogError(f"{label} must be an object")
@@ -383,7 +383,13 @@ def manifest_from_release_payload(
             if isinstance(name, str) and name not in release_assets:
                 release_assets[name] = asset
 
-    missing_assets = [name for name in EXPECTED_ASSET_NAMES.values() if name not in release_assets]
+    # Fork: release.yml publishes the four Unix binaries only. A Windows asset is
+    # still carried through when a release has one, but it is not required here.
+    missing_assets = [
+        name
+        for target, name in EXPECTED_ASSET_NAMES.items()
+        if target in CORE_ASSET_TARGETS and name not in release_assets
+    ]
     if missing_assets:
         raise ChangelogError(
             f"GitHub release v{normalized_version} is missing asset {missing_assets[0]}"
@@ -394,6 +400,8 @@ def manifest_from_release_payload(
     for target, asset_name in EXPECTED_ASSET_NAMES.items():
         asset = release_assets.get(asset_name)
         if not isinstance(asset, dict):
+            if target not in CORE_ASSET_TARGETS:
+                continue
             raise ChangelogError(f"GitHub release v{normalized_version} is missing asset {asset_name}")
         url = str(asset.get("url") or "").strip()
         if not url:
@@ -610,6 +618,10 @@ def fetch_remote_json(url: str, label: str) -> dict[str, Any]:
 
 def verify_asset_urls_resolve(assets: dict[str, str], label: str) -> None:
     for target in ASSET_TARGETS:
+        # Fork: only the four Unix assets are published; check a Windows URL
+        # when a manifest happens to carry one.
+        if target not in assets:
+            continue
         url = assets[target]
         command = [
             "curl",

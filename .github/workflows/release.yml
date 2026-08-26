@@ -61,11 +61,6 @@ jobs:
             name: herdr-macos-aarch64
             libghostty_vt_optimize: ReleaseFast
             libghostty_vt_simd: 'true'
-          - target: x86_64-pc-windows-msvc
-            os: windows-2022
-            name: herdr-windows-x86_64.zip
-            libghostty_vt_optimize: ReleaseFast
-            libghostty_vt_simd: 'true'
 
     runs-on: ${{ matrix.os }}
     env:
@@ -161,27 +156,8 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package artifact
-        if: runner.os != 'Windows'
         shell: bash
         run: cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
-
-      - name: Package artifact
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $package = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.Console.ConPTY.nupkg"
-          $stage = Join-Path $env:RUNNER_TEMP "herdr-windows-x86_64"
-          .\scripts\package_windows_conpty.ps1 `
-            -HerdrExe target\${{ matrix.target }}\release\herdr.exe `
-            -PackagePath $package `
-            -StageDir $stage `
-            -OutputPath ${{ matrix.name }}
-          $version = (& (Join-Path $stage "herdr.exe") --version | Out-String).Trim()
-          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
-          if ($version -notmatch [regex]::Escape($tagVersion) -or $version -match "preview") {
-            throw "Packaged Windows binary has unexpected version identity: $version"
-          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -236,7 +212,6 @@ jobs:
             herdr-linux-aarch64/herdr-linux-aarch64
             herdr-macos-x86_64/herdr-macos-x86_64
             herdr-macos-aarch64/herdr-macos-aarch64
-            herdr-windows-x86_64.zip/herdr-windows-x86_64.zip
           body_path: RELEASE_NOTES.md
 
   close-released-issues:
