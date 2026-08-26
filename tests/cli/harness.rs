@@ -105,8 +105,8 @@ pub(super) fn cleanup_spawned_herdr(spawned: SpawnedHerdr, base: PathBuf) {
     cleanup_test_base(&base);
 }
 
-pub(super) fn wait_for_socket(path: &Path, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
+pub(super) fn wait_for_socket(path: &Path) {
+    let deadline = Instant::now() + crate::support::APPEARS_TIMEOUT;
     while Instant::now() < deadline {
         if path.exists() && std::os::unix::net::UnixStream::connect(path).is_ok() {
             return;

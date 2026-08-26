@@ -663,7 +663,7 @@ fn pane_agent_reports_accept_options_before_pane() {
     let socket_path = runtime_dir.join("herdr.sock");
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = send_request(
         &socket_path,

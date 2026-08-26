@@ -234,6 +234,32 @@ they are still upstream's.
   not fork breakage; the fork's external-contributor guardrail forbids opening
   an upstream issue for them.
 
+**macOS `just check` does not compile the CLI integration suite at all.**
+`tests/cli.rs` opens with `#![cfg(all(unix, not(target_os = "macos")))]`, so every
+file under `tests/cli/` — the harness, the string protocol pins, ~20 case files —
+is invisible to a local macOS build AND to `cargo check --all-targets`. A
+resolution that changes a shared test helper's signature therefore compiles clean
+on macOS and fails CI on Linux with a wall of `E0061`. Hit 2026-08-26: the fork's
+liveness-bounds commit converted `wait_for_socket(path, timeout)` call sites to
+one argument, the conflict resolution kept the two-argument definition in
+`tests/cli/harness.rs`, and nothing local caught it.
+
+Compile that suite before pushing, by lifting the exclusion in a throwaway edit:
+
+```bash
+cp tests/cli.rs /tmp/cli.rs.orig
+sed -i.bak 's/^#!\[cfg(all(unix, not(target_os = "macos")))\]$/#![cfg(unix)]/' tests/cli.rs
+rm -f tests/cli.rs.bak
+cargo check --locked --all-targets            # now includes tests/cli/**
+cp /tmp/cli.rs.orig tests/cli.rs              # ALWAYS restore
+git diff --name-only tests/cli.rs             # must be empty
+```
+
+The tests themselves are excluded on macOS for runtime reasons, so do not try to
+*run* them — compiling is the whole point. Do NOT cross-compile to Linux to check
+this: `cargo check --target *-linux-gnu` clobbers the vendored libghostty-vt
+archive in this checkout.
+
 ## 5. Adopt and push
 
 ```bash

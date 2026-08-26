@@ -227,7 +227,7 @@ fn workspace_close_requires_explicit_worktree_group_intent() {
     create_committed_repo(&repo);
 
     let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
 
     let created = run_cli_json(
         &socket_path,

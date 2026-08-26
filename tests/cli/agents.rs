@@ -77,7 +77,7 @@ fn agent_start_waits_for_a_new_pane_shell_to_finish_initializing() {
         Some(&bin),
         &config,
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
     let seed = run_cli_json(
         &socket_path,
         &["workspace", "create", "--cwd", base.to_str().unwrap()],
@@ -158,7 +158,7 @@ fn agent_start_stops_retrying_when_the_pane_shell_stays_busy() {
         Some(&bin),
         &config,
     );
-    wait_for_socket(&socket_path, Duration::from_secs(5));
+    wait_for_socket(&socket_path);
     let created = run_cli_json(
         &socket_path,
         &["workspace", "create", "--cwd", base.to_str().unwrap()],

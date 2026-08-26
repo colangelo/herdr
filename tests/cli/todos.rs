@@ -1,6 +1,5 @@
 use super::harness::*;
 use std::process::Command;
-use std::time::Duration;
 
 /// `herdr todo` with no pane argument, run from inside a pane, must land on that
 /// pane. This is the feature's headline path — an agent recording its own next
