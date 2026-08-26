@@ -261,6 +261,7 @@ mod tests {
             snapshot: crate::workspace::WorkspaceGitStatusSnapshot {
                 auto_label: "/".into(),
                 branch: Some("main".into()),
+                detached_head: None,
                 ahead_behind: None,
                 space: Some(crate::workspace::GitSpaceMetadata {
                     key: "/.git".into(),
@@ -350,6 +351,7 @@ mod tests {
             snapshot: crate::workspace::WorkspaceGitStatusSnapshot {
                 auto_label: "stale".into(),
                 branch: None,
+                detached_head: None,
                 ahead_behind: None,
                 space: None,
             },

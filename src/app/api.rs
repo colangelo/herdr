@@ -224,7 +224,7 @@ impl App {
             // already running its replacement, so this reports nothing about the
             // pane's current process.
             if self.respawn_replaced_runtimes.remove(pane_id) {
-                return;
+                return Vec::new();
             }
             if self
                 .state

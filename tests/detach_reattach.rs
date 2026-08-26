@@ -684,7 +684,7 @@ fn pane_created_without_client_uses_configured_headless_size() {
         &client_socket,
         CUSTOM_HEADLESS_SIZE_CONFIG,
     );
-    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
 
     let create = workspace_create(&api_socket, "headless-size");
     let pane_id = create["result"]["root_pane"]["pane_id"]
@@ -723,8 +723,8 @@ fn pane_created_after_detach_uses_configured_headless_size() {
         &client_socket,
         CUSTOM_HEADLESS_SIZE_CONFIG,
     );
-    wait_for_socket(&api_socket, Duration::from_secs(10));
-    wait_for_socket(&client_socket, Duration::from_secs(10));
+    wait_for_socket(&api_socket);
+    wait_for_socket(&client_socket);
 
     let mut stream = UnixStream::connect(&client_socket).expect("client should connect");
     let (version, error) =

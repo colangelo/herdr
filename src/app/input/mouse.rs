@@ -5840,6 +5840,7 @@ mod tests {
         let click = |app: &mut crate::app::App, rect: Rect| {
             app.state.handle_mouse(
                 &mut app.terminal_runtimes,
+                crate::app::LOCAL_INPUT_SOURCE,
                 mouse(
                     MouseEventKind::Down(MouseButton::Left),
                     rect.x + rect.width / 2,
@@ -5915,6 +5916,7 @@ mod tests {
         // Third column of the first line, which is where "fi|rst" splits.
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 text_area.x + 2,
@@ -5935,6 +5937,7 @@ mod tests {
         // spilling onto the next one.
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 text_area.x + text_area.width - 1,
@@ -6001,6 +6004,7 @@ mod tests {
         for col in indicator.rect.x..indicator.rect.x + indicator.rect.width {
             app.state.handle_mouse(
                 &mut app.terminal_runtimes,
+                crate::app::LOCAL_INPUT_SOURCE,
                 mouse(
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                     col,
@@ -6014,6 +6018,7 @@ mod tests {
             );
             app.state.handle_mouse(
                 &mut app.terminal_runtimes,
+                crate::app::LOCAL_INPUT_SOURCE,
                 mouse(
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                     col,
@@ -6041,6 +6046,7 @@ mod tests {
 
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 buttons
@@ -6083,6 +6089,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 indicator.rect.x,
@@ -6149,6 +6156,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y),
         );
         assert!(
@@ -6158,6 +6166,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y),
         );
         assert!(
@@ -6229,6 +6238,7 @@ mod tests {
         for row in list.y..list.y + list.height {
             app.state.handle_mouse(
                 &mut app.terminal_runtimes,
+                crate::app::LOCAL_INPUT_SOURCE,
                 mouse(MouseEventKind::Moved, list.x + 4, row),
             );
         }
@@ -6241,6 +6251,7 @@ mod tests {
         for _ in 0..3 {
             app.state.handle_mouse(
                 &mut app.terminal_runtimes,
+                crate::app::LOCAL_INPUT_SOURCE,
                 mouse(MouseEventKind::ScrollDown, list.x + 4, list.y),
             );
         }
@@ -6277,6 +6288,7 @@ mod tests {
 
         let first = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, target),
         );
         assert!(first.is_none(), "the first click only selects");
@@ -6285,6 +6297,7 @@ mod tests {
 
         let second = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, target),
         );
         assert!(
@@ -6309,6 +6322,7 @@ mod tests {
         // Row 0 is the pane heading; row 1 is its todo.
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 list.x + 4,
@@ -6344,6 +6358,7 @@ mod tests {
 
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), list.x + 4, list.y),
         );
 
@@ -6365,6 +6380,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), 0, 0),
         );
 
@@ -6384,6 +6400,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(MouseEventKind::Down(MouseButton::Left), close.x, close.y),
         );
 
@@ -6441,6 +6458,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 beside,
@@ -6480,6 +6498,7 @@ mod tests {
 
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 indicator.x,
@@ -6512,6 +6531,7 @@ mod tests {
 
         app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 indicator.x,
@@ -6575,6 +6595,7 @@ mod tests {
 
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 list.x + 4,
@@ -6590,6 +6611,7 @@ mod tests {
         for col in chip.x..chip.x + chip.width {
             let action = app.state.handle_mouse(
                 &mut app.terminal_runtimes,
+                crate::app::LOCAL_INPUT_SOURCE,
                 mouse(
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                     col,
@@ -6634,6 +6656,7 @@ mod tests {
 
         let action = app.state.handle_mouse(
             &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
             mouse(
                 crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 gap_col,

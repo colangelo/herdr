@@ -5889,6 +5889,7 @@ mod tests {
                 state: AgentState::Idle,
                 visible_blocker: false,
                 visible_working: false,
+                background_work: false,
                 process_exited: false,
                 observed_at: Instant::now(),
             })
@@ -5908,6 +5909,7 @@ mod tests {
                 state: agent_state,
                 visible_blocker: agent_state == AgentState::Blocked,
                 visible_working: agent_state == AgentState::Working,
+                background_work: false,
                 process_exited: false,
                 observed_at: Instant::now(),
             });
@@ -5919,6 +5921,7 @@ mod tests {
                 state: AgentState::Idle,
                 visible_blocker: false,
                 visible_working: false,
+                background_work: false,
                 process_exited: false,
                 observed_at: Instant::now(),
             })
@@ -5943,6 +5946,7 @@ mod tests {
             state: AgentState::Working,
             visible_blocker: false,
             visible_working: true,
+            background_work: false,
             process_exited: false,
             observed_at: Instant::now(),
         });
@@ -5953,6 +5957,7 @@ mod tests {
                 state: AgentState::Idle,
                 visible_blocker: false,
                 visible_working: false,
+                background_work: false,
                 process_exited: true,
                 observed_at: Instant::now(),
             })
