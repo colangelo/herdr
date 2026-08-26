@@ -89,6 +89,7 @@
 - Live handoff (`herdr update --handoff`) now resurfaces working agents without user interaction: the handoff manifest carries each pane's live agent state so working/blocked panes show their real state immediately after the restart, and the new server sweeps all panes in the background (staggered per-pane repaint nudge plus forced detection rescan, no client attach required) to re-verify every agent within seconds. Previously every pane restored as idle and detection only caught up when a pane was viewed or clicked; the one-shot repaint nudge on first client attach has been replaced by the sweep.
 - Windows support is now generally available through stable releases and uses the stable update channel by default. Existing preview installs stay on preview until explicitly switched.
 - Headless servers now use a configurable 120×40 virtual terminal instead of 80×24 when no client is attached, giving newly created panes a practical default size. (#2828)
+- Removed `ui.sidebar_active_bg`. Upstream now ships the same control as the theme token `theme.custom.active_row_bg`, with per-theme defaults and `theme.custom.light`/`theme.custom.dark` variants a single `[ui]` key cannot express. Move the value across to keep a custom active-row background; the built-in defaults are unchanged.
 
 
 ### Fixed

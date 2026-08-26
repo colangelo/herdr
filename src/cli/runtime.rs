@@ -3,8 +3,8 @@ use crate::api::schema::{
     PaneInputSetParams, PaneMoveParams, PaneRenameParams, PaneResizeParams, PaneSplitParams,
     PaneSwapParams, PaneTarget, PaneZoomParams, Request, TabCreateParams, TabListParams,
     TabRenameParams, TabTarget, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceRenameParams,
-    WorkspaceTarget,
-    WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams, WorktreeRemoveParams,
+    WorkspaceTarget, WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams,
+    WorktreeRemoveParams,
 };
 
 fn print_method_response(id: &'static str, method: Method) -> std::io::Result<i32> {

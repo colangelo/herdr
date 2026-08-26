@@ -1368,10 +1368,6 @@ pub struct UiConfig {
     /// "off", "above", "below", "both", "left", "right" — or a bool for
     /// backward compatibility (true = "both"). Default: off.
     pub sidebar_active_border: SidebarActiveBorderConfig,
-    /// Background of the active space and agent rows in the sidebar. Same
-    /// syntax as `accent`. Unset uses the theme's subtle highlight.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sidebar_active_bg: Option<String>,
     /// Default background for the focused pane's cells (tmux
     /// `window-active-style` bg). Same syntax as `accent`. Only cells without
     /// an explicit app-painted background are tinted. Unset keeps the
@@ -1650,7 +1646,6 @@ impl Default for UiConfig {
             pane_title_inactive_color: None,
             pane_todo_color: None,
             sidebar_active_border: SidebarActiveBorderConfig::Off,
-            sidebar_active_bg: None,
             pane_active_bg: None,
             pane_inactive_bg: None,
             dim_inactive_panes: false,
@@ -1944,7 +1939,6 @@ status_indicators = "symbols"
             defaults.ui.sidebar_active_border,
             SidebarActiveBorderConfig::Off
         );
-        assert_eq!(defaults.ui.sidebar_active_bg, None);
         assert_eq!(defaults.ui.pane_active_bg, None);
         assert_eq!(defaults.ui.pane_inactive_bg, None);
         assert!(!defaults.ui.dim_inactive_panes);
@@ -1957,7 +1951,6 @@ pane_border_inactive_color = "#4a4a4a"
 pane_title_active_color = "#ffd700"
 pane_title_inactive_color = "#7a7a7a"
 sidebar_active_border = true
-sidebar_active_bg = "#000000"
 pane_active_bg = "#000000"
 pane_inactive_bg = "#0c0c0c"
 dim_inactive_panes = true
@@ -1988,7 +1981,6 @@ dim_inactive_panes = true
             config.ui.sidebar_active_border,
             SidebarActiveBorderConfig::Both
         );
-        assert_eq!(config.ui.sidebar_active_bg.as_deref(), Some("#000000"));
         assert_eq!(config.ui.pane_active_bg.as_deref(), Some("#000000"));
         assert_eq!(config.ui.pane_inactive_bg.as_deref(), Some("#0c0c0c"));
         assert!(config.ui.dim_inactive_panes);

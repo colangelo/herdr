@@ -1290,13 +1290,13 @@
           "key": "ui.workspace_number_prefix",
           "type": "string",
           "default": "\"\"",
-          "description": "Leader glyph(s) shown before the workspace jump number when sidebar_style is \"editorial\", e.g. \"₽\" to hint the prefix+N chord. Rendered in workspace_number_color. Empty leaves the bare number."
+          "description": "Leader glyph(s) shown before the workspace jump number when sidebar_style is \"editorial\", e.g. \"\u20bd\" to hint the prefix+N chord. Rendered in workspace_number_color. Empty leaves the bare number."
         },
         {
           "key": "ui.agent_number_prefix",
           "type": "string",
           "default": "\"\"",
-          "description": "Leader glyph(s) shown before the agent jump number when sidebar_style is \"editorial\", e.g. \"₽⌥\" to hint the prefix+alt+N chord. Rendered in agent_number_color. Empty leaves the bare number."
+          "description": "Leader glyph(s) shown before the agent jump number when sidebar_style is \"editorial\", e.g. \"\u20bd\u2325\" to hint the prefix+alt+N chord. Rendered in agent_number_color. Empty leaves the bare number."
         },
         {
           "key": "ui.workspace_sort",
@@ -1334,7 +1334,7 @@
           "key": "ui.sort_motion_easing",
           "type": "enum",
           "default": "\"linear\"",
-          "description": "Step cadence across a reshuffle. \"linear\" spaces every step evenly; \"bubble\" eases in and out — slow to break away, quickest mid-flight, slowing into the final slot. The curve stretches over the reshuffle, so it only reads as acceleration when rows travel several positions.",
+          "description": "Step cadence across a reshuffle. \"linear\" spaces every step evenly; \"bubble\" eases in and out \u2014 slow to break away, quickest mid-flight, slowing into the final slot. The curve stretches over the reshuffle, so it only reads as acceleration when rows travel several positions.",
           "values": [
             "linear",
             "bubble"
@@ -1442,7 +1442,7 @@
           "key": "ui.sidebar_active_border",
           "type": "enum",
           "default": "\"off\"",
-          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" — or a bool for backward compatibility (true = \"both\"). \"left\"/\"right\" also apply in the collapsed sidebar, which reserves one extra edge column for the bar; \"above\"/\"below\"/\"both\" draw nothing there (no spacer rows).",
+          "description": "Highlight pattern for the active space and agent in the sidebar, using `pane_border_active_color` and `pane_border_active_style`. Accepts \"off\", \"above\", \"below\", \"both\", \"left\", \"right\" \u2014 or a bool for backward compatibility (true = \"both\"). \"left\"/\"right\" also apply in the collapsed sidebar, which reserves one extra edge column for the bar; \"above\"/\"below\"/\"both\" draw nothing there (no spacer rows).",
           "values": [
             "off",
             "above",
@@ -1451,12 +1451,6 @@
             "left",
             "right"
           ]
-        },
-        {
-          "key": "ui.sidebar_active_bg",
-          "type": "color",
-          "default": "unset",
-          "description": "Background of the active space and agent rows in the sidebar. Same syntax as `accent`. Unset uses the theme's subtle highlight."
         },
         {
           "key": "ui.accent",

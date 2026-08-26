@@ -547,7 +547,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Background of the active space and agent rows in the sidebar (same syntax
 # as accent). Unset uses the theme's subtle highlight.
-# sidebar_active_bg = "#000000"
 
 # Default backgrounds for focused/unfocused pane cells (same syntax as accent),
 # like tmux window-active-style / window-style. Only cells without an

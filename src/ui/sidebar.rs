@@ -1003,7 +1003,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         let row_style = if is_selected {
             Style::default().bg(selection_bg)
         } else if is_active {
-            Style::default().bg(app.sidebar_active_band_bg())
+            Style::default().bg(p.active_row_bg)
         } else {
             Style::default()
         };
@@ -1012,7 +1012,7 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         } else if is_active {
             Style::default()
                 .fg(p.text)
-                .bg(app.sidebar_active_band_bg())
+                .bg(p.active_row_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(app.workspace_number_color.unwrap_or(p.overlay0))
@@ -1076,14 +1076,14 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             let symbol = crate::config::jump_symbol(detail_idx).unwrap_or(' ');
             let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
             let row_style = if is_active {
-                Style::default().bg(app.sidebar_active_band_bg())
+                Style::default().bg(p.active_row_bg)
             } else {
                 Style::default()
             };
             let position_style = if is_active {
                 Style::default()
                     .fg(p.text)
-                    .bg(app.sidebar_active_band_bg())
+                    .bg(p.active_row_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0))
@@ -1693,7 +1693,7 @@ fn render_workspace_list(
             } else if is_dragged {
                 p.surface1
             } else {
-                app.sidebar_active_band_bg()
+                p.active_row_bg
             };
             let buf = frame.buffer_mut();
             for y in row_y..row_y + row_height {
@@ -2106,7 +2106,7 @@ fn render_agent_detail(
         .then_some(row_y);
 
         let row_style = if is_active {
-            Style::default().bg(app.sidebar_active_band_bg())
+            Style::default().bg(p.active_row_bg)
         } else {
             Style::default()
         };
@@ -3789,12 +3789,12 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let active_row = detail_area.y + active_idx as u16;
         let inactive_row = detail_area.y + (1 - active_idx) as u16;
         let active_style = buffer[(detail_area.x, active_row)].style();
-        assert_eq!(active_style.bg, Some(app.sidebar_active_band_bg()));
+        assert_eq!(active_style.bg, Some(app.palette.active_row_bg));
         assert!(active_style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(active_style.fg, Some(app.palette.text));
         assert_ne!(
             buffer[(detail_area.x, inactive_row)].style().bg,
-            Some(app.sidebar_active_band_bg())
+            Some(app.palette.active_row_bg)
         );
     }
 
