@@ -207,11 +207,32 @@ cargo nextest run --locked <test_name>          # in that worktree
 wt remove upstream-baseline                     # when done
 ```
 
-Known upstream-baseline failure (macOS, verified 2026-07-25 at upstream
-`d4e0dd3d`): `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session`
-fails with `agent_not_found` — it fails identically with zero fork patches
-applied, so it is not a rebase regression. Re-verify against the baseline each
-sync rather than assuming it is still upstream's.
+Known upstream-baseline failures (macOS). Each was reproduced on a clean
+`upstream/master` worktree with zero fork patches applied, so none is a rebase
+regression — but re-verify against the baseline each sync rather than assuming
+they are still upstream's.
+
+- Verified 2026-07-25 at upstream `d4e0dd3d`:
+  `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` fails with
+  `agent_not_found`.
+- Verified 2026-08-26 at upstream `d79fd746` (v0.8.2+), all three deterministic
+  under `-j 1`, i.e. not load flakes:
+  - `api_ping::events_subscribe_streams_output_and_agent_status_events` —
+    timed out waiting for json line
+  - `cross_area::cross_area_two_clients_shared_view_and_single_detach_stability`
+    — `pane_read_recent_contains(... "SHARED_VIEW" ...)` never true
+  - `live_handoff::live_server_holds_one_pty_master_fd_per_pane` —
+    "had 2 ptmx master fds; expected 1"
+  - `multi_client::multi_client_broadcasts_frame_updates_to_all_clients` —
+    panic at `tests/multi_client.rs:955`
+
+  Full fork `master` baseline that day: 3782 run, 3778 passed, these 4 failed.
+  Compare a post-rebase run against that number, not against zero.
+
+  All three are upstream-authored tests the fork last touched in April/May, and
+  they fail the same way on fork `master`. They are an upstream/macOS problem,
+  not fork breakage; the fork's external-contributor guardrail forbids opening
+  an upstream issue for them.
 
 ## 5. Adopt and push
 
