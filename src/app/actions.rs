@@ -2279,6 +2279,8 @@ impl AppState {
             return false;
         };
         self.selected = ws_idx;
+        self.confirm_close_pane = None;
+        self.confirm_respawn_pane = None;
         self.confirm_close_workspace_id = Some(workspace_id);
         self.mode = Mode::ConfirmClose;
         true
@@ -2318,6 +2320,7 @@ impl AppState {
         }
         self.selected = ws_idx;
         self.confirm_respawn_pane = None;
+        self.confirm_close_workspace_id = None;
         self.confirm_close_pane = Some(pane_id);
         self.mode = Mode::ConfirmClose;
         true
@@ -2351,6 +2354,7 @@ impl AppState {
         }
         self.selected = ws_idx;
         self.confirm_close_pane = None;
+        self.confirm_close_workspace_id = None;
         self.confirm_respawn_pane = Some(pane_id);
         self.mode = Mode::ConfirmClose;
         true
@@ -7166,5 +7170,30 @@ mod tests {
         state.forget_pane_todo_ui(pane_id);
 
         assert_eq!(state.confirm_respawn_pane, None);
+    }
+
+    #[test]
+    fn opening_one_close_confirmation_clears_the_other_two_tokens() {
+        // Three independent tokens drive one Mode::ConfirmClose modal. If a stale
+        // one survives, confirm_close_accept_via_api consumes it and acts on a
+        // subject the user never confirmed.
+        let mut state = AppState::test_new();
+        state.workspaces = vec![Workspace::test_new("current")];
+        state.active = Some(0);
+        state.selected = 0;
+        state.ensure_test_terminals();
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+
+        state.confirm_close_pane = Some(pane_id);
+        state.confirm_respawn_pane = Some(pane_id);
+        assert!(state.begin_workspace_close_confirmation(0));
+        assert!(state.confirm_close_pane.is_none());
+        assert!(state.confirm_respawn_pane.is_none());
+        assert!(state.confirm_close_workspace_id.is_some());
+
+        assert!(state.confirm_pane_respawn(0, pane_id, true));
+        assert!(state.confirm_close_workspace_id.is_none());
+        assert!(state.confirm_close_pane.is_none());
+        assert_eq!(state.confirm_respawn_pane, Some(pane_id));
     }
 }
