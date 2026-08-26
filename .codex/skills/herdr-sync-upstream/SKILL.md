@@ -1,6 +1,6 @@
 ---
 name: herdr-sync-upstream
-description: Sync the herdr fork with upstream ogulcancelik/herdr — scratch-branch rebase of the fork patches onto upstream/master, force-push to origin and internal, disable new upstream bot workflows. Use when the user wants to pull/merge/integrate/sync upstream changes into the fork.
+description: Sync the herdr fork with upstream herdrdev/herdr — scratch-branch rebase of the fork patches onto upstream/master, force-push to origin and internal, disable new upstream bot workflows. Use when the user wants to pull/merge/integrate/sync upstream changes into the fork.
 ---
 
 # Syncing the herdr fork with upstream
@@ -15,11 +15,13 @@ sync, mostly sidebar/UI features, and it touches `src/` broadly (`src/app/`,
 conflicts, not just workflow-file ones.
 
 Remotes: `origin` = github.com/colangelo/herdr, `internal` = Gitea
-(ac/herdr), `upstream` = github.com/ogulcancelik/herdr — upstream moved to
-the `herdrdev` org (2026-07); git redirects the old slug, but `gh`/API calls
-must use `herdrdev/herdr`, and upstream's `scripts/changelog.py`
-`DEFAULT_RELEASE_REPO` now says `herdrdev/herdr` (harmless here: the fork's
-CI and `release-ac` pass `--repo colangelo/herdr` explicitly).
+(ac/herdr), `upstream` = github.com/herdrdev/herdr. Upstream moved out of
+`ogulcancelik/herdr` into the `herdrdev` org (2026-07); the `upstream` remote
+URL was repointed at the new slug on 2026-08-26, so it no longer rides the
+GitHub redirect, and `gh`/API calls must use `herdrdev/herdr` as well.
+Upstream's `scripts/changelog.py` `DEFAULT_RELEASE_REPO` says `herdrdev/herdr`
+(harmless here: the fork's CI and `release-ac` pass `--repo colangelo/herdr`
+explicitly).
 
 ## 1. Assess
 
