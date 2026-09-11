@@ -7,7 +7,7 @@ default:
 # Run tests
 test:
     cargo nextest run --locked --status-level fail --final-status-level fail --failure-output final --success-output never
-    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_beta_build_id scripts.test_changelog scripts.test_config_reference_check scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty
+    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_beta_build_id scripts.test_changelog scripts.test_config_reference_check scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_windows_cross
     just ui-hot-path-architecture-test
     just integration-assets-test
     just plugin-marketplace-test
@@ -39,16 +39,20 @@ ci filter='all()': lint
     just integration-assets-test
     just plugin-marketplace-test
 
+# Download the Windows SDK once (requires xwin; prompts for Microsoft's SDK license)
+[unix]
+setup-windows-cross *args:
+    python3 scripts/windows_cross.py setup {{args}}
+
 # Run Windows target lint from Unix/macOS to catch cfg(windows) compile and clippy failures before CI
 [unix]
 windows-lint:
-    rustup target add x86_64-pc-windows-msvc
-    LIBGHOSTTY_VT_SIMD=false cargo clippy --all-targets --locked --target x86_64-pc-windows-msvc -- -D warnings
+    python3 scripts/windows_cross.py lint
 
 # Check formatting + run unit tests + Windows target lint + maintenance script tests
 [unix]
 check: ci windows-lint
-    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_beta_build_id scripts.test_changelog scripts.test_config_reference_check scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty
+    python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_beta_build_id scripts.test_changelog scripts.test_config_reference_check scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty scripts.test_windows_cross
     @echo "docs reminder: if this changes user-facing behavior, make sure the relevant release docs are updated or called out before release."
 
 [script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
