@@ -132,10 +132,16 @@ impl<K: Eq + Hash + Clone> ListMotion<K> {
 
         let target_pos =
             |key: &K| -> Option<usize> { target.iter().position(|other| other == key) };
+        // A key absent from `diverged_since` is sitting at its target index and
+        // owes no settle delay, so it is free to be swapped aside by a
+        // travelling neighbour. Requiring it to be *present* and released
+        // instead deadlocks any inversion that straddles an aligned key: no
+        // swap is ever legal, `diverged_since` never empties, and `next_due`
+        // returns a past instant forever, spinning the event loop.
         let released = |diverged_since: &HashMap<K, Instant>, key: &K| {
             diverged_since
                 .get(key)
-                .is_some_and(|since| now >= *since + timing.settle)
+                .is_none_or(|since| now >= *since + timing.settle)
         };
         for idx in 0..self.display.len().saturating_sub(1) {
             let inverted = match (
@@ -521,5 +527,33 @@ mod tests {
             keys(&["c", "a", "b"])
         );
         assert_eq!(motion.next_due(TIMING), None);
+    }
+
+    /// Regression: an inversion whose members include a key already sitting at
+    /// its target index must still resolve. `released` answers false for an
+    /// aligned key because `refresh_divergence` drops it from
+    /// `diverged_since`, so gating a swap on *both* neighbours being released
+    /// wedges the list: no swap is ever legal, `diverged_since` never empties,
+    /// and `next_due` keeps returning a past instant, which spins the event
+    /// loop at 100% CPU forever.
+    #[test]
+    fn inversion_around_an_aligned_key_still_resolves() {
+        let mut motion = ListMotion::new();
+        let t0 = Instant::now();
+        tick(&mut motion, t0, &["b", "a", "c"]);
+        // "a" is already at index 1 in this target; "b" and "c" must cross it.
+        let target = ["c", "a", "b"];
+        tick(&mut motion, t0, &target);
+        let mut now = t0 + TIMING.settle;
+        for _ in 0..64 {
+            tick(&mut motion, now, &target);
+            now += TIMING.step;
+        }
+        assert_eq!(tick(&mut motion, now, &target), keys(&target));
+        assert_eq!(
+            motion.next_due(TIMING),
+            None,
+            "a settled list must not keep asking the event loop to wake"
+        );
     }
 }
