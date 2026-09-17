@@ -2130,7 +2130,16 @@ impl PaneRuntime {
         let pane_terminal = GhosttyPaneTerminal::new(terminal, response_tx.clone())?;
         pane_terminal.apply_host_terminal_theme(host_terminal_theme);
         let _ = pane_terminal.apply_host_terminal_appearance(host_terminal_appearance);
+        // A seeded title arrives without a PTY title-change event, so nothing
+        // else registers this pane as a title source. Without this the value
+        // sits in the runtime and never reaches app-level terminal state — and
+        // so never the sidebar — until the child happens to re-emit OSC 0/2,
+        // which an idle agent may not do for hours.
+        let seeded_terminal_title = terminal_title.is_some();
         pane_terminal.seed_terminal_title(terminal_title);
+        if seeded_terminal_title {
+            render_dirty.request_terminal_title(pane_id);
+        }
         if let Some(input_state) = input_state {
             pane_terminal.seed_handoff_input_state(input_state);
         }
@@ -5376,5 +5385,83 @@ mod tests {
                 observed_at: _,
             } if delivered_pane == pane_id
         ));
+    }
+
+    /// Regression: a title carried across a live handoff must be registered as
+    /// a pending title source on import. `seed_terminal_title` only writes the
+    /// runtime's own fields, and the app-level `TerminalState.terminal_title`
+    /// the sidebar reads is refreshed solely from
+    /// `render_dirty.pending_terminal_title_sources()`. Without the
+    /// registration a seeded title is invisible until the child re-emits
+    /// OSC 0/2, so every idle agent's sidebar row goes blank after an upgrade.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn importing_a_handoff_pane_registers_its_seeded_title_for_sync() {
+        fn import(title: Option<&str>) -> (Arc<RenderSignal>, PaneId) {
+            let pair = native_pty_system()
+                .openpty(PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .expect("openpty");
+            let master_fd = pair
+                .master
+                .as_raw_fd()
+                .expect("pty master fd is available in tests");
+            let owned = crate::pty::fd::duplicate_cloexec_fd(master_fd).expect("dup master fd");
+            let pane_id = PaneId::alloc();
+            let state = crate::handoff_runtime::HandoffRuntimeState {
+                pane_id: pane_id.raw(),
+                child_pid: std::process::id(),
+                rows: 24,
+                cols: 80,
+                cell_width_px: 10,
+                cell_height_px: 20,
+                keyboard_protocol_flags: 0,
+                keyboard_protocol_ansi: None,
+                input_state: None,
+                terminal_title: title.map(str::to_string),
+                initial_history_ansi: None,
+                agent: None,
+                agent_state: None,
+            };
+            let render_dirty = Arc::new(RenderSignal::new());
+            let (events, _event_rx) = mpsc::channel(8);
+            let runtime = PaneRuntime::from_handoff_fd(
+                crate::handoff_runtime::ImportedHandoffRuntime {
+                    master_fd: owned,
+                    state,
+                },
+                1024 * 1024,
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                events,
+                Arc::new(Notify::new()),
+                Arc::clone(&render_dirty),
+            )
+            .expect("import handoff pane");
+            std::mem::forget(runtime);
+            drop(pair);
+            (render_dirty, pane_id)
+        }
+
+        let (with_title, pane_id) = import(Some("\u{2733} infra-relay"));
+        assert!(
+            with_title
+                .pending_terminal_title_sources()
+                .contains(&pane_id),
+            "a seeded title must register its pane so the first sync lifts it \
+             into app-level terminal state"
+        );
+
+        let (without_title, pane_id) = import(None);
+        assert!(
+            !without_title
+                .pending_terminal_title_sources()
+                .contains(&pane_id),
+            "an import with no title must not queue pointless title work"
+        );
     }
 }
