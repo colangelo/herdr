@@ -704,6 +704,10 @@ fn restore_tab(
             .and_then(|imported| imported.state.agent_seed());
         #[cfg(not(unix))]
         let imported_agent_seed = None;
+        #[cfg(unix)]
+        let handoff_agent_state = imported_runtime
+            .as_ref()
+            .and_then(|imported| imported.state.hook_agent_state.clone());
         let pending_native_agent_restore = if was_imported {
             None
         } else {
@@ -842,6 +846,10 @@ fn restore_tab(
                 }
                 restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
                 terminal.restored_last_input_at_ms = saved_last_input_at_ms;
+                #[cfg(unix)]
+                if let Some(agent_state) = handoff_agent_state {
+                    terminal.restore_handoff_agent_state(agent_state);
+                }
                 panes.insert(*id, PaneState::new(terminal_id.clone()));
                 terminal_runtimes.insert(terminal_id, runtime);
                 terminals.push(terminal);
@@ -2226,6 +2234,126 @@ mod tests {
             handoff_runtimes.is_empty(),
             "handoff restore should not replace pending native agent resume with a shell runtime"
         );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn live_handoff_preserves_hook_status_until_next_report() {
+        for state_before_handoff in [AgentState::Working, AgentState::Blocked] {
+            let (snapshot, _) = snapshot_with_saved_pane_history();
+            let (events, _events_rx) = mpsc::channel(32);
+            let (workspaces, mut terminals, runtimes) = restore(
+                &snapshot,
+                None,
+                24,
+                80,
+                4096,
+                test_restore_shell(),
+                crate::config::ShellModeConfig::NonLogin,
+                false,
+                events.clone(),
+                Arc::new(Notify::new()),
+                Arc::new(RenderSignal::new()),
+            );
+            let terminal = terminals.values_mut().next().unwrap();
+            terminal
+                .set_detected_agent_process_at(crate::detect::Agent::Pi, std::time::Instant::now());
+            terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:pi".into(),
+                agent: "pi".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::path(
+                    "/var/tmp/handoff-test.jsonl",
+                )
+                .unwrap(),
+            });
+            terminal.set_hook_authority_with_session_ref(
+                "herdr:pi".into(),
+                "pi".into(),
+                state_before_handoff,
+                None,
+                Some(
+                    crate::agent_resume::AgentSessionRef::path("/var/tmp/handoff-test.jsonl")
+                        .unwrap(),
+                ),
+                Some(1),
+            );
+            assert_eq!(terminal.state, state_before_handoff);
+            let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
+            let snapshot = crate::persist::capture(
+                &workspaces,
+                &terminals,
+                &runtimes,
+                Some(0),
+                0,
+                26,
+                0.5,
+                Default::default(),
+                None,
+            );
+            let pane_id = workspaces[0].tabs[0].panes.keys().next().copied().unwrap();
+            let runtime = runtimes.values().next().unwrap();
+            runtime
+                .pause_handoff_reader(std::time::Duration::from_secs(2))
+                .unwrap();
+            let mut state = runtime.handoff_runtime_state(pane_id.raw());
+            state.hook_agent_state = terminals.values().next().unwrap().handoff_agent_state();
+            let state = serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap();
+            let mut imports = HashMap::from([(
+                pane_id.raw(),
+                crate::handoff_runtime::ImportedHandoffRuntime {
+                    master_fd: runtime.duplicate_handoff_fd().unwrap(),
+                    state,
+                },
+            )]);
+            let (_, mut restored_terminals, restored_runtimes) = restore_handoff(
+                &snapshot,
+                4096,
+                test_restore_shell(),
+                crate::config::ShellModeConfig::NonLogin,
+                &mut imports,
+                events,
+                Arc::new(Notify::new()),
+                Arc::new(RenderSignal::new()),
+            )
+            .unwrap();
+            drop(restored_runtimes);
+            drop(runtimes);
+            let idle_report = |terminal: &mut crate::terminal::TerminalState| {
+                terminal.set_hook_authority_with_session_ref(
+                    "herdr:pi".into(),
+                    "pi".into(),
+                    AgentState::Idle,
+                    None,
+                    Some(
+                        crate::agent_resume::AgentSessionRef::path("/var/tmp/handoff-test.jsonl")
+                            .unwrap(),
+                    ),
+                    Some(2),
+                );
+            };
+            let terminal = restored_terminals.values_mut().next().unwrap();
+            assert_eq!(terminal.state, state_before_handoff);
+            terminal.set_detected_state(Some(crate::detect::Agent::Pi), AgentState::Idle);
+            assert_eq!(
+                terminal.state, state_before_handoff,
+                "screen fallback must not erase the transferred hook status"
+            );
+            idle_report(terminal);
+            assert_eq!(
+                terminal.state,
+                AgentState::Idle,
+                "the next hook report must take effect immediately"
+            );
+            // The acquisition flag travels with the status: the restored pane
+            // ends acquisition exactly as the pane that never moved does.
+            let original = terminals.values_mut().next().unwrap();
+            original.set_detected_state(Some(crate::detect::Agent::Pi), AgentState::Idle);
+            idle_report(original);
+            assert_eq!(
+                terminal.finish_agent_process_acquisition(),
+                original.finish_agent_process_acquisition()
+            );
+        }
     }
 
     #[tokio::test]

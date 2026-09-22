@@ -1377,6 +1377,7 @@ impl HeadlessServer {
                         crate::handoff_runtime::handoff_agent_state_label(terminal.state)
                             .map(str::to_string);
                 }
+                handoff_runtime.hook_agent_state = terminal.handoff_agent_state();
             }
             handoff_entries.push((terminal_id.clone(), handoff_runtime));
         }

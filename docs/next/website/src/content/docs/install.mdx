@@ -147,6 +147,8 @@ To opt into experimental live server handoff for supported running sessions, run
 herdr update --handoff
 ```
 
+When both servers support agent-status transfer, live handoff preserves hook-reported agent status until the next report arrives. Handoff from an older server can temporarily show a running agent as idle.
+
 Live handoff does not apply to Homebrew, mise, or Nix package-manager updates. For those installs, update with the package manager, then restart that Herdr session when you are ready to use the new server. If a running session still uses the old server, stop it with `herdr server stop` or `herdr session stop <name>`, then run Herdr again.
 
 ## Requirements

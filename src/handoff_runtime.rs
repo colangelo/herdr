@@ -34,6 +34,11 @@ pub(crate) struct HandoffRuntimeState {
     /// absent means the receiving server seeds `Idle`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_state: Option<String>,
+    /// The hook-reported agent status before the handoff, so the receiving
+    /// server keeps it until the next report. Named apart from `agent_state`,
+    /// which older fork servers write as a label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_agent_state: Option<crate::terminal::state::HandoffAgentState>,
 }
 
 #[cfg(unix)]
@@ -105,6 +110,7 @@ mod tests {
             initial_history_ansi: None,
             agent: None,
             agent_state: None,
+            hook_agent_state: None,
         }
     }
 
