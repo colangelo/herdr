@@ -147,19 +147,19 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
 
-      - name: Create or replace rolling beta prerelease
+      - name: Publish rolling beta prerelease
+        # Publishes to a staging tag first and only then moves `beta`, so a
+        # refused publish leaves the previous beta release downloadable.
+        # Order and failure modes: scripts/beta_publish.sh.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BETA_VERSION: ${{ needs.prep.outputs.version }}
+          SOURCE_REF: ${{ inputs.ref || 'master' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          # Delete the previous rolling beta release and tag so `beta` always
-          # points at the newest build.
-          gh release delete beta --yes --cleanup-tag 2>/dev/null || true
-          gh release create beta \
-            --prerelease \
-            --target "$(git rev-parse HEAD)" \
-            --title "Beta ${BETA_VERSION}" \
-            --notes "Rolling \`-ac-beta\` build (\`${BETA_VERSION}\`) from \`${{ inputs.ref || 'master' }}\`."$'\n\n'"Install: \`brew install colangelo/tap/herdr-beta\`"$'\n'"Upgrade: \`brew update && brew upgrade herdr-beta\`" \
+          BETA_NOTES="Rolling \`-ac-beta\` build (\`${BETA_VERSION}\`) from \`${SOURCE_REF}\`."$'\n\n'"Install: \`brew install colangelo/tap/herdr-beta\`"$'\n'"Upgrade: \`brew update && brew upgrade herdr-beta\`"
+          export BETA_NOTES
+          TARGET_SHA=$(git rev-parse HEAD) scripts/beta_publish.sh \
             herdr-macos-aarch64/herdr-macos-aarch64 \
             herdr-macos-x86_64/herdr-macos-x86_64
 
