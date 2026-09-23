@@ -12,6 +12,7 @@ use std::process::Command;
 /// mask a missing-target failure.
 fn run_todo_cli_without_pane(socket_path: &std::path::Path, args: &[&str]) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    command.env_remove("HERDR_STARTUP_CWD");
     command.args(args);
     command.env("HERDR_SOCKET_PATH", socket_path);
     command.env_remove("HERDR_PANE_ID");
@@ -24,6 +25,7 @@ fn run_todo_cli_as_pane(
     args: &[&str],
 ) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    command.env_remove("HERDR_STARTUP_CWD");
     command.args(args);
     command.env("HERDR_SOCKET_PATH", socket_path);
     command.env("HERDR_PANE_ID", pane_id);

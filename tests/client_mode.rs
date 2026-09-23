@@ -103,6 +103,7 @@ fn spawn_client_process_with_args(
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.args(args);
     cmd.env("HERDR_DISABLE_SOUND", "1");
     cmd.env("XDG_CONFIG_HOME", config_home);
@@ -141,6 +142,7 @@ fn spawn_no_session_process(config_home: &PathBuf, runtime_dir: &PathBuf) -> Spa
         })
         .unwrap();
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.arg("--no-session");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -199,6 +201,7 @@ fn spawn_server_with_config(
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -541,6 +544,7 @@ fn client_sees_headless_startup_config_diagnostic() {
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", &config_home);
     cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
@@ -1522,6 +1526,7 @@ fn client_receives_notify_on_agent_state_change() {
         .unwrap();
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    cmd.env_remove("HERDR_STARTUP_CWD");
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", &config_home);
     cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
