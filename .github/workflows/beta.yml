@@ -103,19 +103,10 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
           targets: ${{ matrix.target }}
 
-      - name: Restore Homebrew Zig cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          path: ~/Library/Caches/Homebrew/downloads
-          key: homebrew-zig-0.15-${{ runner.os }}-${{ runner.arch }}
-          restore-keys: |
-            homebrew-zig-0.15-${{ runner.os }}-
-
-      - name: Install patched Zig on macOS
-        run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install zig@0.15
-          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
-          "$(brew --prefix zig@0.15)/bin/zig" version
+          version: 0.16.0
 
       - name: Install macOS build tools
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ninja
