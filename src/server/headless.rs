@@ -5118,6 +5118,11 @@ fn is_keybinding_config_diagnostic(diagnostic: &str) -> bool {
 
 /// Run the headless server. This is the entry point called from main.rs.
 pub fn run_server() -> io::Result<()> {
+    // Take the private startup-cwd hint out of the process environment before
+    // anything can spawn a pane: session restore and handoff import both start
+    // shells, and every shell would otherwise inherit the hint and hand it to
+    // any herdr started inside it.
+    let startup_cwd = take_startup_cwd();
     init_logging();
     crate::platform::raise_server_nofile_limit();
 
@@ -5169,7 +5174,7 @@ pub fn run_server() -> io::Result<()> {
             api_rx,
             event_hub,
         );
-        seed_startup_workspace_if_empty(&mut app);
+        seed_startup_workspace_if_empty(&mut app, startup_cwd);
 
         // The server runs headless — disable local notification side effects.
         // Sound and terminal notifications are forwarded to connected clients
@@ -5213,8 +5218,8 @@ pub fn run_server() -> io::Result<()> {
     result
 }
 
-fn seed_startup_workspace_if_empty(app: &mut app::App) {
-    let Some(cwd) = take_startup_cwd() else {
+fn seed_startup_workspace_if_empty(app: &mut app::App, startup_cwd: Option<PathBuf>) {
+    let Some(cwd) = startup_cwd else {
         return;
     };
 
