@@ -17,4 +17,4 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `cargo nextest run --locked` + `cargo fmt --check` green (`just check` is blocked on m4m until https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/80)
+- [x] 4.1 `cargo nextest run --locked` (3936 passed, twice) + `cargo fmt --check` green; `just check` and clippy are blocked on m4m until https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/80
