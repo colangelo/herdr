@@ -678,8 +678,16 @@ fn pane_command() -> Command {
                 .about("Send literal text to a pane")
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("text", "TEXT"))
+                .arg(option("chunk", "BYTES").help(
+                    "Send the text in pieces of at most BYTES bytes, never splitting a character",
+                ))
+                .arg(
+                    option("chunk-delay", "MS")
+                        .requires("chunk")
+                        .help("Pause between --chunk pieces in milliseconds [default: 20]"),
+                )
                 .after_help(
-                    "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
+                    "The text is sent as one raw write. A TUI such as Claude Code may treat a large single write (about 1000 bytes or more) as a paste and collapse it into a placeholder like [Pasted text #1]. Use --chunk 300 to send it as separate paced writes that arrive as typed text; the command returns after the last piece is sent. Use -- before text that starts with --chunk.\n\nnext: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
                 ),
         )
         .subcommand(
@@ -1442,6 +1450,12 @@ mod tests {
                 "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call"
             ),
             "pane send-text is missing its next-step hint: {pane_send_text}"
+        );
+        assert!(
+            pane_send_text.contains("--chunk <BYTES>")
+                && pane_send_text.contains("--chunk-delay <MS>")
+                && pane_send_text.contains("[Pasted text #1]"),
+            "pane send-text help must explain paste collapse and --chunk: {pane_send_text}"
         );
     }
 
