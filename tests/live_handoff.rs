@@ -1439,18 +1439,28 @@ fn live_handoff_keeps_agent_started_pane_after_agent_exits() {
         .unwrap()
         .to_string();
 
-    let started = request(
-        &api_socket,
-        serde_json::json!({
-            "id": "test:agent-start",
-            "method": "agent.start",
-            "params": {
-                "name": "handoff-agent",
-                "kind": "pi",
-                "pane_id": pane_id,
-                "timeout_ms": 5000
-            }
+    // `agent.start` needs the pane's shell to be its foreground process, and a
+    // just-created pane may still be starting it; the server answers
+    // `agent_pane_busy` until then. Retry that one answer instead of racing it.
+    let mut started = serde_json::Value::Null;
+    assert!(
+        support::wait_until(support::APPEARS_TIMEOUT, Duration::from_millis(50), || {
+            started = request(
+                &api_socket,
+                serde_json::json!({
+                    "id": "test:agent-start",
+                    "method": "agent.start",
+                    "params": {
+                        "name": "handoff-agent",
+                        "kind": "pi",
+                        "pane_id": pane_id,
+                        "timeout_ms": 5000
+                    }
+                }),
+            );
+            started["error"]["code"] != "agent_pane_busy"
         }),
+        "pane never became an available shell: {started}"
     );
     assert_ok(started);
     support::wait_for_file(&started_marker);
