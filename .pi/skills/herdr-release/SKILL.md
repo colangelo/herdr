@@ -150,8 +150,9 @@ Also confirm:
 - `docs/next/CHANGELOG.md` has a non-empty `## Unreleased` section (prepare
   aborts on empty; upstream syncs it at their releases, fork content accrues
   between).
-- Local `just check` needs Zig 0.15: `brew install zig@0.15` (keg-only) and
-  `export PATH="$(brew --prefix zig@0.15)/bin:$PATH"` for the session.
+- Local `just check` needs Zig 0.16.0: `brew install zig`. `build.rs` honors
+  `$ZIG`, so if `zig` on PATH is still another version, run
+  `export ZIG="$(brew --prefix zig)/bin/zig"` for the session.
 
 ## 1. Promote staged docs
 
@@ -166,7 +167,7 @@ git commit -m "docs: promote docs/next to public for next release"
 ## 2. Release
 
 ```bash
-export PATH="$(brew --prefix zig@0.15)/bin:$PATH"
+export ZIG="$(brew --prefix zig)/bin/zig"   # Zig 0.16.0
 just release-ac 0.7.1-ac        # full fork version, no v prefix
 ```
 
