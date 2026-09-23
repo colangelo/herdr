@@ -187,7 +187,7 @@ jobs:
           DARWIN_ARM64=$(cat darwin-arm64.sha)
           DARWIN_AMD64=$(cat darwin-amd64.sha)
 
-          git clone https://x-access-token:${GH_TOKEN}@github.com/colangelo/homebrew-tap.git
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/colangelo/homebrew-tap.git"
           cd homebrew-tap
 
           cat > Formula/herdr-beta.rb << FORMULA
