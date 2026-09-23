@@ -153,10 +153,11 @@ Also confirm:
 - Local `just check` needs Zig 0.16.0: `brew install zig`. `build.rs` honors
   `$ZIG`, so if `zig` on PATH is still another version, run
   `export ZIG="$(brew --prefix zig)/bin/zig"` for the session.
-- Its last stage cross-lints Windows and needs Microsoft's SDK once per
-  machine: `cargo install xwin --locked && just setup-windows-cross` (prompts
-  to accept Microsoft's SDK license). Without it, `windows-lint` stops with
-  "Windows cross-check needs SDK configuration".
+- Its last stage cross-lints Windows. On macOS it is skipped with a notice
+  (zig cannot link its native build tools against the Windows libc there,
+  AC-forks/herdr#83); `HERDR_WINDOWS_LINT=1` forces it. On Linux it needs
+  Microsoft's SDK once per machine: `cargo install xwin --locked && just
+  setup-windows-cross` (prompts to accept Microsoft's SDK license).
 
 ## 1. Promote staged docs
 
