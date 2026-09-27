@@ -7,10 +7,10 @@
 
 ## 2. Hand-launched Codex naming (issue 86)
 
-- [ ] 2.1 Platform process start time (macOS, Linux; none elsewhere)
-- [ ] 2.2 Find the pane's Codex process; thread id from `resume <id>`, else its start time
-- [ ] 2.3 Rename job falls back to the anchor; first naming (no old name) runs too; tests against the fake daemon
-- [ ] 2.4 Live: hand-typed launch, `agent rename`, thread named, `agent-bell who` shows it
+- [x] 2.1 Platform process start time (macOS, Linux; none elsewhere)
+- [x] 2.2 Find the pane's Codex process; thread id from `resume <id>`, else its start time
+- [x] 2.3 Rename job falls back to the anchor; first naming (no old name) runs too; tests against the fake daemon
+- [x] 2.4 Live: hand-typed launch, `agent rename`, thread named, `agent-bell who` shows it
 
 ## 3. Ship
 
