@@ -21,13 +21,24 @@ const MAX_RESTORE_TAIL_DURATION: Duration = Duration::from_secs(30);
 /// nothing on screen. The app is then at its bottom even though the screen no
 /// longer matches the initial snapshot (a transient hint vanished, say).
 const RESTORE_BOTTOM_STALLED_STEPS: u8 = 3;
+/// Consecutive expired harvest steps in which an upward notch changed nothing
+/// before the app counts as being at its top. One is not enough: Claude Code
+/// swallows the first notch that leaves its bottom.
+const HARVEST_TOP_STALLED_STEPS: u8 = 3;
+/// Wheel notches in the bottom probe.
 const WHEEL_STEP_EVENTS: usize = 3;
+/// Wheel notches per harvest step. One notch keeps consecutive screens
+/// overlapping even in a short pane: Claude Code scrolls about six rows per
+/// notch, and between its pinned header row, its "Jump to bottom" pill and its
+/// prompt area a 26-row pane leaves about 18 rows that actually scroll, so a
+/// three-notch step left too little clean overlap to align and the whole read
+/// was discarded.
+const HARVEST_STEP_EVENTS: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
     SettleInitial,
     ProbeBottom,
-    RestoreProbe,
     Harvest,
     Restore,
 }
@@ -57,6 +68,7 @@ pub(crate) struct PendingAltScreenRead {
     valid: bool,
     responded: bool,
     restore_stalled_steps: u8,
+    harvest_stalled_steps: u8,
 }
 
 impl PendingAltScreenRead {
@@ -97,6 +109,7 @@ impl PendingAltScreenRead {
             valid: true,
             responded: false,
             restore_stalled_steps: 0,
+            harvest_stalled_steps: 0,
         }
     }
 
@@ -141,7 +154,7 @@ impl PendingAltScreenRead {
                 Some(runtime) => self.start_restore(runtime, now, None),
                 None => self.complete_fallback(),
             },
-            Phase::ProbeBottom | Phase::RestoreProbe | Phase::Restore => self.poll(runtime, now),
+            Phase::ProbeBottom | Phase::Restore => self.poll(runtime, now),
         }
     }
 
@@ -153,9 +166,6 @@ impl PendingAltScreenRead {
             .restore_started_at
             .map(|started| now.duration_since(started));
         if restore_elapsed.is_some_and(|elapsed| elapsed >= MAX_RESTORE_DURATION) {
-            if self.phase != Phase::Restore {
-                return self.complete_fallback();
-            }
             if restore_elapsed.is_some_and(|elapsed| elapsed >= MAX_RESTORE_TAIL_DURATION) {
                 warn!(
                     terminal_id = %self.terminal_id,
@@ -178,7 +188,7 @@ impl PendingAltScreenRead {
                 Phase::SettleInitial => return self.complete_fallback(),
                 Phase::Harvest => return self.start_restore(runtime, now, None),
                 Phase::ProbeBottom => {}
-                Phase::RestoreProbe | Phase::Restore => unreachable!(),
+                Phase::Restore => unreachable!(),
             }
         }
 
@@ -278,31 +288,27 @@ impl PendingAltScreenRead {
                         self.complete_fallback()
                     }
                 } else {
+                    // Either the app was not at its bottom, or its screen changed
+                    // on its own (Claude Code drops its "Press Ctrl-C again"
+                    // hint and shifts every row). Undoing the probe by wheeling
+                    // up cannot tell those apart and, in the second case, leaves
+                    // the app scrolled up. Settle it at its bottom instead and
+                    // answer with the passive snapshot.
+                    self.valid = false;
+                    self.previous = snapshot;
+                    self.phase = Phase::Restore;
+                    self.restore_started_at = Some(now);
                     if send_wheel(
                         runtime,
-                        MouseEventKind::ScrollUp,
-                        WHEEL_STEP_EVENTS,
-                        &snapshot,
+                        MouseEventKind::ScrollDown,
+                        restore_batch_size(&self.previous),
+                        &self.previous,
                     )
                     .is_err()
                     {
                         return self.complete_fallback();
                     }
-                    self.phase = Phase::RestoreProbe;
-                    self.restore_started_at = Some(now);
                     self.arm_step(snapshot_seq, now);
-                    Some(self)
-                }
-            }
-            Phase::RestoreProbe => {
-                if snapshot.similar_text(&self.initial) {
-                    self.complete_fallback()
-                } else {
-                    self.step_observed_output = false;
-                    if step_expired {
-                        self.next_poll_at = now + STEP_TIMEOUT;
-                        self.step_deadline = self.next_poll_at;
-                    }
                     Some(self)
                 }
             }
@@ -316,12 +322,13 @@ impl PendingAltScreenRead {
                     terminal_id = %self.terminal_id,
                     ?merge,
                     retained_rows = self.history.len(),
-                    batch_events = WHEEL_STEP_EVENTS,
+                    batch_events = HARVEST_STEP_EVENTS,
                     step_expired,
                     "alternate-screen harvest snapshot"
                 );
                 match merge {
                     UpwardMerge::Advanced { .. } => {
+                        self.harvest_stalled_steps = 0;
                         self.previous = snapshot;
                         if self.history.len() >= self.lines {
                             self.start_restore(runtime, now, Some(snapshot_seq))
@@ -330,11 +337,25 @@ impl PendingAltScreenRead {
                         }
                     }
                     UpwardMerge::Unchanged if step_expired => {
-                        self.reached_top = true;
-                        self.start_restore(runtime, now, Some(snapshot_seq))
+                        self.harvest_stalled_steps = self.harvest_stalled_steps.saturating_add(1);
+                        if self.harvest_stalled_steps >= HARVEST_TOP_STALLED_STEPS {
+                            self.reached_top = true;
+                            self.start_restore(runtime, now, Some(snapshot_seq))
+                        } else {
+                            self.start_harvest(runtime, now, snapshot_seq)
+                        }
                     }
                     UpwardMerge::Unaligned if step_expired => {
-                        self.valid = false;
+                        // Rows already merged were aligned step by step, so a
+                        // step that no longer lines up only ends the harvest.
+                        // Claude Code's pinned header gives way to the real
+                        // first message at the top of a transcript, which is
+                        // exactly such a step. The read stays valid only if
+                        // the restore returns to the initial screen, and is
+                        // reported as truncated.
+                        if self.history.len() <= self.initial.rows.len() {
+                            self.valid = false;
+                        }
                         self.start_restore(runtime, now, Some(snapshot_seq))
                     }
                     UpwardMerge::Unchanged | UpwardMerge::Unaligned => {
@@ -393,7 +414,7 @@ impl PendingAltScreenRead {
         now: Instant,
         baseline_seq: u64,
     ) -> PollOutcome {
-        let events = WHEEL_STEP_EVENTS;
+        let events = HARVEST_STEP_EVENTS;
         if send_wheel(runtime, MouseEventKind::ScrollUp, events, &self.previous).is_err() {
             return self.complete_fallback();
         }
@@ -917,6 +938,194 @@ mod tests {
                 .recv_timeout(Duration::from_millis(50))
                 .expect("read response"),
             "fallback"
+        );
+
+        drop(runtime);
+        drop(_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    fn is_wheel(bytes: &[u8], button: &str) -> bool {
+        String::from_utf8_lossy(bytes).contains(&format!("\x1b[<{button};"))
+    }
+    const WHEEL_UP: &str = "64";
+    const WHEEL_DOWN: &str = "65";
+
+    #[test]
+    fn probe_on_a_screen_that_changed_by_itself_settles_down_instead_of_wheeling_up() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _guard = rt.enter();
+        let (runtime, mut input_rx) = TerminalRuntime::test_with_channel_capacity(20, 5, 8);
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "hint"], true));
+        let started = Instant::now();
+        let (pending, response_rx) = pending_read(&runtime, started, 8);
+        let mut pending = pending
+            .poll(Some(&runtime), started + INITIAL_QUIET)
+            .expect("bottom probe");
+        assert!(is_wheel(&input_rx.try_recv().expect("probe"), WHEEL_DOWN));
+
+        // Claude Code drops its "Press Ctrl-C again to exit" hint and every
+        // row shifts: the probe did not scroll, but the screen no longer
+        // matches.
+        runtime.test_process_pty_bytes(&draw(&["", "", "17", "18", "19"], false));
+        let mut now = started + INITIAL_QUIET + Duration::from_millis(1);
+        pending = pending
+            .poll(Some(&runtime), now)
+            .expect("redraw coalescing");
+        now += Duration::from_millis(10);
+        pending = pending.poll(Some(&runtime), now).expect("probe settles");
+        let settle = input_rx.try_recv().expect("settle wheel batch");
+        assert!(
+            is_wheel(&settle, WHEEL_DOWN) && !is_wheel(&settle, WHEEL_UP),
+            "a changed screen at the probe must never be wheeled up"
+        );
+
+        let mut finished = false;
+        for _ in 0..=RESTORE_BOTTOM_STALLED_STEPS {
+            now += STEP_TIMEOUT;
+            match pending.poll(Some(&runtime), now) {
+                Some(next) => {
+                    let bytes = input_rx.try_recv().expect("settle wheel batch");
+                    assert!(!is_wheel(&bytes, WHEEL_UP));
+                    pending = next;
+                }
+                None => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        assert!(finished, "settling must stop once the screen stops moving");
+        assert_eq!(
+            response_rx
+                .recv_timeout(Duration::from_millis(50))
+                .expect("read response"),
+            "fallback"
+        );
+
+        drop(runtime);
+        drop(_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
+    fn harvest_does_not_take_one_unmoved_notch_for_the_top() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _guard = rt.enter();
+        let (runtime, mut input_rx) = TerminalRuntime::test_with_channel_capacity(20, 5, 8);
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "20"], true));
+        let started = Instant::now();
+        let (pending, response_rx) = pending_read(&runtime, started, 8);
+        let harvest_started = started + INITIAL_QUIET + STEP_TIMEOUT;
+        let pending = pending
+            .poll(Some(&runtime), started + INITIAL_QUIET)
+            .expect("bottom probe");
+        input_rx.try_recv().expect("bottom wheel probe");
+        let pending = pending
+            .poll(Some(&runtime), harvest_started)
+            .expect("history harvest");
+        assert!(is_wheel(
+            &input_rx.try_recv().expect("first notch"),
+            WHEEL_UP
+        ));
+
+        // Claude Code swallows the first notch that leaves its bottom.
+        let retry_at = harvest_started + STEP_TIMEOUT;
+        let pending = pending
+            .poll(Some(&runtime), retry_at)
+            .expect("one unmoved notch is not the top");
+        assert!(is_wheel(
+            &input_rx.try_recv().expect("second notch"),
+            WHEEL_UP
+        ));
+
+        runtime.test_process_pty_bytes(&draw(&["13", "14", "15", "16", "17"], false));
+        let pending = pending
+            .poll(Some(&runtime), retry_at + Duration::from_millis(1))
+            .expect("redraw coalescing");
+        let pending = pending
+            .poll(Some(&runtime), retry_at + Duration::from_millis(11))
+            .expect("viewport restore");
+        assert!(is_wheel(&input_rx.try_recv().expect("restore"), WHEEL_DOWN));
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "20"], false));
+        let pending = pending
+            .poll(Some(&runtime), retry_at + Duration::from_millis(12))
+            .expect("restore redraw coalescing");
+        assert!(pending
+            .poll(Some(&runtime), retry_at + Duration::from_millis(22))
+            .is_none());
+        assert_eq!(
+            response_text(&response_rx),
+            "13\n14\n15\n16\n17\n18\n19\n20\n"
+        );
+
+        drop(runtime);
+        drop(_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
+    fn a_harvest_step_that_stops_aligning_keeps_the_rows_already_merged() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _guard = rt.enter();
+        let (runtime, mut input_rx) = TerminalRuntime::test_with_channel_capacity(20, 5, 8);
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "20"], true));
+        let started = Instant::now();
+        let (pending, response_rx) = pending_read(&runtime, started, 12);
+        let harvest_started = started + INITIAL_QUIET + STEP_TIMEOUT;
+        let pending = pending
+            .poll(Some(&runtime), started + INITIAL_QUIET)
+            .expect("bottom probe");
+        input_rx.try_recv().expect("bottom wheel probe");
+        let pending = pending
+            .poll(Some(&runtime), harvest_started)
+            .expect("history harvest");
+        input_rx.try_recv().expect("first notch");
+
+        runtime.test_process_pty_bytes(&draw(&["13", "14", "15", "16", "17"], false));
+        let mut now = harvest_started + Duration::from_millis(1);
+        let pending = pending
+            .poll(Some(&runtime), now)
+            .expect("redraw coalescing");
+        now += Duration::from_millis(10);
+        let pending = pending.poll(Some(&runtime), now).expect("rows merged");
+        assert!(is_wheel(
+            &input_rx.try_recv().expect("next notch"),
+            WHEEL_UP
+        ));
+
+        // At the top of a transcript Claude Code replaces its pinned header
+        // with the real first message: the screen no longer lines up.
+        runtime.test_process_pty_bytes(&draw(&["first", "a", "b", "c", "d"], false));
+        now += Duration::from_millis(1);
+        let pending = pending
+            .poll(Some(&runtime), now)
+            .expect("redraw coalescing");
+        now += STEP_TIMEOUT;
+        let pending = pending.poll(Some(&runtime), now).expect("harvest ends");
+        assert!(is_wheel(&input_rx.try_recv().expect("restore"), WHEEL_DOWN));
+
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "20"], false));
+        now += Duration::from_millis(1);
+        let pending = pending
+            .poll(Some(&runtime), now)
+            .expect("restore redraw coalescing");
+        assert!(pending
+            .poll(Some(&runtime), now + Duration::from_millis(10))
+            .is_none());
+        assert_eq!(
+            response_text(&response_rx),
+            "13\n14\n15\n16\n17\n18\n19\n20\n",
+            "the aligned rows survive the step that did not line up"
         );
 
         drop(runtime);
