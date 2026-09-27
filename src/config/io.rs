@@ -6,6 +6,7 @@ use super::{model::LoadedConfig, Config, CONFIG_PATH_ENV_VAR};
 
 const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
     "advanced",
+    "agents",
     "experimental",
     "keys",
     "onboarding",
@@ -916,6 +917,19 @@ resume_agents_on_restore = true
         assert!(loaded.config.session.resume_agents_on_restore);
         assert!(loaded.diagnostics.is_empty());
         assert!(loaded.invalid_sections.is_empty());
+    }
+
+    #[test]
+    fn agents_is_a_known_top_level_section() {
+        let (keys, diagnostics) = unknown_top_level_sections_from_str(
+            r#"
+[agents.codex]
+app_server = true
+"#,
+        );
+
+        assert!(keys.is_empty(), "{keys:?}");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]
