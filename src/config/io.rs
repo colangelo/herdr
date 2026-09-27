@@ -350,6 +350,14 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         &mut invalid_sections,
         |section| config.remote = section,
     );
+    load_live_section(
+        table,
+        "agents",
+        "agents config",
+        &mut diagnostics,
+        &mut invalid_sections,
+        |section| config.agents = section,
+    );
 
     diagnostics.extend(config.theme.diagnostics());
 
@@ -930,6 +938,23 @@ app_server = true
 
         assert!(keys.is_empty(), "{keys:?}");
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn load_live_config_keeps_the_codex_agent_section() {
+        let loaded = load_live_config_from_str(
+            r#"
+[agents.codex]
+app_server = true
+name_threads = true
+"#,
+        )
+        .unwrap();
+
+        assert!(loaded.config.agents.codex.app_server);
+        assert!(loaded.config.agents.codex.name_threads);
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+        assert!(loaded.invalid_sections.is_empty());
     }
 
     #[test]
