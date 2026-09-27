@@ -294,7 +294,9 @@ fn config_check(args: &[String]) -> std::io::Result<i32> {
         }
     }
 
-    let diagnostics = crate::config::Config::load().diagnostics;
+    let loaded = crate::config::Config::load();
+    let diagnostics = loaded.diagnostics;
+    let warnings = loaded.config.keybind_warnings();
     if diagnostics.is_empty() {
         println!("config: ok");
     } else {
@@ -302,6 +304,11 @@ fn config_check(args: &[String]) -> std::io::Result<i32> {
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
+    }
+    // Warnings describe a configuration that applies as written but is
+    // probably not what was meant; they do not fail the check.
+    for warning in &warnings {
+        println!("warning: {warning}");
     }
 
     Ok(i32::from(!diagnostics.is_empty()))

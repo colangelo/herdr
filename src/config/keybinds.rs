@@ -459,6 +459,10 @@ struct BindingRegistry {
     prefix_source: BindingSource,
     direct: std::collections::HashMap<KeyCombo, RegisteredBinding>,
     prefix: std::collections::HashMap<KeyCombo, RegisteredBinding>,
+    /// Actions left with no key because user bindings took all their default
+    /// keys. Warnings, not diagnostics: the configuration still applies as
+    /// written, so they must not turn a reload into a partial one.
+    unbound_warnings: Vec<String>,
 }
 
 impl BindingRegistry {
@@ -468,6 +472,7 @@ impl BindingRegistry {
             prefix_source,
             direct: std::collections::HashMap::new(),
             prefix: std::collections::HashMap::new(),
+            unbound_warnings: Vec::new(),
         }
     }
 
@@ -509,6 +514,20 @@ impl BindingRegistry {
 
 impl Config {
     pub(super) fn validated_keybinds(&self) -> (Option<String>, KeyCombo, Vec<String>, Keybinds) {
+        let (prefix_diag, prefix, diagnostics, keybinds, _) =
+            self.validated_keybinds_and_warnings();
+        (prefix_diag, prefix, diagnostics, keybinds)
+    }
+
+    /// Keybinding warnings: things that apply as configured but are probably
+    /// not what the user meant, such as an action left with no key.
+    pub fn keybind_warnings(&self) -> Vec<String> {
+        self.validated_keybinds_and_warnings().4
+    }
+
+    fn validated_keybinds_and_warnings(
+        &self,
+    ) -> (Option<String>, KeyCombo, Vec<String>, Keybinds, Vec<String>) {
         let mut diagnostics = Vec::new();
         let (prefix, prefix_diag) = parse_key_combo_with_diagnostic(
             &self.keys.prefix,
@@ -829,7 +848,12 @@ impl Config {
             }
         }
 
-        (prefix_diag, prefix, diagnostics, keybinds)
+        let warnings = registry
+            .unbound_warnings
+            .into_iter()
+            .chain(navigate_registry.unbound_warnings)
+            .collect();
+        (prefix_diag, prefix, diagnostics, keybinds, warnings)
     }
 }
 
@@ -922,6 +946,7 @@ fn parse_action_bindings(
     source: BindingSource,
 ) -> ActionKeybinds {
     let mut bindings = Vec::new();
+    let mut displaced = Vec::new();
     for raw in config.values() {
         let raw = raw.trim();
         if raw.is_empty() {
@@ -929,7 +954,9 @@ fn parse_action_bindings(
         }
         match parse_binding_string(raw) {
             Some(ParsedBinding::Single(binding)) => {
+                let taken_by = displaced_by(&binding, registry, source);
                 if reject_binding(field, &binding, registry, diagnostics, source) {
+                    displaced.extend(taken_by.map(|by| (binding.label.clone(), by)));
                     continue;
                 }
                 registry.register(&binding, field, source);
@@ -947,7 +974,51 @@ fn parse_action_bindings(
             }
         }
     }
+    warn_if_left_unbound(field, &bindings, &displaced, registry);
     ActionKeybinds { bindings }
+}
+
+/// A default binding that a user binding already holds is dropped without a
+/// diagnostic, because the user chose that key. Name the user binding that took
+/// it, so an action left with no key at all can be reported.
+fn displaced_by(
+    binding: &ResolvedBinding,
+    registry: &BindingRegistry,
+    source: BindingSource,
+) -> Option<String> {
+    if source != BindingSource::Default {
+        return None;
+    }
+    if binding.trigger.is_prefix() && registry.prefix_rhs_is_reserved(binding.trigger.combo()) {
+        return (registry.prefix_source == BindingSource::User).then(|| "keys.prefix".into());
+    }
+    registry
+        .conflict(binding)
+        .filter(|first| first.source == BindingSource::User)
+        .map(|first| first.field.clone())
+}
+
+/// Warn when every default binding of an action was taken by user bindings, so
+/// the action silently ended up with no key.
+fn warn_if_left_unbound(
+    field: &str,
+    bindings: &[ResolvedBinding],
+    displaced: &[(String, String)],
+    registry: &mut BindingRegistry,
+) {
+    if !bindings.is_empty() || displaced.is_empty() {
+        return;
+    }
+    let taken = displaced
+        .iter()
+        .map(|(label, by)| format!("{label} is taken by {by}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let diag = format!(
+        "{field} has no keybinding: its default {taken}; bind {field} to another key, or set it to \"\" to leave it unbound"
+    );
+    warn!(message = %diag, "config warning");
+    registry.unbound_warnings.push(diag);
 }
 
 fn parse_navigate_bindings(
@@ -958,6 +1029,7 @@ fn parse_navigate_bindings(
     source: BindingSource,
 ) -> ActionKeybinds {
     let mut bindings = Vec::new();
+    let mut displaced = Vec::new();
     for raw in config.values() {
         let raw = raw.trim();
         if raw.is_empty() {
@@ -965,7 +1037,9 @@ fn parse_navigate_bindings(
         }
         match parse_binding_string(raw) {
             Some(ParsedBinding::Single(binding)) => {
+                let taken_by = displaced_by(&binding, registry, source);
                 if reject_navigate_binding(field, &binding, registry, diagnostics, source) {
+                    displaced.extend(taken_by.map(|by| (binding.label.clone(), by)));
                     continue;
                 }
                 registry.register(&binding, field, source);
@@ -983,6 +1057,7 @@ fn parse_navigate_bindings(
             }
         }
     }
+    warn_if_left_unbound(field, &bindings, &displaced, registry);
     ActionKeybinds { bindings }
 }
 
@@ -2464,7 +2539,7 @@ new_workspace = "prefix+n"
     }
 
     #[test]
-    fn user_binding_silently_displaces_default_binding() {
+    fn user_binding_that_takes_an_actions_only_key_warns() {
         let config: Config = toml::from_str(
             r#"
 [keys]
@@ -2477,6 +2552,13 @@ previous_workspace = "prefix+shift+l"
         let kb = config.keybinds();
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            config.keybind_warnings(),
+            vec![
+                "keys.swap_pane_right has no keybinding: its default prefix+shift+l is taken by keys.previous_workspace; bind keys.swap_pane_right to another key, or set it to \"\" to leave it unbound"
+                    .to_string()
+            ]
+        );
         assert_eq!(
             binding_triggers(&kb.previous_workspace),
             vec![BindingTrigger::Prefix((
@@ -2502,6 +2584,70 @@ prefix = "n"
 
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert!(kb.next_tab.bindings.is_empty());
+        let warnings = config.keybind_warnings();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.starts_with("keys.next_tab has no keybinding:")
+                    && w.contains("is taken by keys.prefix")),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn letter_workspace_jumps_warn_about_every_action_they_leave_without_a_key() {
+        // The shape of a real config: letter jumps took prefix+b, prefix+c and
+        // prefix+g, the only keys of toggle_sidebar, new_tab and goto.
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+switch_workspace = ["prefix+1..9", "prefix+a", "prefix+b", "prefix+c", "prefix+d", "prefix+f", "prefix+g"]
+"#,
+        )
+        .unwrap();
+
+        assert!(config.collect_diagnostics().is_empty());
+        let warnings = config.keybind_warnings();
+        for field in ["keys.new_tab", "keys.toggle_sidebar", "keys.goto"] {
+            assert!(
+                warnings
+                    .iter()
+                    .any(|w| w.starts_with(&format!("{field} has no keybinding:"))
+                        && w.contains("is taken by keys.switch_workspace")),
+                "missing warning for {field}: {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_unbound_warning_when_the_action_keeps_a_key_or_is_cleared_on_purpose() {
+        let moved: Config = toml::from_str(
+            r#"
+[keys]
+switch_workspace = ["prefix+c"]
+new_tab = "prefix+ctrl+c"
+"#,
+        )
+        .unwrap();
+        assert!(
+            moved.keybind_warnings().is_empty(),
+            "{:?}",
+            moved.keybind_warnings()
+        );
+
+        let cleared: Config = toml::from_str(
+            r#"
+[keys]
+switch_workspace = ["prefix+c"]
+new_tab = ""
+"#,
+        )
+        .unwrap();
+        assert!(
+            cleared.keybind_warnings().is_empty(),
+            "{:?}",
+            cleared.keybind_warnings()
+        );
     }
 
     #[test]
