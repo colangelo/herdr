@@ -9,8 +9,10 @@ but herdr's Codex hook reports it only at the first turn. So:
   is loaded (poll `thread/read` briefly).
 - **Start**: poll `thread/loaded/list` for up to 20 s; for each id, `thread/read`;
   candidates are top-level (`parentThreadId` null), non-ephemeral, unnamed,
-  `cwd` equal to the pane's cwd (canonicalised) and `createdAt` no earlier than
-  the launch (1 s slack). Exactly one candidate: name it. Several: stop and
+  `cwd` equal to the pane's cwd (canonicalised) and created no earlier than the
+  launch (1 s slack). Creation time comes from the thread id, a UUIDv7, not
+  from `createdAt`: the daemon refreshes `createdAt` on threads with no turns,
+  and an old empty thread then looks brand new. Exactly one candidate: name it. Several: stop and
   leave it to the session report.
 - **Session report** (first turn): if the thread is still unnamed, name it.
 - **Rename**: with a known session id, rename that thread; otherwise rename the
