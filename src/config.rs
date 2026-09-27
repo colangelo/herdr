@@ -21,8 +21,8 @@ pub use self::{
         CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
     },
     model::{
-        validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
-        ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
+        validated_sidebar_bounds, AgentPanelSortConfig, CodexAgentConfig, Config,
+        ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
         NotificationCenterPositionConfig, PaneBorderActiveStyleConfig, ShellModeConfig,
         SidebarActiveBorderConfig, SidebarCollapsedModeConfig, SidebarStyleConfig,
         SortMotionConfig, SortMotionEasingConfig, StateColorsConfig, StateSymbolsConfig,

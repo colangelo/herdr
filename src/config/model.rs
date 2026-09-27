@@ -580,6 +580,7 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    pub agents: AgentsConfig,
 }
 
 #[derive(Debug)]
@@ -1449,6 +1450,40 @@ impl Default for RemoteConfig {
         }
     }
 }
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AgentsConfig {
+    pub codex: CodexAgentConfig,
+}
+
+/// How herdr launches Codex panes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct CodexAgentConfig {
+    /// Launch and resume Codex panes on the shared Codex app-server daemon
+    /// (`--remote unix://<app_server_socket>` and `-C <pane cwd>`). Default: false.
+    pub app_server: bool,
+    /// The daemon's control socket. `~` expands to the home directory.
+    /// Default: `~/.codex/app-server-control/app-server-control.sock`.
+    pub app_server_socket: String,
+    /// Name each Codex pane's daemon thread after the pane's agent name.
+    /// Needs `app_server`. Default: false.
+    pub name_threads: bool,
+}
+
+impl Default for CodexAgentConfig {
+    fn default() -> Self {
+        Self {
+            app_server: false,
+            app_server_socket: DEFAULT_CODEX_APP_SERVER_SOCKET.to_string(),
+            name_threads: false,
+        }
+    }
+}
+
+pub const DEFAULT_CODEX_APP_SERVER_SOCKET: &str =
+    "~/.codex/app-server-control/app-server-control.sock";
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
