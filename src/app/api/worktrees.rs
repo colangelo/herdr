@@ -1462,7 +1462,7 @@ mod tests {
             ],
         );
         // Use Git's path spelling, as worktree create/open do when assigning membership.
-        let checkout = crate::worktree::list_existing_worktrees(&repo, false)
+        let checkout = crate::worktree::list_existing_worktrees(&repo)
             .unwrap()
             .into_iter()
             .find(|entry| entry.branch.as_deref() == Some("worktree/membership"))
@@ -1542,7 +1542,7 @@ mod tests {
         );
         app.state.assert_invariants_for_test();
 
-        let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false, false);
+        let remove = crate::worktree::build_worktree_remove_command(&repo, &checkout, false);
         crate::worktree::run_worktree_command(&remove).unwrap();
         let _ = std::fs::remove_dir_all(repo);
     }
