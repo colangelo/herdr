@@ -14,5 +14,12 @@
 
 ## 3. Ship
 
-- [ ] 3.1 `just check` green
-- [ ] 3.2 Beta published; live proof on m4m with the beta
+- [x] 3.1 `just check` green
+- [x] 3.2 Beta published; live proof on m4m with the beta
+
+Verified 2026-09-27 on m4m with the `0.8.2-ac-beta.99-danilo` release binary in a
+throwaway session whose panes all ran `atuin pty-proxy`: `agent start --kind codex`
+came up idle and named its thread; a hand-typed Codex was detected and `agent
+rename` named its thread; `config check` accepted `[agents]`; after `server
+reload-config` a start still used `--remote` and named its thread. `agent-bell who`
+listed all three threads as codex under their pane names.
