@@ -1815,6 +1815,30 @@
       ]
     },
     {
+      "id": "agents",
+      "title": "Agents",
+      "keys": [
+        {
+          "key": "agents.codex.app_server",
+          "type": "boolean",
+          "default": "false",
+          "description": "Launch and resume Codex panes on the shared Codex app-server daemon: herdr adds `--remote unix://<app_server_socket>` and `-C <pane cwd>` to `agent start --kind codex` and to restored `codex resume`. Arguments you pass yourself win. Unix only."
+        },
+        {
+          "key": "agents.codex.app_server_socket",
+          "type": "string",
+          "default": "\"~/.codex/app-server-control/app-server-control.sock\"",
+          "description": "The Codex app-server daemon's control socket. `~` expands to your home directory."
+        },
+        {
+          "key": "agents.codex.name_threads",
+          "type": "boolean",
+          "default": "false",
+          "description": "Name each Codex pane's daemon thread after the pane's agent name, and rename it when the agent is renamed. Needs `agents.codex.app_server`. Ephemeral threads are skipped."
+        }
+      ]
+    },
+    {
       "id": "worktrees",
       "title": "Worktrees",
       "keys": [

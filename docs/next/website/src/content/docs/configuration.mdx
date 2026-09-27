@@ -534,6 +534,23 @@ Automatic restores start one agent at a time, 100 milliseconds apart by default,
 
 Only panes with a valid native session reference from an official integration can resume; other panes restore as normal shells. See [Session state and restore](/docs/session-state/) for supported Agents and persistence behavior.
 
+## Codex on the shared app-server daemon
+
+Tools that message Codex sessions from outside, such as agent-bell, can reach only threads that live on the shared Codex app-server daemon. Herdr can start and resume Codex panes there:
+
+```toml
+[agents.codex]
+app_server = true
+# app_server_socket = "~/.codex/app-server-control/app-server-control.sock"
+name_threads = true
+```
+
+With `app_server = true`, `herdr agent start --kind codex` and the restore of a Codex pane add `--remote unix://<app_server_socket>` and `-C <pane cwd>`. The cwd matters: on the daemon, a thread started without `-C` takes the daemon's directory. Arguments you pass after `--` win, so a `--remote` or `-C` of your own is kept.
+
+With `name_threads = true` as well, herdr names the pane's daemon thread after the pane's agent name, so other tools can address it by that name, and renames the thread when you rename the agent. A new pane's thread is found as the only unnamed thread in the pane's directory created since the launch. When two Codex panes start in the same directory at once, herdr names neither until Codex reports each session at its first turn. Ephemeral threads cannot take a name and are skipped. Naming runs in the background and never blocks or fails a launch; results go to the server log.
+
+Both switches are off by default, apply to the next launch after a config reload, and do nothing on Windows. Turning `name_threads` off leaves `app_server` working exactly as before.
+
 ## IME cursor tracking
 
 On macOS, AI Agent TUIs that hide the hardware cursor can prevent native input-method candidate windows from following the focused pane. Reveal a cursor anchor for those panes with:
