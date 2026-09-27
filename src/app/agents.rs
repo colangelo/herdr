@@ -127,9 +127,29 @@ impl App {
         if terminal.effective_agent_label().is_none() {
             return Err(AgentRenameError::NotAgent);
         }
+        let codex_rename = (terminal.effective_agent_label() == Some("codex"))
+            .then(|| {
+                let old_name = terminal.agent_name.clone()?;
+                let new_name = normalized_name.clone()?;
+                let thread_id = terminal
+                    .persisted_agent_session
+                    .as_ref()
+                    .filter(|session| session.agent == "codex")
+                    .map(|session| session.session_ref.value.clone());
+                Some(crate::codex_app_server::NameJob::Rename {
+                    thread_id,
+                    cwd: terminal.cwd.clone(),
+                    old_name,
+                    new_name,
+                })
+            })
+            .flatten();
         match normalized_name {
             Some(name) => terminal.set_agent_name(name),
             None => terminal.clear_agent_name(),
+        }
+        if let (Some(job), Some(socket)) = (codex_rename, self.codex_app_server.naming_socket()) {
+            crate::codex_app_server::spawn_name_job(socket.to_path_buf(), job);
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
@@ -192,8 +212,10 @@ impl App {
         let shell_name = available_shell_name(runtime)
             .ok_or_else(|| AgentStartError::TargetBusy(params.pane_id.clone()))?;
 
-        let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
-        argv.extend(params.args);
+        let pane_cwd = runtime.cwd().unwrap_or_else(|| terminal.cwd.clone());
+        let argv = agent_start_argv(kind, params.args, &self.codex_app_server, &pane_cwd);
+        let launches_on_codex_daemon =
+            kind == crate::detect::Agent::Codex && self.codex_app_server.naming_socket().is_some();
         let command = crate::platform::interactive_shell_command(&argv, &shell_name)
             .ok_or(AgentStartError::InvalidArgument)?;
         let bytes = crate::app::api_helpers::encode_api_submission(runtime, &command);
@@ -219,6 +241,18 @@ impl App {
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
+        if launches_on_codex_daemon {
+            if let Some(socket) = self.codex_app_server.naming_socket() {
+                crate::codex_app_server::spawn_name_job(
+                    socket.to_path_buf(),
+                    crate::codex_app_server::NameJob::Discover {
+                        cwd: pane_cwd,
+                        launched_at: crate::codex_app_server::unix_now_ms(),
+                        name: name.clone(),
+                    },
+                );
+            }
+        }
 
         let agent = self
             .agent_info(ws_idx, pane_id)
@@ -410,6 +444,25 @@ impl App {
     }
 }
 
+/// The argv `agent start` runs: the agent's executable, the caller's
+/// arguments, and for Codex the shared-daemon arguments when enabled.
+fn agent_start_argv(
+    kind: crate::detect::Agent,
+    args: Vec<String>,
+    codex_app_server: &crate::codex_app_server::CodexAppServer,
+    pane_cwd: &std::path::Path,
+) -> Vec<String> {
+    let codex_args = if kind == crate::detect::Agent::Codex {
+        codex_app_server.launch_args(pane_cwd, &args)
+    } else {
+        Vec::new()
+    };
+    let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
+    argv.extend(args);
+    argv.extend(codex_args);
+    argv
+}
+
 fn available_shell_name(runtime: &crate::terminal::TerminalRuntime) -> Option<String> {
     #[cfg(test)]
     if runtime.child_pid().is_none() {
@@ -487,5 +540,64 @@ mod tests {
         ] {
             assert!(!valid_agent_name(name), "expected {name:?} to be invalid");
         }
+    }
+}
+
+#[cfg(test)]
+mod codex_app_server_tests {
+    use super::agent_start_argv;
+    use crate::codex_app_server::CodexAppServer;
+    use crate::detect::Agent;
+    use std::path::Path;
+
+    fn codex(app_server: bool) -> CodexAppServer {
+        CodexAppServer::from_config(&crate::config::CodexAgentConfig {
+            app_server,
+            app_server_socket: "/run/codex.sock".into(),
+            name_threads: false,
+        })
+    }
+
+    #[test]
+    fn codex_start_is_unchanged_when_the_switch_is_off() {
+        assert_eq!(
+            agent_start_argv(
+                Agent::Codex,
+                vec!["--yolo".into()],
+                &codex(false),
+                Path::new("/repo")
+            ),
+            ["codex", "--yolo"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_start_goes_to_the_daemon_with_the_pane_cwd() {
+        assert_eq!(
+            agent_start_argv(
+                Agent::Codex,
+                vec!["--yolo".into()],
+                &codex(true),
+                Path::new("/repo")
+            ),
+            [
+                "codex",
+                "--yolo",
+                "--remote",
+                "unix:///run/codex.sock",
+                "-C",
+                "/repo"
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn other_agents_never_get_codex_arguments() {
+        assert_eq!(
+            agent_start_argv(Agent::Claude, Vec::new(), &codex(true), Path::new("/repo")),
+            ["claude"]
+        );
     }
 }

@@ -141,6 +141,8 @@ pub struct App {
     pub(crate) selection_highlight_clear_deadline: Option<Instant>,
     startup_per_agent_delay: Duration,
     next_agent_resume_at: Option<Instant>,
+    /// How Codex panes are launched and named (`[agents.codex]`).
+    pub(crate) codex_app_server: crate::codex_app_server::CodexAppServer,
     pub(crate) session_save_deadline: Option<Instant>,
     /// When the working spinner last stepped; the next step is due one
     /// `status_spinner_interval` later while `AppState::spinner_active`.
@@ -977,6 +979,9 @@ impl App {
                 config.session.startup_per_agent_delay_ms.into(),
             ),
             next_agent_resume_at: None,
+            codex_app_server: crate::codex_app_server::CodexAppServer::from_config(
+                &config.agents.codex,
+            ),
             session_save_deadline: None,
             last_spinner_tick: None,
             session_save_thread: None,
@@ -1808,6 +1813,10 @@ impl App {
             }
         }
 
+        if !invalid_section("agents") {
+            self.codex_app_server =
+                crate::codex_app_server::CodexAppServer::from_config(&config.agents.codex);
+        }
         if !invalid_section("session")
             && Duration::from_millis(config.session.startup_per_agent_delay_ms.into())
                 != self.startup_per_agent_delay

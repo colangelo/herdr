@@ -238,7 +238,11 @@ impl App {
             return false;
         }
 
-        let Some(resume_command) = shell_command_from_argv(&plan.argv) else {
+        let argv = resume_argv(&plan, &self.codex_app_server, &cwd);
+        let codex_thread = (plan.agent == "codex")
+            .then(|| codex_resume_thread_id(&plan.argv))
+            .flatten();
+        let Some(resume_command) = shell_command_from_argv(&argv) else {
             tracing::warn!(
                 pane = pane_id.raw(),
                 terminal = %terminal_id,
@@ -299,9 +303,25 @@ impl App {
         }
 
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        let mut agent_name = None;
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
             terminal.respawn_shell_on_exit = false;
+            agent_name = terminal.agent_name.clone();
+        }
+        if let (Some(socket), Some(thread_id), Some(name)) = (
+            self.codex_app_server.naming_socket(),
+            codex_thread,
+            agent_name,
+        ) {
+            crate::codex_app_server::spawn_name_job(
+                socket.to_path_buf(),
+                crate::codex_app_server::NameJob::Known {
+                    thread_id,
+                    name,
+                    only_if_unnamed: false,
+                },
+            );
         }
         true
     }
@@ -367,6 +387,32 @@ fn shell_quote(value: &str) -> String {
         return value.to_string();
     }
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// The argv a deferred resume runs: the plan's, plus for Codex the
+/// shared-daemon arguments when enabled.
+fn resume_argv(
+    plan: &crate::agent_resume::AgentResumePlan,
+    codex_app_server: &crate::codex_app_server::CodexAppServer,
+    cwd: &std::path::Path,
+) -> Vec<String> {
+    let mut argv = plan.argv.clone();
+    if plan.agent == "codex" {
+        let extra = codex_app_server.launch_args(cwd, argv.get(1..).unwrap_or_default());
+        argv.extend(extra);
+    }
+    argv
+}
+
+/// The thread a `codex resume <id>` plan reopens: Codex thread ids are its
+/// session ids.
+fn codex_resume_thread_id(argv: &[String]) -> Option<String> {
+    match argv {
+        [program, subcommand, id, ..] if program == "codex" && subcommand == "resume" => {
+            Some(id.clone())
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -875,6 +921,64 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_resume_goes_to_the_daemon_with_the_pane_cwd() {
+        let plan = crate::agent_resume::AgentResumePlan {
+            agent: "codex".into(),
+            argv: vec!["codex".into(), "resume".into(), "thread-1".into()],
+            dedupe_key: "k".into(),
+        };
+        let on = crate::codex_app_server::CodexAppServer::from_config(
+            &crate::config::CodexAgentConfig {
+                app_server: true,
+                app_server_socket: "/run/codex.sock".into(),
+                name_threads: true,
+            },
+        );
+        assert_eq!(
+            super::resume_argv(&plan, &on, std::path::Path::new("/repo")),
+            [
+                "codex",
+                "resume",
+                "thread-1",
+                "--remote",
+                "unix:///run/codex.sock",
+                "-C",
+                "/repo"
+            ]
+        );
+        assert_eq!(
+            super::resume_argv(&plan, &Default::default(), std::path::Path::new("/repo")),
+            ["codex", "resume", "thread-1"]
+        );
+        assert_eq!(
+            super::codex_resume_thread_id(&plan.argv).as_deref(),
+            Some("thread-1")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn other_agents_resume_without_codex_arguments() {
+        let plan = crate::agent_resume::AgentResumePlan {
+            agent: "claude".into(),
+            argv: vec!["claude".into(), "--resume".into(), "s".into()],
+            dedupe_key: "k".into(),
+        };
+        let on = crate::codex_app_server::CodexAppServer::from_config(
+            &crate::config::CodexAgentConfig {
+                app_server: true,
+                app_server_socket: "/run/codex.sock".into(),
+                name_threads: true,
+            },
+        );
+        assert_eq!(
+            super::resume_argv(&plan, &on, std::path::Path::new("/repo")),
+            ["claude", "--resume", "s"]
+        );
     }
 
     #[test]

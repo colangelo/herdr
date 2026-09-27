@@ -62,6 +62,7 @@ mod build_info;
 mod checksum;
 mod cli;
 mod client;
+mod codex_app_server;
 mod config;
 mod detect;
 mod events;

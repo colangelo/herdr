@@ -1268,6 +1268,9 @@ impl App {
         let Some(agent_label) = normalize_reported_agent_label(&params.agent) else {
             return invalid_agent(id);
         };
+        let codex_thread = (agent_label == "codex")
+            .then(|| params.agent_session_id.clone())
+            .flatten();
         self.handle_internal_event(crate::events::AppEvent::AgentSessionReported {
             pane_id,
             session_ref: crate::agent_resume::session_ref_from_report(
@@ -1283,6 +1286,28 @@ impl App {
                 params.session_start_source,
             ),
         });
+        // A new Codex pane whose thread could not be told apart at launch
+        // gets its name once the hook reports the thread (its session id).
+        if let (Some(socket), Some(thread_id)) =
+            (self.codex_app_server.naming_socket(), codex_thread)
+        {
+            let name = self
+                .find_pane(pane_id)
+                .and_then(|(ws_idx, _)| self.state.workspaces.get(ws_idx))
+                .and_then(|workspace| workspace.terminal_id(pane_id))
+                .and_then(|terminal_id| self.state.terminals.get(terminal_id))
+                .and_then(|terminal| terminal.agent_name.clone());
+            if let Some(name) = name {
+                crate::codex_app_server::spawn_name_job(
+                    socket.to_path_buf(),
+                    crate::codex_app_server::NameJob::Known {
+                        thread_id,
+                        name,
+                        only_if_unnamed: true,
+                    },
+                );
+            }
+        }
 
         encode_success(id, ResponseResult::Ok {})
     }
