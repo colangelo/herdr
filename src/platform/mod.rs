@@ -261,6 +261,43 @@ pub(crate) fn available_pane_shell_from_job(child_pid: u32, job: ForegroundJob) 
         .filter(|name| is_pane_shell_process_name(name))
 }
 
+/// The pane's shell when it is waiting at its prompt, looking through a
+/// recognised PTY wrapper to the shell it hosts.
+///
+/// A wrapper such as `atuin pty-proxy` replaces the pane's shell and re-runs it
+/// inside a PTY of its own, so the pane's own foreground job is only ever the
+/// wrapper. The wrapper stands in for the shell only when it is alone in that
+/// job, and its shell counts only when that shell is itself alone at the front
+/// of the nested PTY: a command or a subshell there means the pane is busy.
+///
+/// `nested` returns the wrapper's child that owns the nested PTY together with
+/// that PTY's foreground job, so the job can be checked against the child.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn available_pane_shell_behind_wrapper(
+    child_pid: u32,
+    job: ForegroundJob,
+    is_wrapper: impl Fn(&ForegroundProcess) -> bool,
+    nested: impl FnOnce(u32) -> Option<(u32, ForegroundJob)>,
+) -> Option<String> {
+    if job.process_group_id != child_pid
+        || job.processes.iter().any(|process| process.pid != child_pid)
+    {
+        return None;
+    }
+    let leader = job
+        .processes
+        .iter()
+        .find(|process| process.pid == child_pid)?;
+    if is_pane_shell_process_name(&leader.name) {
+        return Some(leader.name.clone());
+    }
+    if !is_wrapper(leader) {
+        return None;
+    }
+    let (shell_pid, nested_job) = nested(child_pid)?;
+    available_pane_shell_from_job(shell_pid, nested_job)
+}
+
 /// Pick the child that owns a nested PTY and resolve its foreground job.
 ///
 /// This is the shared half of `nested_foreground_job`: "the foreground job of
@@ -275,15 +312,17 @@ pub(crate) fn available_pane_shell_from_job(child_pid: u32, job: ForegroundJob) 
 /// terminal is an ordinary child rather than a nested PTY, and following it
 /// would make this a one-level process-tree walk instead.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+///
+/// Returns the child that owns the nested PTY alongside its foreground job.
 pub(crate) fn nested_foreground_job_from_children(
     parent_terminal: u64,
     children: impl IntoIterator<Item = (u32, Option<u64>)>,
     mut foreground_job: impl FnMut(u32) -> Option<ForegroundJob>,
-) -> Option<ForegroundJob> {
+) -> Option<(u32, ForegroundJob)> {
     children
         .into_iter()
         .filter(|(_, terminal)| terminal.is_some_and(|terminal| terminal != parent_terminal))
-        .find_map(|(pid, _)| foreground_job(pid))
+        .find_map(|(pid, _)| foreground_job(pid).map(|job| (pid, job)))
 }
 
 fn normalized_process_name(name: &str) -> String {
@@ -557,11 +596,128 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn lone_job(pid: u32, name: &str) -> ForegroundJob {
+        ForegroundJob {
+            process_group_id: pid,
+            processes: vec![ForegroundProcess {
+                pid,
+                name: name.into(),
+                argv0: None,
+                argv: None,
+                cmdline: None,
+            }],
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn is_test_wrapper(process: &ForegroundProcess) -> bool {
+        process.name == "atuin"
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_accepts_the_pane_shell_at_its_prompt() {
+        assert_eq!(
+            available_pane_shell_behind_wrapper(
+                10,
+                lone_job(10, "zsh"),
+                is_test_wrapper,
+                |_| panic!("a bare shell needs no nested lookup"),
+            )
+            .as_deref(),
+            Some("zsh")
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_looks_through_a_wrapper_to_its_shell_at_the_prompt() {
+        assert_eq!(
+            available_pane_shell_behind_wrapper(
+                10,
+                lone_job(10, "atuin"),
+                is_test_wrapper,
+                |pid| (pid == 10).then(|| (20, lone_job(20, "zsh"))),
+            )
+            .as_deref(),
+            Some("zsh")
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_refuses_a_wrapped_shell_running_a_command() {
+        assert_eq!(
+            available_pane_shell_behind_wrapper(10, lone_job(10, "atuin"), is_test_wrapper, |_| {
+                Some((20, lone_job(30, "vim")))
+            },),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_refuses_a_nested_shell_that_is_not_the_wrappers_own() {
+        // A subshell started from the wrapped shell leads the nested terminal's
+        // foreground job, but it is not the shell the wrapper hosts.
+        assert_eq!(
+            available_pane_shell_behind_wrapper(10, lone_job(10, "atuin"), is_test_wrapper, |_| {
+                Some((20, lone_job(30, "bash")))
+            },),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_refuses_a_wrapper_without_a_nested_terminal() {
+        assert_eq!(
+            available_pane_shell_behind_wrapper(10, lone_job(10, "atuin"), is_test_wrapper, |_| {
+                None
+            }),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_does_not_look_behind_an_unrecognised_program() {
+        assert_eq!(
+            available_pane_shell_behind_wrapper(
+                10,
+                lone_job(10, "vim"),
+                is_test_wrapper,
+                |_| panic!("only a recognised wrapper is looked behind"),
+            ),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn available_shell_refuses_a_wrapper_sharing_its_job_with_another_process() {
+        let mut job = lone_job(10, "atuin");
+        job.processes.push(ForegroundProcess {
+            pid: 11,
+            name: "sleep".into(),
+            argv0: None,
+            argv: None,
+            cmdline: None,
+        });
+        assert_eq!(
+            available_pane_shell_behind_wrapper(10, job, is_test_wrapper, |_| {
+                Some((20, lone_job(20, "zsh")))
+            }),
+            None
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn nested_lookup_follows_a_child_on_its_own_controlling_terminal() {
         assert_eq!(
             nested_foreground_job_from_children(5, [(200, Some(6))], |pid| Some(test_job(pid))),
-            Some(test_job(200))
+            Some((200, test_job(200)))
         );
     }
 
@@ -603,7 +759,7 @@ mod tests {
                 [(200, Some(5)), (300, None), (400, Some(6))],
                 |pid| Some(test_job(pid))
             ),
-            Some(test_job(400))
+            Some((400, test_job(400)))
         );
     }
 

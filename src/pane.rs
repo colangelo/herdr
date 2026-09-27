@@ -733,9 +733,66 @@ struct ProcessProbeResult {
     /// Unix-only: no Windows wrapper presents a nested PTY to descend into.
     #[cfg(unix)]
     nested_process_group_id: Option<u32>,
+    /// The shell a recognised PTY wrapper hosts, when the pane's own job is
+    /// that wrapper. The wrapper keeps the pane's foreground group fixed, so
+    /// the hosted shell's foreground group is the only sign a command started.
+    #[cfg(unix)]
+    wrapped_shell: Option<WrappedShell>,
     foreground_is_pane_shell: bool,
     agent: Option<Agent>,
     process_name: Option<String>,
+}
+
+/// The shell a PTY wrapper hosts, and its PTY's foreground group when probed.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WrappedShell {
+    pid: u32,
+    foreground_pgid: u32,
+}
+
+/// Watches the foreground group of the shell a PTY wrapper hosts.
+///
+/// An unwrapped pane notices a command starting because its own foreground
+/// group changes. A wrapped pane's foreground group is the wrapper's for good,
+/// so without this an agent launched there is found only if a content-driven
+/// acquisition window happens to cover its start. `poll` costs one foreground
+/// group lookup per tick, and only for a pane whose last probe found a wrapper.
+#[cfg(unix)]
+#[derive(Debug, Default)]
+struct WrappedShellWatch {
+    shell: Option<WrappedShell>,
+}
+
+#[cfg(unix)]
+impl WrappedShellWatch {
+    /// Take the wrapped shell a fresh probe saw, and the group it saw in front.
+    fn observe(&mut self, probed: Option<WrappedShell>) {
+        self.shell = probed;
+    }
+
+    /// Whether the wrapped shell's foreground group moved since it was last
+    /// seen. A shell that is gone reads as a change, so the pane re-probes.
+    fn poll(&mut self, foreground_pgid: impl FnOnce(u32) -> Option<u32>) -> bool {
+        let Some(shell) = self.shell.as_mut() else {
+            return false;
+        };
+        match foreground_pgid(shell.pid) {
+            Some(pgid) if pgid == shell.foreground_pgid => false,
+            Some(pgid) => {
+                shell.foreground_pgid = pgid;
+                true
+            }
+            None => {
+                self.shell = None;
+                true
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.shell = None;
+    }
 }
 
 fn agent_hint_for_foreground_job_members(
@@ -780,6 +837,8 @@ fn process_probe_result(
         process_group_id: Some(job.process_group_id),
         #[cfg(unix)]
         nested_process_group_id: None,
+        #[cfg(unix)]
+        wrapped_shell: None,
         foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
         agent: Some(agent),
         process_name: Some(process_name),
@@ -798,15 +857,23 @@ fn process_probe_result(
 /// on every tick and re-probe the pane continuously.
 fn nested_process_probe_result(
     job: &crate::platform::ForegroundJob,
+    shell_pid: u32,
     nested_job: &crate::platform::ForegroundJob,
     pid: u32,
     agent: Agent,
     process_name: String,
 ) -> ProcessProbeResult {
+    #[cfg(not(unix))]
+    let _ = shell_pid;
     ProcessProbeResult {
         process_group_id: Some(job.process_group_id),
         #[cfg(unix)]
         nested_process_group_id: Some(nested_job.process_group_id),
+        #[cfg(unix)]
+        wrapped_shell: Some(WrappedShell {
+            pid: shell_pid,
+            foreground_pgid: nested_job.process_group_id,
+        }),
         foreground_is_pane_shell: nested_job
             .processes
             .iter()
@@ -835,7 +902,7 @@ fn probe_foreground_process_from_jobs(
     foreground_pgid: Option<u32>,
     leader_job: Option<crate::platform::ForegroundJob>,
     foreground_job: impl FnOnce() -> Option<crate::platform::ForegroundJob>,
-    nested_foreground_job: impl FnOnce(u32) -> Option<crate::platform::ForegroundJob>,
+    nested_foreground_job: impl FnOnce(u32) -> Option<(u32, crate::platform::ForegroundJob)>,
     read_hint: impl Fn(u32) -> Option<Agent> + Copy,
 ) -> ProcessProbeResult {
     if let Some(job) = leader_job.as_ref() {
@@ -870,19 +937,40 @@ fn probe_foreground_process_from_jobs(
         }
 
         let identified = crate::detect::identify_agent_in_job(job);
+        #[cfg_attr(not(unix), allow(unused_mut))] // only unix records the wrapped shell
+        let mut wrapped_shell = None;
         if identified.is_none() {
             // Only now, with the pane's own job exhausted, is it worth asking
             // whether a recognised wrapper is hiding the agent one PTY down.
-            if let Some((nested_job, agent, process_name)) =
-                crate::detect::nested_agent_job(job, nested_foreground_job)
+            if let Some((shell_pid, nested_job)) =
+                crate::detect::wrapped_shell_job(job, nested_foreground_job)
             {
-                return nested_process_probe_result(job, &nested_job, pid, agent, process_name);
+                if let Some((agent, process_name)) =
+                    crate::detect::identify_agent_in_job(&nested_job)
+                {
+                    return nested_process_probe_result(
+                        job,
+                        shell_pid,
+                        &nested_job,
+                        pid,
+                        agent,
+                        process_name,
+                    );
+                }
+                wrapped_shell = Some((shell_pid, nested_job.process_group_id));
             }
         }
+        #[cfg(not(unix))]
+        let _ = wrapped_shell;
         return ProcessProbeResult {
             process_group_id: Some(job.process_group_id),
             #[cfg(unix)]
             nested_process_group_id: None,
+            #[cfg(unix)]
+            wrapped_shell: wrapped_shell.map(|(pid, foreground_pgid)| WrappedShell {
+                pid,
+                foreground_pgid,
+            }),
             foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
             agent: identified.as_ref().map(|(agent, _)| *agent),
             process_name: identified.map(|(_, process_name)| process_name),
@@ -893,6 +981,8 @@ fn probe_foreground_process_from_jobs(
         process_group_id: foreground_pgid,
         #[cfg(unix)]
         nested_process_group_id: None,
+        #[cfg(unix)]
+        wrapped_shell: None,
         foreground_is_pane_shell: false,
         agent: None,
         process_name: None,
@@ -905,7 +995,7 @@ fn probe_foreground_process(pid: u32, foreground_pgid: Option<u32>) -> ProcessPr
         foreground_pgid,
         foreground_pgid.and_then(crate::detect::foreground_group_leader_job),
         || crate::detect::foreground_job(pid),
-        crate::platform::nested_foreground_job,
+        crate::platform::nested_foreground_job_with_owner,
         crate::platform::process_agent_hint,
     )
 }
@@ -957,6 +1047,7 @@ fn spawn_basic_detection_task(
         let mut last_visible_signal_refresh = None;
         let mut last_process_check = std::time::Instant::now();
         let mut last_foreground_pgid = None;
+        let mut wrapped_shell_watch = WrappedShellWatch::default();
         let mut has_process_probe = false;
         let mut acquisition_started_at = None;
         let mut last_content_change_at = None;
@@ -987,6 +1078,7 @@ fn spawn_basic_detection_task(
                     last_visible_signal_refresh = None;
                     last_process_check = std::time::Instant::now();
                     last_foreground_pgid = None;
+                    wrapped_shell_watch.clear();
                     has_process_probe = false;
                     acquisition_started_at = None;
                     last_content_change_at = None;
@@ -1017,8 +1109,11 @@ fn spawn_basic_detection_task(
             let foreground_pgid = (pid > 0)
                 .then(|| crate::detect::foreground_process_group_id(pid))
                 .flatten();
+            let wrapped_shell_changed =
+                pid > 0 && wrapped_shell_watch.poll(crate::detect::foreground_process_group_id);
             let process_group_changed =
-                foreground_group_changed(foreground_pgid, last_foreground_pgid);
+                foreground_group_changed(foreground_pgid, last_foreground_pgid)
+                    || wrapped_shell_changed;
             let should_check_process = pid > 0 && {
                 let process_probe_input = ProcessProbeInput {
                     current_agent: agent,
@@ -1032,10 +1127,11 @@ fn spawn_basic_detection_task(
                     pending_restore_probe: false,
                     elapsed_since_process_check: now.duration_since(last_process_check),
                 };
-                !should_skip_process_probe_for_lifecycle_authority(
-                    lifecycle_authority_active,
-                    process_probe_input,
-                ) && should_probe_foreground_job(process_probe_input)
+                wrapped_shell_changed
+                    || !should_skip_process_probe_for_lifecycle_authority(
+                        lifecycle_authority_active,
+                        process_probe_input,
+                    ) && should_probe_foreground_job(process_probe_input)
             };
 
             if should_check_process {
@@ -1044,6 +1140,7 @@ fn spawn_basic_detection_task(
                 has_process_probe = true;
                 let probe = probe_foreground_process(pid, foreground_pgid);
                 publish_nested_agent_process_group(&nested_agent_process_group_id, &probe);
+                wrapped_shell_watch.observe(probe.wrapped_shell);
                 let process_group_id = probe.process_group_id;
                 let tracked_process_group_id =
                     process_group_for_change_tracking(foreground_pgid, process_group_id);
@@ -2684,6 +2781,8 @@ impl PaneRuntime {
                 #[cfg(windows)]
                 let mut last_observation = (Instant::now(), Some(0));
                 let mut last_foreground_pgid = None;
+                #[cfg(unix)]
+                let mut wrapped_shell_watch = WrappedShellWatch::default();
                 let mut has_process_probe = false;
                 let mut acquisition_started_at = None;
                 let mut last_content_change_at = None;
@@ -2723,6 +2822,8 @@ impl PaneRuntime {
                             state = AgentState::Unknown;
                             last_visible_idle = false;
                             last_foreground_pgid = None;
+                            #[cfg(unix)]
+                            wrapped_shell_watch.clear();
                             has_process_probe = false;
                             acquisition_started_at = None;
                             last_content_change_at = None;
@@ -2796,17 +2897,24 @@ impl PaneRuntime {
                             last_content_seq.is_some() && last_content_seq != Some(content_seq);
                         last_observation = (now, (!retry).then_some(content_seq));
                     }
+                    #[cfg(unix)]
+                    let wrapped_shell_changed =
+                        pid > 0 && wrapped_shell_watch.poll(detect::foreground_process_group_id);
+                    #[cfg(not(unix))]
+                    let wrapped_shell_changed = false;
                     let process_group_changed =
-                        foreground_group_changed(foreground_pgid, last_foreground_pgid);
+                        foreground_group_changed(foreground_pgid, last_foreground_pgid)
+                            || wrapped_shell_changed;
                     let should_check_process = pid > 0 && {
                         let process_probe_input = ProcessProbeInput {
                             foreground_pgid,
                             ..process_probe_input
                         };
-                        !should_skip_process_probe_for_lifecycle_authority(
-                            lifecycle_authority_active,
-                            process_probe_input,
-                        ) && should_probe_foreground_job(process_probe_input)
+                        wrapped_shell_changed
+                            || !should_skip_process_probe_for_lifecycle_authority(
+                                lifecycle_authority_active,
+                                process_probe_input,
+                            ) && should_probe_foreground_job(process_probe_input)
                     };
 
                     let mut agent_changed = false;
@@ -2821,6 +2929,8 @@ impl PaneRuntime {
                                 &nested_agent_process_group_id_for_task,
                                 &probe,
                             );
+                            #[cfg(unix)]
+                            wrapped_shell_watch.observe(probe.wrapped_shell);
                             let process_name = probe.process_name;
                             let process_group_id = probe.process_group_id;
                             let tracked_process_group_id = process_group_for_change_tracking(
@@ -4840,7 +4950,7 @@ mod tests {
     }
 
     /// Nested lookup for a pane that is not behind a PTY wrapper.
-    fn no_nested_job(_pid: u32) -> Option<crate::platform::ForegroundJob> {
+    fn no_nested_job(_pid: u32) -> Option<(u32, crate::platform::ForegroundJob)> {
         None
     }
 
@@ -4973,6 +5083,9 @@ mod tests {
         assert_eq!(result.process_name.as_deref(), Some("claude"));
     }
 
+    /// The wrapper's child that owns the nested PTY in `wrapped_pane_probe`.
+    const WRAPPED_SHELL_PID: u32 = 150;
+
     /// A pane whose PTY carries only `leader_name`, with `nested` one PTY down.
     fn wrapped_pane_probe(
         leader_name: &str,
@@ -4992,7 +5105,7 @@ mod tests {
             |pid| {
                 nested_lookups.set(nested_lookups.get() + 1);
                 assert_eq!(pid, 42, "the descent starts from the process group leader");
-                nested
+                nested.map(|job| (WRAPPED_SHELL_PID, job))
             },
             |_| None,
         )
@@ -5098,7 +5211,7 @@ mod tests {
             || Some(job),
             |_| {
                 lookups.set(lookups.get() + 1);
-                Some(nested)
+                Some((WRAPPED_SHELL_PID, nested))
             },
             |_| None,
         );
@@ -5122,6 +5235,108 @@ mod tests {
         // the wrapper's directory.
         assert_eq!(result.nested_process_group_id, Some(200));
         assert_eq!(result.process_name.as_deref(), Some("claude"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapped_pane_at_its_prompt_reports_the_shell_to_watch() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: WRAPPED_SHELL_PID,
+            processes: vec![foreground_process(WRAPPED_SHELL_PID, "zsh")],
+        };
+
+        let result = wrapped_pane_probe("atuin", Some(nested), &lookups);
+
+        assert_eq!(result.agent, None);
+        assert_eq!(
+            result.wrapped_shell,
+            Some(WrappedShell {
+                pid: WRAPPED_SHELL_PID,
+                foreground_pgid: WRAPPED_SHELL_PID,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapped_pane_with_an_agent_keeps_watching_the_shell() {
+        let lookups = std::cell::Cell::new(0);
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "codex")],
+        };
+
+        let result = wrapped_pane_probe("atuin", Some(nested), &lookups);
+
+        assert_eq!(result.agent, Some(Agent::Codex));
+        assert_eq!(
+            result.wrapped_shell,
+            Some(WrappedShell {
+                pid: WRAPPED_SHELL_PID,
+                foreground_pgid: 200,
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unwrapped_pane_has_no_shell_to_watch() {
+        let lookups = std::cell::Cell::new(0);
+
+        let unrecognized = wrapped_pane_probe("script", None, &lookups);
+        let no_nested_pty = wrapped_pane_probe("atuin", None, &lookups);
+
+        assert_eq!(unrecognized.wrapped_shell, None);
+        assert_eq!(no_nested_pty.wrapped_shell, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapped_shell_watch_fires_when_the_hosted_shell_starts_a_command() {
+        let mut watch = WrappedShellWatch::default();
+        assert!(!watch.poll(|_| panic!("nothing to watch before a probe finds a wrapper")));
+
+        watch.observe(Some(WrappedShell {
+            pid: 150,
+            foreground_pgid: 150,
+        }));
+        assert!(!watch.poll(|pid| {
+            assert_eq!(pid, 150);
+            Some(150)
+        }));
+        assert!(watch.poll(|_| Some(300)), "a command took the foreground");
+        assert!(!watch.poll(|_| Some(300)), "one change fires once");
+        assert!(
+            watch.poll(|_| Some(150)),
+            "back at the prompt is a change too"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapped_shell_watch_fires_once_when_the_shell_is_gone() {
+        let mut watch = WrappedShellWatch::default();
+        watch.observe(Some(WrappedShell {
+            pid: 150,
+            foreground_pgid: 150,
+        }));
+
+        assert!(watch.poll(|_| None));
+        assert!(!watch.poll(|_| panic!("a vanished shell is not polled again")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapped_shell_watch_stops_after_a_probe_without_a_wrapper() {
+        let mut watch = WrappedShellWatch::default();
+        watch.observe(Some(WrappedShell {
+            pid: 150,
+            foreground_pgid: 150,
+        }));
+        watch.observe(None);
+
+        assert!(!watch.poll(|_| panic!("an unwrapped pane is not polled")));
     }
 
     #[cfg(unix)]

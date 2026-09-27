@@ -986,7 +986,16 @@ pub fn nested_foreground_job(_pid: u32) -> Option<ForegroundJob> {
     None
 }
 
-pub(crate) fn available_pane_shell(child_pid: u32) -> Option<String> {
+/// Always `None`, for the same reason as `nested_foreground_job`.
+pub fn nested_foreground_job_with_owner(_pid: u32) -> Option<(u32, ForegroundJob)> {
+    None
+}
+
+/// ConPTY presents no nested PTY to look behind, so `_is_wrapper` goes unused.
+pub(crate) fn available_pane_shell(
+    child_pid: u32,
+    _is_wrapper: impl Fn(&super::ForegroundProcess) -> bool,
+) -> Option<String> {
     let snapshot = ProcessSnapshot::new(snapshot_processes());
     available_pane_shell_from_snapshot(child_pid, &snapshot)
 }

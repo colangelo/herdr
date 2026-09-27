@@ -468,7 +468,10 @@ fn available_shell_name(runtime: &crate::terminal::TerminalRuntime) -> Option<St
     if runtime.child_pid().is_none() {
         return Some("sh".into());
     }
-    crate::platform::available_pane_shell(runtime.child_pid()?)
+    crate::platform::available_pane_shell(
+        runtime.child_pid()?,
+        crate::detect::is_nested_pty_wrapper,
+    )
 }
 
 pub(super) fn runtime_hosts_agent(
@@ -490,6 +493,11 @@ fn live_runtime_agent(runtime: &crate::terminal::TerminalRuntime) -> Option<crat
             job.processes
                 .iter()
                 .find_map(|process| crate::platform::process_agent_hint(process.pid))
+        })
+        .or_else(|| {
+            // A PTY wrapper such as atuin's hides the agent one PTY down.
+            crate::detect::nested_agent_job(&job, crate::platform::nested_foreground_job_with_owner)
+                .map(|(_, agent, _)| agent)
         })
 }
 

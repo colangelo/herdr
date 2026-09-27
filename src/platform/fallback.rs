@@ -164,7 +164,10 @@ pub fn current_process_is_detached_server_daemon() -> bool {
     false
 }
 
-pub(crate) fn available_pane_shell(_child_pid: u32) -> Option<String> {
+pub(crate) fn available_pane_shell(
+    _child_pid: u32,
+    _is_wrapper: impl Fn(&super::ForegroundProcess) -> bool,
+) -> Option<String> {
     None
 }
 
@@ -180,6 +183,11 @@ pub fn foreground_group_leader_job(_process_group_id: u32) -> Option<ForegroundJ
 
 /// Unsupported platform stub.
 pub fn nested_foreground_job(_pid: u32) -> Option<ForegroundJob> {
+    None
+}
+
+/// Unsupported platform stub.
+pub fn nested_foreground_job_with_owner(_pid: u32) -> Option<(u32, ForegroundJob)> {
     None
 }
 

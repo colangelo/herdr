@@ -135,8 +135,16 @@ fn shell_quote(value: &str) -> String {
 }
 
 /// Collect the foreground terminal job for a given child PID.
-pub(crate) fn available_pane_shell(child_pid: u32) -> Option<String> {
-    super::available_pane_shell_from_job(child_pid, foreground_job(child_pid)?)
+pub(crate) fn available_pane_shell(
+    child_pid: u32,
+    is_wrapper: impl Fn(&super::ForegroundProcess) -> bool,
+) -> Option<String> {
+    super::available_pane_shell_behind_wrapper(
+        child_pid,
+        foreground_job(child_pid)?,
+        is_wrapper,
+        nested_foreground_job_with_owner,
+    )
 }
 
 pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
@@ -154,6 +162,11 @@ pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
 /// The foreground job of the PTY this process owns, or `None` when it owns no
 /// PTY of its own.
 pub fn nested_foreground_job(pid: u32) -> Option<ForegroundJob> {
+    nested_foreground_job_with_owner(pid).map(|(_, job)| job)
+}
+
+/// `nested_foreground_job`, also naming the child that owns the nested PTY.
+pub fn nested_foreground_job_with_owner(pid: u32) -> Option<(u32, ForegroundJob)> {
     if pid == 0 {
         return None;
     }

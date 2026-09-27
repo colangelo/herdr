@@ -240,7 +240,7 @@ pub fn identify_agent(process_name: &str) -> Option<Agent> {
 /// nested PTY and yields nothing, which is the same answer as not matching.
 const NESTED_PTY_WRAPPER_NAMES: [&str; 1] = ["atuin"];
 
-fn is_nested_pty_wrapper(process: &crate::platform::ForegroundProcess) -> bool {
+pub(crate) fn is_nested_pty_wrapper(process: &crate::platform::ForegroundProcess) -> bool {
     let name = normalized_agent_lookup_name(path_basename(
         process.argv0.as_deref().unwrap_or(&process.name),
     ));
@@ -269,12 +269,23 @@ fn nested_pty_wrapper_leader(job: &crate::platform::ForegroundJob) -> Option<u32
 /// one level by construction: this never recurses.
 pub fn nested_agent_job(
     job: &crate::platform::ForegroundJob,
-    nested_foreground_job: impl FnOnce(u32) -> Option<crate::platform::ForegroundJob>,
+    nested_foreground_job: impl FnOnce(u32) -> Option<(u32, crate::platform::ForegroundJob)>,
 ) -> Option<(crate::platform::ForegroundJob, Agent, String)> {
-    let wrapper = nested_pty_wrapper_leader(job)?;
-    let nested = nested_foreground_job(wrapper)?;
+    let (_, nested) = wrapped_shell_job(job, nested_foreground_job)?;
     let (agent, process_name) = identify_agent_in_job(&nested)?;
     Some((nested, agent, process_name))
+}
+
+/// The PTY a recognised wrapper owns one level below `job`: the wrapper's child
+/// that owns it - the shell the wrapper hosts - and that PTY's foreground job.
+///
+/// Yields `None` when `job`'s leader is not a recognised wrapper or when it owns
+/// no nested PTY. Like `nested_agent_job`, the descent is one level.
+pub fn wrapped_shell_job(
+    job: &crate::platform::ForegroundJob,
+    nested_foreground_job: impl FnOnce(u32) -> Option<(u32, crate::platform::ForegroundJob)>,
+) -> Option<(u32, crate::platform::ForegroundJob)> {
+    nested_foreground_job(nested_pty_wrapper_leader(job)?)
 }
 
 pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Agent, String)> {
