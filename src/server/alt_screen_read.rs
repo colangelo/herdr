@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use crossterm::event::{KeyModifiers, MouseEventKind};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::api::schema::{PaneReadResult, ResponseResult, SuccessResponse};
 use crate::terminal::{ScreenSnapshot, TerminalId, TerminalRuntime, UpwardMerge};
@@ -13,6 +13,14 @@ const OUTPUT_QUIET: Duration = Duration::from_millis(10);
 const STEP_TIMEOUT: Duration = Duration::from_millis(120);
 const MAX_DURATION: Duration = Duration::from_secs(15);
 const MAX_RESTORE_DURATION: Duration = Duration::from_secs(5);
+/// After `MAX_RESTORE_DURATION` the caller gets its fallback answer, but the
+/// restore keeps wheeling down so the app is never left scrolled up. This is
+/// the bound on that tail.
+const MAX_RESTORE_TAIL_DURATION: Duration = Duration::from_secs(30);
+/// Consecutive expired restore steps in which a downward wheel batch changed
+/// nothing on screen. The app is then at its bottom even though the screen no
+/// longer matches the initial snapshot (a transient hint vanished, say).
+const RESTORE_BOTTOM_STALLED_STEPS: u8 = 3;
 const WHEEL_STEP_EVENTS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +55,8 @@ pub(crate) struct PendingAltScreenRead {
     upward_events: usize,
     reached_top: bool,
     valid: bool,
+    responded: bool,
+    restore_stalled_steps: u8,
 }
 
 impl PendingAltScreenRead {
@@ -85,6 +95,8 @@ impl PendingAltScreenRead {
             upward_events: 0,
             reached_top: false,
             valid: true,
+            responded: false,
+            restore_stalled_steps: 0,
         }
     }
 
@@ -137,11 +149,23 @@ impl PendingAltScreenRead {
         let Some(runtime) = runtime else {
             return self.complete_fallback();
         };
-        let restore_expired = self
+        let restore_elapsed = self
             .restore_started_at
-            .is_some_and(|started| now.duration_since(started) >= MAX_RESTORE_DURATION);
-        if restore_expired {
-            return self.complete_fallback();
+            .map(|started| now.duration_since(started));
+        if restore_elapsed.is_some_and(|elapsed| elapsed >= MAX_RESTORE_DURATION) {
+            if self.phase != Phase::Restore {
+                return self.complete_fallback();
+            }
+            if restore_elapsed.is_some_and(|elapsed| elapsed >= MAX_RESTORE_TAIL_DURATION) {
+                warn!(
+                    terminal_id = %self.terminal_id,
+                    "alternate-screen read gave up restoring the viewport"
+                );
+                return self.complete_fallback();
+            }
+            // Answer now so the caller is not held hostage by a slow app, and
+            // keep scrolling it back down.
+            self.respond_fallback();
         }
         let traversal_expired = now.duration_since(self.started_at) >= MAX_DURATION
             && matches!(
@@ -320,13 +344,28 @@ impl PendingAltScreenRead {
                 }
             }
             Phase::Restore => {
+                let unchanged = snapshot.similar_text(&self.previous);
+                if !unchanged {
+                    self.restore_stalled_steps = 0;
+                } else if step_expired && !output_observed {
+                    self.restore_stalled_steps = self.restore_stalled_steps.saturating_add(1);
+                }
                 if snapshot.similar_text(&self.initial) {
                     if self.valid {
                         self.complete_success()
                     } else {
                         self.complete_fallback()
                     }
-                } else if step_expired || !snapshot.similar_text(&self.previous) {
+                } else if self.restore_stalled_steps >= RESTORE_BOTTOM_STALLED_STEPS {
+                    // Wheeling down no longer moves anything: the app is back at
+                    // its bottom, but the screen changed during the read, so the
+                    // harvested history cannot be anchored to it.
+                    debug!(
+                        terminal_id = %self.terminal_id,
+                        "alternate-screen restore reached the bottom of a changed screen"
+                    );
+                    self.complete_fallback()
+                } else if step_expired || !unchanged {
                     if send_wheel(
                         runtime,
                         MouseEventKind::ScrollDown,
@@ -399,7 +438,21 @@ impl PendingAltScreenRead {
         self.step_deadline = self.next_poll_at;
     }
 
+    /// Send the passive-snapshot answer once, leaving the read free to keep
+    /// restoring the viewport.
+    fn respond_fallback(&mut self) {
+        if !self.responded {
+            self.responded = true;
+            let _ = self
+                .respond_to
+                .send(std::mem::take(&mut self.fallback_response));
+        }
+    }
+
     fn complete_success(mut self) -> PollOutcome {
+        if self.responded {
+            return None;
+        }
         debug!(
             terminal_id = %self.terminal_id,
             retained_rows = self.history.len(),
@@ -421,16 +474,17 @@ impl PendingAltScreenRead {
         None
     }
 
-    fn complete_fallback(self) -> PollOutcome {
+    fn complete_fallback(mut self) -> PollOutcome {
         debug!(
             terminal_id = %self.terminal_id,
             ?self.phase,
             retained_rows = self.history.len(),
             upward_events = self.upward_events,
             valid = self.valid,
+            responded = self.responded,
             "alternate-screen read fell back to passive snapshot"
         );
-        let _ = self.respond_to.send(self.fallback_response);
+        self.respond_fallback();
         None
     }
 }
@@ -728,6 +782,141 @@ mod tests {
         assert_eq!(
             response_text(&response_rx),
             "13\n14\n15\n16\n17\n18\n19\n20\n"
+        );
+
+        drop(runtime);
+        drop(_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    /// Drive a read over `16..=20` up to its first restore batch: the harvest
+    /// sees `13..=17`, which fills the 8 requested rows.
+    fn read_until_restore(
+        runtime: &TerminalRuntime,
+        input_rx: &mut tokio::sync::mpsc::Receiver<Bytes>,
+        started: Instant,
+    ) -> (PendingAltScreenRead, mpsc::Receiver<String>, Instant) {
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "20"], true));
+        let (pending, response_rx) = pending_read(runtime, started, 8);
+        let harvest_started = started + INITIAL_QUIET + STEP_TIMEOUT;
+        let pending = pending
+            .poll(Some(runtime), started + INITIAL_QUIET)
+            .expect("bottom probe");
+        input_rx.try_recv().expect("bottom wheel probe");
+        let pending = pending
+            .poll(Some(runtime), harvest_started)
+            .expect("history harvest");
+        input_rx.try_recv().expect("upward wheel batch");
+        runtime.test_process_pty_bytes(&draw(&["13", "14", "15", "16", "17"], false));
+        let pending = pending
+            .poll(Some(runtime), harvest_started + Duration::from_millis(1))
+            .expect("redraw coalescing");
+        let restore_started = harvest_started + Duration::from_millis(11);
+        let pending = pending
+            .poll(Some(runtime), restore_started)
+            .expect("viewport restore");
+        input_rx.try_recv().expect("restore wheel batch");
+        (pending, response_rx, restore_started)
+    }
+
+    #[test]
+    fn restore_keeps_scrolling_down_after_answering_when_it_needs_more_than_five_seconds() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _guard = rt.enter();
+        let (runtime, mut input_rx) = TerminalRuntime::test_with_channel_capacity(20, 5, 8);
+        let started = Instant::now();
+        let (pending, response_rx, restore_started) =
+            read_until_restore(&runtime, &mut input_rx, started);
+
+        // The app is still scrolled up when the restore budget runs out.
+        runtime.test_process_pty_bytes(&draw(&["14", "15", "16", "17", "18"], false));
+        let late = restore_started + MAX_RESTORE_DURATION + Duration::from_millis(1);
+        let pending = pending
+            .poll(Some(&runtime), late)
+            .expect("an app away from its bottom must still be restored");
+        assert_eq!(
+            response_rx
+                .recv_timeout(Duration::from_millis(50))
+                .expect("the caller is answered when the budget runs out"),
+            "fallback"
+        );
+        let pending = pending
+            .poll(Some(&runtime), late + Duration::from_millis(11))
+            .expect("restore continues past the budget");
+        input_rx
+            .try_recv()
+            .expect("restore keeps wheeling down past the budget");
+
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "19", "20"], false));
+        let pending = pending
+            .poll(Some(&runtime), late + Duration::from_millis(12))
+            .expect("restore redraw coalescing");
+        assert!(pending
+            .poll(Some(&runtime), late + Duration::from_millis(22))
+            .is_none());
+        assert!(
+            response_rx.try_recv().is_err(),
+            "the caller must be answered exactly once"
+        );
+
+        drop(runtime);
+        drop(_guard);
+        rt.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[test]
+    fn restore_stops_at_the_bottom_when_the_screen_changed_during_the_read() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let _guard = rt.enter();
+        let (runtime, mut input_rx) = TerminalRuntime::test_with_channel_capacity(20, 5, 8);
+        let started = Instant::now();
+        let (mut pending, response_rx, restore_started) =
+            read_until_restore(&runtime, &mut input_rx, started);
+
+        // Back at the bottom, but a transient line the initial snapshot held
+        // (Claude Code's "Press Ctrl-C again to exit") has gone, so the screen
+        // will never match it again.
+        runtime.test_process_pty_bytes(&draw(&["16", "17", "18", "", ""], false));
+        let mut now = restore_started + Duration::from_millis(1);
+        pending = pending
+            .poll(Some(&runtime), now)
+            .expect("restore redraw coalescing");
+        now += Duration::from_millis(10);
+        pending = pending
+            .poll(Some(&runtime), now)
+            .expect("changed bottom is wheeled once more");
+        input_rx.try_recv().expect("restore wheel batch");
+
+        let mut finished = false;
+        for _ in 0..RESTORE_BOTTOM_STALLED_STEPS {
+            now += STEP_TIMEOUT;
+            match pending.poll(Some(&runtime), now) {
+                Some(next) => {
+                    input_rx.try_recv().expect("stalled restore wheel batch");
+                    pending = next;
+                }
+                None => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            finished,
+            "a restore that moves nothing must stop at the bottom"
+        );
+        assert!(now < restore_started + MAX_RESTORE_DURATION);
+        assert_eq!(
+            response_rx
+                .recv_timeout(Duration::from_millis(50))
+                .expect("read response"),
+            "fallback"
         );
 
         drop(runtime);
