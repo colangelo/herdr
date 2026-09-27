@@ -5150,8 +5150,11 @@ navigate_pane_down = "ctrl+j"
 
         let output_path = unique_temp_path("custom-command-keybind");
         let release_path = unique_temp_path("custom-command-release");
+        // Write through a temp file and rename it into place: wait_for_file
+        // returns as soon as the path exists, and a direct redirect could be
+        // read half-written under full-suite load.
         let command = format!(
-            "printf '%s\\n%s\\n%s\\n%s\\n' \"$$\" \"$HERDR_ACTIVE_WORKSPACE_ID\" \"$HERDR_ACTIVE_TAB_ID\" \"$HERDR_ACTIVE_PANE_ID\" > '{}'; i=0; while [ ! -e '{}' ] && [ \"$i\" -lt 250 ]; do sleep 0.02; i=$((i + 1)); done",
+            "printf '%s\\n%s\\n%s\\n%s\\n' \"$$\" \"$HERDR_ACTIVE_WORKSPACE_ID\" \"$HERDR_ACTIVE_TAB_ID\" \"$HERDR_ACTIVE_PANE_ID\" > '{0}.tmp' && mv '{0}.tmp' '{0}'; i=0; while [ ! -e '{1}' ] && [ \"$i\" -lt 250 ]; do sleep 0.02; i=$((i + 1)); done",
             output_path.display(),
             release_path.display(),
         );
