@@ -862,7 +862,11 @@ mod tests {
         assert_eq!(uuid_v7_millis(&stale.id), Some(1_790_540_587_111));
         assert_eq!(uuid_v7_millis("not-a-uuid"), None);
         assert_eq!(
-            pick_new_thread(&[stale.clone()], Path::new("/repo"), 1_790_541_454_000),
+            pick_new_thread(
+                std::slice::from_ref(&stale),
+                Path::new("/repo"),
+                1_790_541_454_000
+            ),
             Pick::None,
             "a stale thread is not the new pane's even with a fresh createdAt"
         );
