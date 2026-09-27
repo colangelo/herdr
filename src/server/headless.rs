@@ -12035,6 +12035,7 @@ next_tab = ""
             request: api::schema::Request {
                 id: "stale".into(),
                 method: api::schema::Method::PaneReportAgent(api::schema::PaneReportAgentParams {
+                    resume_argv: None,
                     pane_id: public_pane_id,
                     source: "herdr:pi".into(),
                     agent: "pi".into(),
@@ -12119,6 +12120,186 @@ next_tab = ""
             "Found direct calls to self.app.handle_internal_event outside \
              handle_internal_event_with_forwarding (bypass risk):\n  {}",
             bypass_lines.join("\n  ")
+        );
+    }
+
+    fn resume_report_server(writer: ClientWriter) -> (HeadlessServer, crate::layout::PaneId) {
+        let mut server = test_headless_server();
+        server.app.state.workspaces = ["background", "active"]
+            .map(crate::workspace::Workspace::test_new)
+            .into();
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(1);
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(writer),
+            ),
+        );
+        let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
+        (server, pane_id)
+    }
+
+    fn resume_api_report(server: &mut HeadlessServer, method: api::schema::Method) {
+        let (respond_to, response_rx) = std::sync::mpsc::channel();
+        server.handle_api_request_with_shutdown_check(api::ApiRequestMessage {
+            request: api::schema::Request {
+                id: "resume-probe".into(),
+                method,
+            },
+            respond_to,
+            response_write_complete: None,
+            stream_active: None,
+        });
+        let response = response_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        serde_json::from_str::<api::schema::SuccessResponse>(&response).expect("successful report");
+    }
+
+    #[test]
+    fn api_report_agent_stores_valid_resume_argv_and_rejects_invalid() {
+        let (writer, _control_rx, _render_rx) = test_client_writer();
+        let (mut server, pane_id) = resume_report_server(writer);
+        let public_pane_id = format!("{}:p1", server.app.state.workspaces[0].id);
+        let terminal_id = server.app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let report = |resume_argv: Vec<&str>| {
+            api::schema::Method::PaneReportAgent(api::schema::PaneReportAgentParams {
+                pane_id: public_pane_id.clone(),
+                source: "prime-agent".into(),
+                agent: "prime-agent".into(),
+                state: api::schema::PaneAgentState::Idle,
+                message: None,
+                seq: Some(1),
+                agent_session_id: Some("01a0".into()),
+                agent_session_path: None,
+                resume_argv: Some(resume_argv.into_iter().map(String::from).collect()),
+            })
+        };
+
+        resume_api_report(
+            &mut server,
+            report(vec!["prime-agent", "--resume", "01a0", "--model", "x"]),
+        );
+        assert_eq!(
+            server.app.state.terminals[&terminal_id]
+                .reported_resume()
+                .unwrap()
+                .argv,
+            vec!["prime-agent", "--resume", "01a0", "--model", "x"]
+        );
+
+        resume_api_report(&mut server, report(vec!["prime-agent", "--resume", "dup"]));
+        assert_eq!(
+            server.app.state.terminals[&terminal_id]
+                .reported_resume()
+                .unwrap()
+                .argv[2],
+            "01a0",
+            "a duplicate sequence number must not replace the command"
+        );
+
+        let (respond_to, response_rx) = std::sync::mpsc::channel();
+        server.handle_api_request_with_shutdown_check(api::ApiRequestMessage {
+            request: api::schema::Request {
+                id: "invalid-resume".into(),
+                method: report(vec!["/opt/prime/prime-agent", "--resume", "01a0"]),
+            },
+            respond_to,
+            response_write_complete: None,
+            stream_active: None,
+        });
+        let response = response_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        assert!(response.contains("invalid_resume_argv"), "{response}");
+        assert_eq!(
+            server.app.state.terminals[&terminal_id]
+                .reported_resume()
+                .unwrap()
+                .argv[0],
+            "prime-agent"
+        );
+
+        let (respond_to, response_rx) = std::sync::mpsc::channel();
+        server.handle_api_request_with_shutdown_check(api::ApiRequestMessage {
+            request: api::schema::Request {
+                id: "not-owner".into(),
+                method: api::schema::Method::PaneReportAgentSession(
+                    api::schema::PaneReportAgentSessionParams {
+                        pane_id: public_pane_id.clone(),
+                        source: "custom:intruder".into(),
+                        agent: "intruder".into(),
+                        seq: None,
+                        agent_session_id: None,
+                        agent_session_path: None,
+                        session_start_source: None,
+                        resume_argv: Some(vec!["intruder".into()]),
+                    },
+                ),
+            },
+            respond_to,
+            response_write_complete: None,
+            stream_active: None,
+        });
+        let response = response_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        assert!(response.contains("resume_not_accepted"), "{response}");
+        assert_eq!(
+            server.app.state.terminals[&terminal_id]
+                .reported_resume()
+                .unwrap()
+                .agent,
+            "prime-agent"
+        );
+    }
+
+    #[test]
+    fn api_resume_argv_is_ignored_when_its_session_report_is_refused() {
+        let (writer, _control_rx, _render_rx) = test_client_writer();
+        let (mut server, pane_id) = resume_report_server(writer);
+        let public_pane_id = format!("{}:p1", server.app.state.workspaces[0].id);
+        let terminal_id = server.app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        server.handle_internal_event_with_forwarding(AppEvent::AgentProcessDetected {
+            pane_id,
+            agent: crate::detect::Agent::Claude,
+            observed_at: std::time::Instant::now(),
+            replaced_process: false,
+        });
+        let report = |session: &str| {
+            api::schema::Method::PaneReportAgentSession(api::schema::PaneReportAgentSessionParams {
+                pane_id: public_pane_id.clone(),
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                seq: None,
+                agent_session_id: Some(session.into()),
+                agent_session_path: None,
+                session_start_source: None,
+                resume_argv: Some(vec!["claude".into(), "--resume".into(), session.into()]),
+            })
+        };
+
+        resume_api_report(&mut server, report("session-a"));
+        resume_api_report(&mut server, report("session-b"));
+
+        let terminal = &server.app.state.terminals[&terminal_id];
+        assert!(terminal.session_ref_is_current(
+            &crate::agent_resume::AgentSessionRef::id("session-a").unwrap()
+        ));
+        assert_eq!(
+            terminal.reported_resume().unwrap().argv,
+            vec!["claude", "--resume", "session-a"]
         );
     }
 }

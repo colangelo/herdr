@@ -3793,6 +3793,7 @@ command = "echo custom"
             id: "t".into(),
             method: crate::api::schema::Method::PaneReportAgentSession(
                 crate::api::schema::PaneReportAgentSessionParams {
+                    resume_argv: None,
                     pane_id: pane_id.to_string(),
                     source: "herdr:claude".into(),
                     agent: "claude".into(),
