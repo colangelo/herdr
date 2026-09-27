@@ -184,6 +184,34 @@ fn controlling_terminal(pid: u32) -> Option<u64> {
     controlling_terminal_from_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
 }
 
+/// When a process started, in unix ms.
+pub fn process_started_at_ms(pid: u32) -> Option<i64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let boot = std::fs::read_to_string("/proc/stat").ok()?;
+    let ticks_per_sec = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    started_at_ms_from_stat(&stat, &boot, i64::from(i32::try_from(ticks_per_sec).ok()?))
+}
+
+fn started_at_ms_from_stat(stat: &str, proc_stat: &str, ticks_per_sec: i64) -> Option<i64> {
+    // After (comm): state(0) ... starttime(19), in clock ticks since boot.
+    let rest = stat.get(stat.rfind(')')? + 2..)?;
+    let ticks: i64 = rest.split_whitespace().nth(19)?.parse().ok()?;
+    let boot_secs: i64 = proc_stat
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    if ticks_per_sec <= 0 {
+        return None;
+    }
+    Some(
+        boot_secs
+            .saturating_mul(1000)
+            .saturating_add(ticks.saturating_mul(1000) / ticks_per_sec),
+    )
+}
+
 fn controlling_terminal_from_stat(stat: &str) -> Option<u64> {
     // After (comm): state(0) ppid(1) pgrp(2) session(3) tty_nr(4). The kernel
     // reports "no controlling terminal" as 0.
@@ -1105,6 +1133,18 @@ mod tests {
             controlling_terminal_from_stat("123 (name with ) paren) S 1 456 789 34816 456"),
             Some(34816)
         );
+    }
+
+    #[test]
+    fn proc_stat_parsing_reads_the_start_time() {
+        // starttime is the 22nd field: 250 ticks at 100 per second is 2.5 s
+        // after a boot at unix second 1000.
+        let stat = "7 (co) dex) S 1 7 7 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 250 0 0";
+        assert_eq!(
+            started_at_ms_from_stat(stat, "cpu 1 2 3\nbtime 1000\nprocesses 9\n", 100),
+            Some(1_002_500)
+        );
+        assert_eq!(started_at_ms_from_stat(stat, "cpu 1 2 3\n", 100), None);
     }
 
     #[test]

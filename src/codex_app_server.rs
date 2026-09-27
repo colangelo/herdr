@@ -16,6 +16,9 @@ const NAME_JOB_POLL: Duration = Duration::from_millis(250);
 /// A thread counts as the new pane's if it was created no earlier than this
 /// before the launch.
 const CREATED_SLACK_MS: i64 = 1_000;
+/// How long after a hand-launched Codex process starts its thread can appear.
+/// Codex creates it at startup; the bound keeps a later launch's thread out.
+const HAND_LAUNCH_WINDOW_MS: i64 = 30_000;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CodexAppServer {
@@ -117,8 +120,12 @@ pub(crate) enum NameJob {
     Rename {
         thread_id: Option<String>,
         cwd: PathBuf,
-        old_name: String,
+        /// The name herdr gave the thread before, if it named it.
+        old_name: Option<String>,
         new_name: String,
+        /// When the pane's Codex process started, in unix ms: the anchor for a
+        /// thread herdr neither launched nor learned the id of.
+        process_started_at: Option<i64>,
     },
 }
 
@@ -190,14 +197,43 @@ pub(crate) enum Pick {
 /// The thread a newly launched pane created: the only unnamed, nameable one
 /// in its cwd created since the launch. Several means a guess, so none.
 pub(crate) fn pick_new_thread(threads: &[ThreadSummary], cwd: &Path, launched_at_ms: i64) -> Pick {
+    pick_unnamed_thread(threads, cwd, |created| {
+        created >= launched_at_ms - CREATED_SLACK_MS
+    })
+}
+
+/// The thread a Codex process herdr did not launch created: the only unnamed,
+/// nameable one in its cwd created within `HAND_LAUNCH_WINDOW_MS` of the
+/// process starting. Several means a guess, so none.
+pub(crate) fn pick_process_thread(
+    threads: &[ThreadSummary],
+    cwd: &Path,
+    started_at_ms: i64,
+) -> Pick {
+    pick_unnamed_thread(threads, cwd, |created| {
+        created >= started_at_ms - CREATED_SLACK_MS
+            && created <= started_at_ms + HAND_LAUNCH_WINDOW_MS
+    })
+}
+
+/// The thread id a `codex … resume <id> …` command line reopens.
+pub(crate) fn resumed_thread_id(argv: &[String]) -> Option<String> {
+    argv.windows(2)
+        .find(|pair| pair[0] == "resume" && uuid_v7_millis(&pair[1]).is_some())
+        .map(|pair| pair[1].clone())
+}
+
+fn pick_unnamed_thread(
+    threads: &[ThreadSummary],
+    cwd: &Path,
+    created_in_window: impl Fn(i64) -> bool,
+) -> Pick {
     let candidates: Vec<_> = threads
         .iter()
         .filter(|thread| {
             thread.nameable()
                 && thread.name.is_none()
-                && thread
-                    .created_ms()
-                    .is_some_and(|created| created >= launched_at_ms - CREATED_SLACK_MS)
+                && thread.created_ms().is_some_and(&created_in_window)
                 && thread.in_cwd(cwd)
         })
         .collect();
@@ -237,7 +273,10 @@ pub(crate) fn spawn_name_job(socket: PathBuf, job: NameJob) {
 
 #[cfg(unix)]
 mod client {
-    use super::{pick_new_thread, NameJob, Pick, ThreadSummary, NAME_JOB_DEADLINE, NAME_JOB_POLL};
+    use super::{
+        pick_new_thread, pick_process_thread, NameJob, Pick, ThreadSummary, NAME_JOB_DEADLINE,
+        NAME_JOB_POLL,
+    };
     use base64::Engine as _;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
@@ -589,20 +628,52 @@ mod client {
                     }
                 }
                 NameJob::Rename {
-                    thread_id,
+                    thread_id: Some(id),
+                    new_name,
+                    ..
+                } => Some(match rpc.read_thread(id) {
+                    Ok(thread) => name_thread(&mut rpc, &thread, new_name),
+                    Err(_) => Ok(format!("thread {id} is not on the daemon")),
+                }),
+                NameJob::Rename {
+                    thread_id: None,
                     cwd,
                     old_name,
                     new_name,
+                    process_started_at,
                 } => {
-                    let thread = match thread_id {
-                        Some(id) => rpc.read_thread(id).ok(),
-                        None => rpc.loaded_threads()?.into_iter().find(|thread| {
-                            thread.name.as_deref() == Some(old_name.as_str()) && thread.in_cwd(cwd)
-                        }),
-                    };
-                    Some(match thread {
-                        Some(thread) => name_thread(&mut rpc, &thread, new_name),
-                        None => Ok(format!("no thread named {old_name} in {}", cwd.display())),
+                    let threads = rpc.loaded_threads()?;
+                    let by_old_name = old_name.as_deref().and_then(|old_name| {
+                        threads.iter().find(|thread| {
+                            thread.name.as_deref() == Some(old_name) && thread.in_cwd(cwd)
+                        })
+                    });
+                    Some(match (by_old_name, process_started_at) {
+                        (Some(thread), _) => name_thread(&mut rpc, &thread.clone(), new_name),
+                        (None, Some(started_at)) => {
+                            match pick_process_thread(&threads, cwd, *started_at) {
+                                Pick::One(id) => {
+                                    let thread = threads
+                                        .into_iter()
+                                        .find(|thread| thread.id == id)
+                                        .unwrap_or_default();
+                                    name_thread(&mut rpc, &thread, new_name)
+                                }
+                                Pick::Ambiguous(count) => Ok(format!(
+                                    "{count} unnamed threads in {} started with the pane's codex; naming none",
+                                    cwd.display()
+                                )),
+                                Pick::None => Ok(format!(
+                                    "no unnamed thread in {} started with the pane's codex",
+                                    cwd.display()
+                                )),
+                            }
+                        }
+                        (None, None) => Ok(format!(
+                            "no thread named {} in {}",
+                            old_name.as_deref().unwrap_or("(none)"),
+                            cwd.display()
+                        )),
                     })
                 }
             };
@@ -829,6 +900,53 @@ mod tests {
     }
 
     #[test]
+    fn pick_process_thread_keeps_to_the_window_after_the_process_started() {
+        let threads = [
+            thread("before", "/repo", 90),
+            thread("mine", "/repo", 101),
+            thread("later", "/repo", 131),
+        ];
+        assert_eq!(
+            pick_process_thread(&threads, Path::new("/repo"), 100_000),
+            Pick::One("mine".into())
+        );
+    }
+
+    #[test]
+    fn pick_process_thread_refuses_to_guess() {
+        let threads = [thread("a", "/repo", 101), thread("b", "/repo", 110)];
+        assert_eq!(
+            pick_process_thread(&threads, Path::new("/repo"), 100_000),
+            Pick::Ambiguous(2)
+        );
+    }
+
+    #[test]
+    fn resumed_thread_id_is_read_from_the_command_line() {
+        let argv = |parts: &[&str]| {
+            parts
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+        };
+        let id = "01a0e4f8-16fa-78f1-b2a4-fe126b57b4b2";
+        assert_eq!(
+            resumed_thread_id(&argv(&["codex", "--remote", "unix:///s", "resume", id])).as_deref(),
+            Some(id)
+        );
+        assert_eq!(
+            resumed_thread_id(&argv(&["codex", "resume", id, "-C", "/repo"])).as_deref(),
+            Some(id)
+        );
+        assert_eq!(resumed_thread_id(&argv(&["codex", "-C", "/repo"])), None);
+        assert_eq!(
+            resumed_thread_id(&argv(&["codex", "resume", "--last"])),
+            None,
+            "only an id names the thread"
+        );
+    }
+
+    #[test]
     fn pick_new_thread_refuses_to_guess() {
         let threads = [thread("a", "/repo", 100), thread("b", "/repo", 101)];
         assert_eq!(
@@ -1022,8 +1140,9 @@ mod tests {
             &NameJob::Rename {
                 thread_id: None,
                 cwd: "/repo".into(),
-                old_name: "old".into(),
+                old_name: Some("old".into()),
                 new_name: "new".into(),
+                process_started_at: None,
             },
         )
         .expect("rename job");
@@ -1031,6 +1150,65 @@ mod tests {
             name_calls(&calls),
             [serde_json::json!({"threadId": "t1", "name": "new"})]
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_of_a_hand_launched_pane_finds_the_thread_its_process_created() {
+        let dir = temp_dir("hand-launch");
+        let (socket, calls) = loaded_daemon(
+            &dir,
+            vec![
+                // Before the process started: someone else's.
+                serde_json::json!({"id": "before", "cwd": "/repo", "ephemeral": false, "createdAt": 90}),
+                serde_json::json!({"id": "mine", "cwd": "/repo", "ephemeral": false, "createdAt": 102}),
+                // Long after: a later launch's.
+                serde_json::json!({"id": "later", "cwd": "/repo", "ephemeral": false, "createdAt": 200}),
+            ],
+        );
+        let outcome = client::run_name_job(
+            &socket,
+            &NameJob::Rename {
+                thread_id: None,
+                cwd: "/repo".into(),
+                old_name: None,
+                new_name: "worker".into(),
+                process_started_at: Some(100_000),
+            },
+        )
+        .expect("rename job");
+        assert!(outcome.starts_with("named mine"), "{outcome}");
+        assert_eq!(
+            name_calls(&calls),
+            [serde_json::json!({"threadId": "mine", "name": "worker"})]
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_without_a_known_thread_or_process_names_nothing() {
+        let dir = temp_dir("rename-none");
+        let (socket, calls) = loaded_daemon(
+            &dir,
+            vec![
+                serde_json::json!({"id": "t1", "cwd": "/repo", "ephemeral": false, "createdAt": 1}),
+            ],
+        );
+        let outcome = client::run_name_job(
+            &socket,
+            &NameJob::Rename {
+                thread_id: None,
+                cwd: "/repo".into(),
+                old_name: None,
+                new_name: "worker".into(),
+                process_started_at: None,
+            },
+        )
+        .expect("rename job");
+        assert!(outcome.starts_with("no thread named"), "{outcome}");
+        assert!(name_calls(&calls).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 

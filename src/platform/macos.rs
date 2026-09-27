@@ -809,6 +809,14 @@ fn run_clipboard_command(command: &ClipboardCommand, bytes: &[u8]) -> bool {
     child.wait().map(|status| status.success()).unwrap_or(false)
 }
 
+/// When a process started, in unix ms.
+pub fn process_started_at_ms(pid: u32) -> Option<i64> {
+    let info = process_bsdinfo(pid)?;
+    let secs = i64::try_from(info.pbi_start_tvsec).ok()?;
+    let micros = i64::try_from(info.pbi_start_tvusec).ok()?;
+    Some(secs.saturating_mul(1000).saturating_add(micros / 1000))
+}
+
 fn process_bsdinfo(pid: u32) -> Option<libc::proc_bsdinfo> {
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;

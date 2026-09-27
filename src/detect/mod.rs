@@ -288,6 +288,17 @@ pub fn wrapped_shell_job(
     nested_foreground_job(nested_pty_wrapper_leader(job)?)
 }
 
+/// The processes in `job` that identify as `agent`, by the same name matching
+/// `identify_agent_in_job` uses.
+pub fn agent_processes_in_job(
+    job: &crate::platform::ForegroundJob,
+    agent: Agent,
+) -> impl Iterator<Item = &crate::platform::ForegroundProcess> {
+    job.processes
+        .iter()
+        .filter(move |process| identify_agent(&normalized_process_name(process)) == Some(agent))
+}
+
 pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Agent, String)> {
     if let Some(process) = job
         .processes

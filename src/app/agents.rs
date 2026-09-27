@@ -111,6 +111,21 @@ impl App {
             }
         }
 
+        // Only looked up when a Codex thread may need naming, and only here:
+        // a rename is rare, and this reads the pane's process table.
+        let codex_process = self
+            .codex_app_server
+            .naming_socket()
+            .and_then(|_| {
+                let terminal_id = self
+                    .state
+                    .workspaces
+                    .get(resolved.ws_idx)?
+                    .terminal_id(resolved.pane_id)?;
+                self.terminal_runtimes.get(terminal_id)
+            })
+            .and_then(pane_codex_process);
+
         let Some(terminal) = self
             .state
             .terminals
@@ -129,18 +144,25 @@ impl App {
         }
         let codex_rename = (terminal.effective_agent_label() == Some("codex"))
             .then(|| {
-                let old_name = terminal.agent_name.clone()?;
                 let new_name = normalized_name.clone()?;
                 let thread_id = terminal
                     .persisted_agent_session
                     .as_ref()
                     .filter(|session| session.agent == "codex")
-                    .map(|session| session.session_ref.value.clone());
+                    .map(|session| session.session_ref.value.clone())
+                    .or_else(|| {
+                        codex_process
+                            .as_ref()
+                            .and_then(|process| process.resumed_thread_id.clone())
+                    });
                 Some(crate::codex_app_server::NameJob::Rename {
                     thread_id,
                     cwd: terminal.cwd.clone(),
-                    old_name,
+                    old_name: terminal.agent_name.clone(),
                     new_name,
+                    process_started_at: codex_process
+                        .as_ref()
+                        .and_then(|process| process.started_at),
                 })
             })
             .flatten();
@@ -461,6 +483,39 @@ fn agent_start_argv(
     argv.extend(args);
     argv.extend(codex_args);
     argv
+}
+
+/// What naming needs to know about the Codex process running in a pane.
+struct PaneCodexProcess {
+    /// The thread it reopened with `resume <id>`.
+    resumed_thread_id: Option<String>,
+    /// When it started, in unix ms.
+    started_at: Option<i64>,
+}
+
+/// The Codex process in the pane's foreground job, or one PTY down behind a
+/// recognised wrapper.
+fn pane_codex_process(runtime: &crate::terminal::TerminalRuntime) -> Option<PaneCodexProcess> {
+    let job = crate::detect::foreground_job(runtime.child_pid()?)?;
+    let codex = |job: &crate::platform::ForegroundJob| {
+        crate::detect::agent_processes_in_job(job, crate::detect::Agent::Codex)
+            .next()
+            .cloned()
+    };
+    let process = codex(&job).or_else(|| {
+        let (_, nested) = crate::detect::wrapped_shell_job(
+            &job,
+            crate::platform::nested_foreground_job_with_owner,
+        )?;
+        codex(&nested)
+    })?;
+    Some(PaneCodexProcess {
+        resumed_thread_id: process
+            .argv
+            .as_deref()
+            .and_then(crate::codex_app_server::resumed_thread_id),
+        started_at: crate::platform::process_started_at_ms(process.pid),
+    })
 }
 
 fn available_shell_name(runtime: &crate::terminal::TerminalRuntime) -> Option<String> {

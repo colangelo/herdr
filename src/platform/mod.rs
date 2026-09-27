@@ -596,6 +596,21 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn process_start_time_is_a_recent_past_instant() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis() as i64;
+        let started = process_started_at_ms(std::process::id()).expect("own start time");
+        assert!(started <= now, "started {started} after now {now}");
+        assert!(
+            now - started < 24 * 60 * 60 * 1000,
+            "started {started}, now {now}"
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn lone_job(pid: u32, name: &str) -> ForegroundJob {
         ForegroundJob {
             process_group_id: pid,

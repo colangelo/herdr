@@ -991,6 +991,11 @@ pub fn nested_foreground_job_with_owner(_pid: u32) -> Option<(u32, ForegroundJob
     None
 }
 
+/// Not read on Windows: only Unix names Codex daemon threads.
+pub fn process_started_at_ms(_pid: u32) -> Option<i64> {
+    None
+}
+
 /// ConPTY presents no nested PTY to look behind, so `_is_wrapper` goes unused.
 pub(crate) fn available_pane_shell(
     child_pid: u32,

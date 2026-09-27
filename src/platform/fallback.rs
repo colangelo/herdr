@@ -192,6 +192,11 @@ pub fn nested_foreground_job_with_owner(_pid: u32) -> Option<(u32, ForegroundJob
 }
 
 /// Unsupported platform stub.
+pub fn process_started_at_ms(_pid: u32) -> Option<i64> {
+    None
+}
+
+/// Unsupported platform stub.
 pub fn foreground_process_group_id(_child_pid: u32) -> Option<u32> {
     None
 }
