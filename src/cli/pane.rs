@@ -522,12 +522,13 @@ fn pane_read(args: &[String]) -> std::io::Result<i32> {
         }
     };
 
+    let lines = params.lines;
     let response = super::send_request(&Request {
         id: "cli:pane:read".into(),
         method: Method::PaneRead(params),
     })?;
 
-    super::print_read_response(&response)
+    super::print_read_response(&response, lines)
 }
 
 fn parse_pane_read_args(args: &[String]) -> Result<PaneReadParams, String> {

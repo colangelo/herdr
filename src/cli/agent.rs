@@ -916,7 +916,7 @@ fn agent_read(args: &[String]) -> std::io::Result<i32> {
             strip_ansi,
         }),
     })?;
-    super::print_read_response(&response)
+    super::print_read_response(&response, lines)
 }
 
 fn print_agent_help() {
