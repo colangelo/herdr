@@ -59,9 +59,11 @@ destination SHALL appear last.
 Space headings SHALL NOT be selectable; selection SHALL move between
 destinations only.
 
-The picker SHALL list only valid destinations: it SHALL exclude the pane's
-current tab and SHALL exclude tabs that cannot receive the pane. The action SHALL
-NOT open a picker that offers no destination.
+The picker SHALL list only valid destinations: the pane's current tab SHALL NOT
+be a destination, and tabs that cannot receive the pane SHALL be excluded. The
+pane's current tab SHALL still be shown in its place, greyed and marked as where
+the pane is now, as a row that cannot be selected, submitted or counted as a
+destination. The action SHALL NOT open a picker that offers no destination.
 
 Selecting a destination SHALL preserve the pane's running process and terminal
 contents, and SHALL focus the moved pane at its destination, switching the active
@@ -91,7 +93,7 @@ space when the destination lies in another space.
 
 - **WHEN** the picker is open and the user moves the selection through the list
 - **THEN** the selection moves from destination to destination
-- **AND** no space heading can be selected or submitted
+- **AND** no space heading, and not the pane's current tab, can be selected or submitted
 
 #### Scenario: Cancel the picker leaves layout unchanged
 
@@ -226,3 +228,41 @@ match; a matching heading SHALL keep all its destinations.
 
 - **WHEN** the query matches nothing
 - **THEN** the picker says so, keeps the query, and Enter does nothing
+
+### Requirement: The move picker is drawn as a tree
+
+The move-pane picker SHALL draw its destinations as a tree in the session
+navigator's visual language: each space heading with its state icon, name and
+pane count in the navigator's heading style; its tabs and its new-tab action as
+branches under it; a blank line between spaces; and the navigator's full-row
+selection. A tab row SHALL set its number and name apart from the word `tab`,
+and SHALL show the names of the panes it holds. The new-tab and new-space rows
+SHALL be drawn as actions (a `+` mark, dimmer text), not as places. The picker
+SHALL name the pane being moved and where it is, and SHALL show, for the
+selected row, a one-line detail of what the move would do. Its width SHALL be
+measured from these rows, not from the filtered ones.
+
+#### Scenario: Space names stand out
+
+- **WHEN** the picker opens in a session with several spaces
+- **THEN** each space heading is drawn in the navigator's heading style with
+  its pane count, and its tabs hang under it as branches
+
+#### Scenario: The pane's own tab is shown but not offered
+
+- **WHEN** the picker opens for a pane in tab 1 of the space "herdr"
+- **THEN** tab 1 of "herdr" is listed greyed and marked as where the pane is
+- **AND** moving the selection never lands on it, and it is not counted in the
+  destination count
+
+#### Scenario: A tab shows what is in it
+
+- **WHEN** a tab holds panes named `keyboard-shortcuts` and `install tuicr`
+- **THEN** its row shows those names, and the detail line lists every pane in
+  it when the row is selected
+- **AND** a search for `keyboard` keeps that tab and its space heading
+
+#### Scenario: The tree stays whole while searching
+
+- **WHEN** a query leaves only the second of a space's tabs
+- **THEN** that tab is drawn as the space's last branch

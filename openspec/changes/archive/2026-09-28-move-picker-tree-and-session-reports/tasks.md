@@ -36,6 +36,19 @@ Decided while building (recorded so review can check them):
   runs on macOS; RSS hid the saving (MADV_FREE_REUSABLE).
 - #114 (a plugin test reading a half-written file) was found by `just check`
   and fixed; #115 (a respawn test flake) was backlogged with context.
+- The throwaway proof of beta.105 (m4m, session j10proof, 310x56 and 100x30
+  in a sized tmux) found #116: both dialogs cut the status column by a label
+  floor their short labels never needed (`clipper-relay-3, +2` where `, +1`
+  fit). Fixed on master after the beta (77da76e2); it is not in beta.105.
+- Proof results on beta.105: the picker and navigator match the mockups at
+  both sizes, and ac's cut statuses (`keyboard-shortcuts · idle`,
+  `macos-relay-3 · idle`) draw whole in the 73-wide navigator; a pane moved
+  from w5 to w4, then a live handoff, then a stand-in Claude started in it
+  (shell env `w5:p2`) recorded its session on `w4:p2`; 8/8 fast `pane run`
+  restarts kept the new session.
+- Handoffs from builds before beta.105 are captured by the old code, so panes
+  moved before the upgrade lose their old ids once more; the fix holds for
+  moves made on beta.105 and later.
 
 ## 2. Build (green)
 
@@ -49,6 +62,6 @@ Decided while building (recorded so review can check them):
 ## 3. Ship and prove
 
 - [x] 3.1 Granular commits (look, navigator, ids, session), `pull --rebase`, push `origin` and `internal`, no force-push
-- [ ] 3.2 One beta via `herdr-dogfood`
-- [ ] 3.3 Throwaway session on m4m (not ac's): the picker at 310x56 and 100x30 matches the mockups; the navigator's statuses are whole; a pane moved across spaces, then a handoff, then a report under its old id lands; a `pane run` Claude restart keeps its session
-- [ ] 3.4 Comment SHAs, the beta and how each was checked on #109, #110, #111, #112; leave them open for herdr-relay's live check
+- [x] 3.2 One beta via `herdr-dogfood`
+- [x] 3.3 Throwaway session on m4m (not ac's): the picker at 310x56 and 100x30 matches the mockups; the navigator's statuses are whole; a pane moved across spaces, then a handoff, then a report under its old id lands; a `pane run` Claude restart keeps its session
+- [x] 3.4 Comment SHAs, the beta and how each was checked on #109, #110, #111, #112; leave them open for herdr-relay's live check
