@@ -531,6 +531,16 @@ pub struct PaneProcessInfo {
     pub tty: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub foreground_processes: Vec<PaneProcessInfoProcess>,
+    /// The foreground job of the PTY a recognised wrapper (such as `atuin
+    /// pty-proxy`) runs the pane's shell in. Absent for an unwrapped pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested_foreground_process_group_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested_foreground_processes: Vec<PaneProcessInfoProcess>,
+    /// The pane's shell, directly or behind a recognised wrapper, is alone at
+    /// the front of its terminal: nothing is running in the pane.
+    #[serde(default)]
+    pub shell_at_prompt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

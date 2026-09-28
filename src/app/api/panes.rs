@@ -216,23 +216,22 @@ impl App {
         };
         let shell_pid = runtime.child_pid();
         let foreground_job = shell_pid.and_then(crate::detect::foreground_job);
+        let nested_job = foreground_job.as_ref().and_then(|job| {
+            crate::detect::wrapped_shell_job(job, crate::platform::nested_foreground_job_with_owner)
+                .map(|(_, nested)| nested)
+        });
+        let shell_at_prompt = shell_pid.is_some_and(|pid| {
+            crate::platform::available_pane_shell(pid, crate::detect::is_nested_pty_wrapper)
+                .is_some()
+        });
         let foreground_process_group_id = foreground_job.as_ref().map(|job| job.process_group_id);
         let foreground_processes = foreground_job
-            .map(|job| {
-                job.processes
-                    .into_iter()
-                    .map(|process| PaneProcessInfoProcess {
-                        pid: process.pid,
-                        name: process.name,
-                        argv0: process.argv0,
-                        argv: process.argv,
-                        cmdline: process.cmdline,
-                        cwd: crate::platform::process_cwd(process.pid)
-                            .map(|cwd| cwd.display().to_string()),
-                    })
-                    .collect()
-            })
+            .map(process_info_processes)
             .unwrap_or_default();
+        let nested_foreground_process_group_id =
+            nested_job.as_ref().map(|job| job.process_group_id);
+        let nested_foreground_processes =
+            nested_job.map(process_info_processes).unwrap_or_default();
 
         encode_success(
             id,
@@ -243,6 +242,9 @@ impl App {
                     foreground_process_group_id,
                     tty: None,
                     foreground_processes,
+                    nested_foreground_process_group_id,
+                    nested_foreground_processes,
+                    shell_at_prompt,
                 },
             },
         )
@@ -1982,6 +1984,20 @@ fn split_path_id(idx: usize, path: &[bool]) -> String {
 
 fn invalid_agent(id: String) -> String {
     encode_error(id, "invalid_agent", "agent label must not be empty")
+}
+
+fn process_info_processes(job: crate::platform::ForegroundJob) -> Vec<PaneProcessInfoProcess> {
+    job.processes
+        .into_iter()
+        .map(|process| PaneProcessInfoProcess {
+            pid: process.pid,
+            name: process.name,
+            argv0: process.argv0,
+            argv: process.argv,
+            cmdline: process.cmdline,
+            cwd: crate::platform::process_cwd(process.pid).map(|cwd| cwd.display().to_string()),
+        })
+        .collect()
 }
 
 #[cfg(test)]

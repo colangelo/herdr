@@ -1881,6 +1881,11 @@ mod tests {
 
         assert_eq!(response["result"]["type"], "pane_process_info");
         assert_eq!(response["result"]["process_info"]["pane_id"], target);
+        // No process to inspect: never claimed to be at a prompt.
+        assert_eq!(response["result"]["process_info"]["shell_at_prompt"], false);
+        assert!(response["result"]["process_info"]
+            .get("nested_foreground_processes")
+            .is_none());
     }
 
     #[test]
