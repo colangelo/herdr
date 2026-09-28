@@ -39,6 +39,7 @@ fn modified_url_click_modifier_matches_terminal_mouse_reporting() {
 mod app_scroll;
 mod clipboard;
 mod copy_mode;
+mod display_panes;
 mod lease;
 pub(crate) mod list_keys;
 pub(crate) mod text_keys;
@@ -127,6 +128,7 @@ impl App {
                 Mode::PaneTodos => self.handle_pane_todos_key_via_api(key_event),
                 Mode::PaneTodoEdit => self.handle_pane_todo_edit_key_via_api(key_event),
                 Mode::TodoBoard => self.handle_todo_board_key_via_api(key_event),
+                Mode::DisplayPanes => self.handle_display_panes_key(key_event),
                 Mode::Terminal => unreachable!(),
             },
         }
@@ -890,7 +892,7 @@ fn app_for_mouse_test() -> App {
 }
 
 #[cfg(test)]
-fn mouse(
+pub(super) fn mouse(
     kind: crossterm::event::MouseEventKind,
     col: u16,
     row: u16,

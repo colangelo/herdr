@@ -58,6 +58,8 @@ pub(crate) struct RightClickPassthroughGesture {
 use crate::terminal_theme::{HostAppearance, TerminalTheme};
 use crate::workspace::Workspace;
 
+pub(crate) use super::display_panes::DisplayPanesState;
+
 // ---------------------------------------------------------------------------
 // Theme palette — all UI colors in one place, ready for theming
 // ---------------------------------------------------------------------------
@@ -1022,6 +1024,7 @@ pub enum Mode {
     PaneTodos,
     PaneTodoEdit,
     TodoBoard,
+    DisplayPanes,
 }
 
 impl Mode {
@@ -2112,6 +2115,10 @@ macro_rules! overlays {
                     }
                 }
 
+                // Generated for every overlay so the accessor set is uniform;
+                // an overlay with nothing to edit in place (display panes)
+                // never calls it.
+                #[allow(dead_code)]
                 pub(crate) fn $get_mut(&mut self) -> Option<&mut $state> {
                     match self.overlay.as_mut() {
                         Some(Overlay::$variant(state)) => Some(state),
@@ -2170,6 +2177,8 @@ overlays! {
         pane_move_target_picker / pane_move_target_picker_mut / take_pane_move_target_picker;
     TodoBoard(TodoBoardState) => mode TodoBoard, ascii true,
         todo_board / todo_board_mut / take_todo_board;
+    DisplayPanes(DisplayPanesState) => mode DisplayPanes, ascii true,
+        display_panes / display_panes_mut / take_display_panes;
 }
 
 impl AppState {
@@ -4878,6 +4887,9 @@ mod tests {
             OverlayKind::PaneMoveTargetPicker => Overlay::PaneMoveTargetPicker(
                 PaneMoveTargetPickerState::new("p1".into(), Vec::new()),
             ),
+            OverlayKind::DisplayPanes => Overlay::DisplayPanes(DisplayPanesState {
+                deadline: std::time::Instant::now(),
+            }),
             OverlayKind::TodoBoard => Overlay::TodoBoard(TodoBoardState::new(vec![
                 TodoBoardItem::PaneHeading {
                     space: "one".into(),

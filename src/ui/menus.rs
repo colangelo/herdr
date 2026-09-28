@@ -19,7 +19,12 @@ fn keybind_label(bindings: &crate::config::ActionKeybinds) -> String {
     bindings.label().unwrap_or_else(|| "unset".to_string())
 }
 
-fn render_bottom_bar(frame: &mut Frame, area: Rect, line: Line<'_>, bg: ratatui::style::Color) {
+pub(super) fn render_bottom_bar(
+    frame: &mut Frame,
+    area: Rect,
+    line: Line<'_>,
+    bg: ratatui::style::Color,
+) {
     frame.render_widget(Clear, area);
     let buf = frame.buffer_mut();
     for x in area.x..area.x + area.width {

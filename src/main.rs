@@ -195,6 +195,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_pane_todos = "prefix+ctrl+t"
 # add_pane_todo = ""      # optional, unset by default; compose a new todo for the focused pane
 # open_todo_board = ""    # optional, unset by default; every pane's todos in one board
+# display_panes = "prefix+i"  # every pane's number, address, name and size, like tmux's prefix+q
 # workspace_picker = "prefix+w"
 # goto = "prefix+g"
 # new_workspace = "prefix+shift+n"

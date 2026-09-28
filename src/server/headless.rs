@@ -4858,6 +4858,8 @@ impl HeadlessServer {
             changed = true;
         }
 
+        changed |= self.app.expire_display_panes(now);
+
         if self
             .app
             .selection_autoscroll_deadline

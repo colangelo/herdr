@@ -376,6 +376,7 @@ pub struct Keybinds {
     pub open_pane_todos: ActionKeybinds,
     pub add_pane_todo: ActionKeybinds,
     pub open_todo_board: ActionKeybinds,
+    pub display_panes: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
@@ -581,6 +582,7 @@ impl Config {
             open_pane_todos: empty_action!(),
             add_pane_todo: empty_action!(),
             open_todo_board: empty_action!(),
+            display_panes: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
             previous_agent: empty_action!(),
@@ -735,6 +737,7 @@ impl Config {
             apply_action!(keybinds.open_pane_todos, open_pane_todos, source);
             apply_action!(keybinds.add_pane_todo, add_pane_todo, source);
             apply_action!(keybinds.open_todo_board, open_todo_board, source);
+            apply_action!(keybinds.display_panes, display_panes, source);
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
             apply_action!(keybinds.previous_agent, previous_agent, source);

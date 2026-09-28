@@ -640,6 +640,9 @@ pub struct KeysConfig {
     pub add_pane_todo: BindingConfig,
     /// Open the session-wide todo board. Unbound by default.
     pub open_todo_board: BindingConfig,
+    /// Show every pane's number, address, name and size in characters, and the
+    /// window size, until the next key or for 3 seconds. Default: "prefix+i".
+    pub display_panes: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
@@ -810,6 +813,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     open_todo_board: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    display_panes: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_workspace: Option<BindingConfig>,
@@ -961,6 +966,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(open_pane_todos);
         apply_field!(add_pane_todo);
         apply_field!(open_todo_board);
+        apply_field!(display_panes);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
         apply_field!(previous_agent);
@@ -1083,6 +1089,7 @@ impl KeysConfig {
         copy_effective_action_field!(open_pane_todos, keybinds.open_pane_todos);
         copy_effective_action_field!(add_pane_todo, keybinds.add_pane_todo);
         copy_effective_action_field!(open_todo_board, keybinds.open_todo_board);
+        copy_effective_action_field!(display_panes, keybinds.display_panes);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
@@ -1557,6 +1564,7 @@ impl Default for KeysConfig {
             open_pane_todos: BindingConfig::one("prefix+ctrl+t"),
             add_pane_todo: BindingConfig::empty(),
             open_todo_board: BindingConfig::empty(),
+            display_panes: BindingConfig::one("prefix+i"),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),

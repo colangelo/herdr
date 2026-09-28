@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 mod dialogs;
+mod display_panes;
 mod keybind_help;
 pub(crate) mod list_motion;
 mod menus;
@@ -599,6 +600,7 @@ pub fn render_with_runtime_registry(
         Mode::PaneTodos => render_pane_todo_panel(app, frame),
         Mode::PaneTodoEdit => render_pane_todo_edit_overlay(app, frame, frame.area()),
         Mode::TodoBoard => render_todo_board(app, frame),
+        Mode::DisplayPanes => display_panes::render_display_panes(app, frame, mode_bar_area),
         Mode::Terminal => {}
     }
 }

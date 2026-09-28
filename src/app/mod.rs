@@ -14,6 +14,7 @@ mod api_helpers;
 pub(crate) use api_helpers::limit_snapshot_lines;
 mod config_io;
 mod creation;
+pub(crate) mod display_panes;
 mod git_refresh;
 mod ids;
 mod input;
@@ -2253,6 +2254,9 @@ impl App {
             }
             Mode::TodoBoard => {
                 self.handle_todo_board_key_via_api(key_event);
+            }
+            Mode::DisplayPanes => {
+                self.handle_display_panes_key(key_event);
             }
             Mode::Resize => {
                 self.handle_resize_key_via_api(key);
