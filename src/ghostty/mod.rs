@@ -3353,20 +3353,41 @@ mod tests {
         out
     }
 
+    /// Fails unless compression really runs: libghostty must not report it
+    /// unsupported, and the process footprint must drop by at least a quarter
+    /// of what the scrollback added. nextest runs each test in its own
+    /// process, so the footprint change is this terminal's.
     #[test]
     fn incremental_compression_preserves_cold_scrollback() {
-        let mut terminal = Terminal::new(80, 24, 20_000_000).unwrap();
+        const LINES: usize = 50_000;
+        let baseline = crate::platform::process_memory_footprint_bytes();
+        let mut terminal = Terminal::new(80, 24, 200_000_000).unwrap();
         let initial_activity = terminal.compression_activity().unwrap();
-        let suffix = "x".repeat(66);
-        for line in 1..=10_000 {
-            terminal.write(format!("{line:05} {suffix}\r\n").as_bytes());
+        // Varied text, as a real log looks, so the pages hold more than one
+        // repeated byte.
+        let words = [
+            "build",
+            "error",
+            "warning",
+            "compiling",
+            "finished",
+            "test",
+            "ok",
+        ];
+        for line in 1..=LINES {
+            let word = words[line % words.len()];
+            let pad = "=".repeat(line % 37);
+            terminal.write(format!("{line:06} {word} {pad} {}\r\n", line * 7919).as_bytes());
         }
         assert_ne!(terminal.compression_activity().unwrap(), initial_activity);
+        let filled = crate::platform::process_memory_footprint_bytes();
 
         let mut complete = false;
-        for _ in 0..10_000 {
+        for _ in 0..1_000_000 {
             match terminal.compress_incremental().unwrap() {
-                TerminalCompressionResult::Unsupported => return,
+                TerminalCompressionResult::Unsupported => {
+                    panic!("libghostty reports scrollback compression unsupported on this target")
+                }
                 TerminalCompressionResult::Pending => {}
                 TerminalCompressionResult::Complete => {
                     complete = true;
@@ -3375,14 +3396,24 @@ mod tests {
             }
         }
         assert!(complete, "incremental compression did not converge");
+        let compressed = crate::platform::process_memory_footprint_bytes();
+
+        if let (Some(baseline), Some(filled), Some(compressed)) = (baseline, filled, compressed) {
+            let added = filled.saturating_sub(baseline);
+            let freed = filled.saturating_sub(compressed);
+            assert!(
+                freed >= added / 4,
+                "compression freed {freed} bytes of the {added} the scrollback added"
+            );
+        }
 
         let oldest = terminal.read_text_screen((0, 0), (79, 0), false).unwrap();
-        assert!(oldest.starts_with("00001 "));
+        assert!(oldest.starts_with("000001 "));
         let last_row = terminal.total_rows().unwrap() as u32 - 1;
         let newest = terminal
             .read_text_screen((0, last_row - 1), (79, last_row), false)
             .unwrap();
-        assert!(newest.contains("10000"));
+        assert!(newest.contains(&format!("{LINES:06}")));
     }
 
     #[test]
