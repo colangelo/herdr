@@ -2573,7 +2573,7 @@ previous_workspace = "prefix+shift+l"
     }
 
     #[test]
-    fn user_prefix_silently_displaces_default_prefix_rhs_binding() {
+    fn user_prefix_that_takes_an_actions_only_key_warns() {
         let config: Config = toml::from_str(
             r#"
 [keys]
