@@ -26,6 +26,20 @@ pub struct SessionSnapshot {
     pub sidebar_section_split: Option<f32>,
     #[serde(default)]
     pub collapsed_space_keys: std::collections::HashSet<String>,
+    /// The last client size, (cols, rows), a server with no client attached
+    /// lays panes out at. Optional and additive, so builds on either side of
+    /// it read each other's files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_client_size: Option<(u16, u16)>,
+}
+
+impl SessionSnapshot {
+    /// The stored client size if it is one worth using: a missing, zero or
+    /// below-floor size falls back to the configured headless size.
+    pub fn remembered_client_size(&self) -> Option<(u16, u16)> {
+        self.last_client_size
+            .and_then(crate::app::state::rememberable_client_size)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -223,6 +237,10 @@ struct RawSessionSnapshot {
     sidebar_section_split: Option<f32>,
     #[serde(default)]
     collapsed_space_keys: std::collections::HashSet<String>,
+    /// Read loosely: an unreadable size is dropped, not a reason to lose the
+    /// session.
+    #[serde(default)]
+    last_client_size: Option<serde_json::Value>,
 }
 
 fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> {
@@ -238,6 +256,9 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         sidebar_width: raw.sidebar_width,
         sidebar_section_split: raw.sidebar_section_split,
         collapsed_space_keys: raw.collapsed_space_keys,
+        last_client_size: raw
+            .last_client_size
+            .and_then(|value| serde_json::from_value(value).ok()),
     })
 }
 
@@ -300,6 +321,7 @@ pub fn capture(
     sidebar_width: u16,
     sidebar_section_split: f32,
     collapsed_space_keys: std::collections::HashSet<String>,
+    last_client_size: Option<(u16, u16)>,
 ) -> SessionSnapshot {
     SessionSnapshot {
         version: SNAPSHOT_VERSION,
@@ -312,6 +334,7 @@ pub fn capture(
         sidebar_width: Some(sidebar_width),
         sidebar_section_split: Some(sidebar_section_split),
         collapsed_space_keys,
+        last_client_size,
     }
 }
 
@@ -613,6 +636,7 @@ mod tests {
             state.sidebar_width,
             state.sidebar_section_split,
             state.collapsed_space_keys.clone(),
+            state.last_client_size,
         )
     }
 
@@ -677,6 +701,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            last_client_size: None,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored = parse_snapshot(&json).unwrap();
@@ -770,6 +795,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            last_client_size: None,
             version: SNAPSHOT_VERSION,
         };
 
@@ -838,6 +864,67 @@ mod tests {
 
         assert_eq!(restored.sidebar_width, None);
         assert_eq!(restored.sidebar_section_split, None);
+    }
+
+    #[test]
+    fn snapshot_round_trips_last_client_size() {
+        let mut state = state_with_workspaces(&["one"]);
+        state.last_client_size = Some((310, 56));
+
+        let json = serde_json::to_string(&capture_from_state(&state)).unwrap();
+        let restored = parse_snapshot(&json).unwrap();
+
+        assert_eq!(restored.last_client_size, Some((310, 56)));
+        assert_eq!(restored.remembered_client_size(), Some((310, 56)));
+    }
+
+    #[test]
+    fn snapshot_without_last_client_size_loads() {
+        let json = serde_json::json!({
+            "version": SNAPSHOT_VERSION,
+            "workspaces": [],
+            "active": null,
+            "selected": 0
+        })
+        .to_string();
+
+        let restored = parse_snapshot(&json).unwrap();
+
+        assert_eq!(restored.remembered_client_size(), None);
+        let unset = capture_from_state(&state_with_workspaces(&["one"]));
+        assert!(
+            !serde_json::to_string(&unset)
+                .unwrap()
+                .contains("last_client_size"),
+            "an unset size is left out of the file"
+        );
+    }
+
+    #[test]
+    fn zero_last_client_size_is_ignored() {
+        for stored in [
+            serde_json::json!([0, 0]),
+            serde_json::json!([310, 0]),
+            serde_json::json!([60, 20]),
+            serde_json::json!("wide"),
+            serde_json::json!([70000, 56]),
+        ] {
+            let json = serde_json::json!({
+                "version": SNAPSHOT_VERSION,
+                "workspaces": [],
+                "active": null,
+                "selected": 0,
+                "sidebar_width": 30,
+                "last_client_size": stored,
+            })
+            .to_string();
+
+            let restored = parse_snapshot(&json)
+                .unwrap_or_else(|err| panic!("{stored} must not lose the session: {err}"));
+
+            assert_eq!(restored.remembered_client_size(), None, "{stored}");
+            assert_eq!(restored.sidebar_width, Some(30), "{stored}");
+        }
     }
 
     #[test]
@@ -1459,6 +1546,7 @@ mod tests {
             sidebar_width: Some(26),
             sidebar_section_split: Some(0.5),
             collapsed_space_keys: std::collections::HashSet::new(),
+            last_client_size: None,
         };
 
         let json = serde_json::to_string(&snap).unwrap();

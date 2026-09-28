@@ -340,14 +340,12 @@ pub struct HeadlessServer {
     deferred_alt_screen_reads: Vec<api::ApiRequestMessage>,
     /// Monotonic activity counter used to pick the most recently active client.
     next_activity_stamp: u64,
-    /// Configured virtual terminal size used when no clients are connected.
-    headless_size: (u16, u16),
-    /// The size a live handoff carried from the previous server, used instead
-    /// of `headless_size` while no client is attached. The first client to
-    /// attach ends it.
+    /// The size a live handoff carried from the previous server, used ahead
+    /// of the remembered client size and the configured headless size while
+    /// no client is attached. The first client to attach ends it.
     handoff_client_size: Option<(u16, u16)>,
     /// Shared pane runtime size derived from the foreground client, or the
-    /// configured headless size when no clients are connected.
+    /// no-client size (`AppState::no_client_size`) when none is connected.
     effective_size: (u16, u16),
     /// Flag set when shutdown is initiated.
     shutting_down: bool,
@@ -521,9 +519,10 @@ impl HeadlessServer {
         spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
 
         let server_keybindings = app_keybindings(&app);
-        let headless_size = app.state.headless_size;
-        // No client has attached yet.
-        app.state.detached_pane_size = Some(headless_size);
+        // No client has attached yet: panes restored from the session file
+        // come back at the size the last client had.
+        let no_client_size = app.state.no_client_size(None);
+        app.state.detached_pane_size = Some(no_client_size);
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =
             server_config_diagnostic_summaries(config_diagnostics);
         #[cfg(not(unix))]
@@ -550,9 +549,8 @@ impl HeadlessServer {
             pending_alt_screen_reads: Vec::new(),
             deferred_alt_screen_reads: Vec::new(),
             next_activity_stamp: 1,
-            headless_size,
             handoff_client_size: None,
-            effective_size: headless_size,
+            effective_size: no_client_size,
             shutting_down: false,
             handoff_in_progress: false,
             #[cfg(unix)]
@@ -1197,7 +1195,7 @@ impl HeadlessServer {
 
     /// The size to lay panes out at while no client is attached.
     fn detached_size(&self) -> (u16, u16) {
-        self.handoff_client_size.unwrap_or(self.headless_size)
+        self.app.state.no_client_size(self.handoff_client_size)
     }
 
     fn sync_headless_view_geometry(&mut self) {
@@ -1246,6 +1244,9 @@ impl HeadlessServer {
         let terminal_size = client.terminal_size;
         let outer_terminal_focus = client.outer_terminal_focus;
         self.handoff_client_size = None;
+        self.app
+            .state
+            .remember_foreground_client_size(terminal_size);
         let host_cell_size = if self.app.state.kitty_graphics_enabled && client.cell_size.is_known()
         {
             client.cell_size
@@ -1349,6 +1350,7 @@ impl HeadlessServer {
             self.app.state.sidebar_width,
             self.app.state.sidebar_section_split,
             self.app.state.collapsed_space_keys.clone(),
+            self.app.state.last_client_size,
         );
 
         let mut handoff_entries = Vec::new();
@@ -1627,7 +1629,6 @@ impl HeadlessServer {
         let report = self.app.apply_config_from_disk(notify_success);
         self.app.take_config_reloaded_from_disk();
         self.server_keybindings = app_keybindings(&self.app);
-        self.headless_size = self.app.state.headless_size;
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =
             server_config_diagnostic_summaries(&report.diagnostics);
         self.server_config_diagnostic = server_config_diagnostic;
@@ -5457,7 +5458,11 @@ mod tests {
         app.state.local_sound_playback = false;
         app.local_terminal_notifications = false;
         app.local_input_source_switch = false;
+        test_headless_server_from_app(app)
+    }
 
+    /// Builds a test server around `app` the way `HeadlessServer::new` does.
+    fn test_headless_server_from_app(mut app: crate::app::App) -> HeadlessServer {
         let dir = std::env::temp_dir().join(format!(
             "hh-{}-{}",
             std::process::id(),
@@ -5481,7 +5486,8 @@ mod tests {
         #[cfg(windows)]
         spawn_windows_client_accept_thread(listener, should_quit.clone(), server_event_tx.clone());
         let server_keybindings = app_keybindings(&app);
-        let headless_size = app.state.headless_size;
+        let no_client_size = app.state.no_client_size(None);
+        app.state.detached_pane_size = Some(no_client_size);
 
         HeadlessServer {
             app,
@@ -5505,9 +5511,8 @@ mod tests {
             pending_alt_screen_reads: Vec::new(),
             deferred_alt_screen_reads: Vec::new(),
             next_activity_stamp: 1,
-            headless_size,
             handoff_client_size: None,
-            effective_size: headless_size,
+            effective_size: no_client_size,
             shutting_down: false,
             handoff_in_progress: false,
             #[cfg(unix)]
@@ -5563,13 +5568,13 @@ mod tests {
         let server = test_headless_server();
 
         assert_eq!(
-            server.headless_size,
+            server.app.state.headless_size,
             (
                 crate::config::DEFAULT_HEADLESS_COLS,
                 crate::config::DEFAULT_HEADLESS_ROWS
             )
         );
-        assert_eq!(server.effective_size, server.headless_size);
+        assert_eq!(server.effective_size, server.app.state.headless_size);
     }
 
     #[test]
@@ -5578,7 +5583,7 @@ mod tests {
         server.sync_foreground_client_state();
         assert_eq!(
             server.app.state.detached_pane_size,
-            Some(server.headless_size)
+            Some(server.app.state.headless_size)
         );
 
         let (client_tx, _control_rx, _client_rx) = test_client_writer();
@@ -5635,7 +5640,158 @@ mod tests {
         server.foreground_client_id = None;
         server.sync_foreground_client_state();
 
-        assert_eq!(server.effective_size, server.headless_size);
+        assert_eq!(
+            server.effective_size,
+            (80, 24),
+            "the client that ended the handoff size is now the remembered one"
+        );
+    }
+
+    fn attach_remembering_test_client(
+        server: &mut HeadlessServer,
+        client_id: u64,
+        size: (u16, u16),
+        foreground: bool,
+    ) {
+        let (client_tx, _control_rx, _client_rx) = test_client_writer();
+        server.clients.insert(
+            client_id,
+            ClientConnection::new(
+                size,
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                client_id,
+                RenderEncoding::SemanticFrame,
+                Some(client_tx),
+            ),
+        );
+        if foreground {
+            server.promote_client_to_foreground(client_id);
+        }
+    }
+
+    #[test]
+    fn detach_keeps_the_last_client_size() {
+        let mut server = test_headless_server();
+        attach_remembering_test_client(&mut server, 1, (310, 56), true);
+
+        server.remove_client_and_resize_if_needed(1);
+
+        assert_eq!(server.foreground_client_id, None);
+        assert_eq!(server.effective_size, (310, 56));
+        assert_eq!(server.app.state.detached_pane_size, Some((310, 56)));
+        assert_eq!(server.app.state.estimate_pane_size(), (56, 310));
+        assert!(
+            server.app.state.session_dirty,
+            "a new remembered size is saved"
+        );
+    }
+
+    #[test]
+    fn last_client_resize_wins() {
+        let mut server = test_headless_server();
+        attach_remembering_test_client(&mut server, 1, (200, 50), true);
+        assert!(server.handle_server_event(ServerEvent::ClientResize {
+            client_id: 1,
+            cols: 310,
+            rows: 56,
+            cell_width_px: 0,
+            cell_height_px: 0,
+        }));
+
+        server.remove_client_and_resize_if_needed(1);
+
+        assert_eq!(server.effective_size, (310, 56));
+    }
+
+    #[test]
+    fn tiny_client_is_not_remembered() {
+        let mut server = test_headless_server();
+        attach_remembering_test_client(&mut server, 1, (310, 56), true);
+        server.remove_client_and_resize_if_needed(1);
+        attach_remembering_test_client(&mut server, 2, (60, 20), true);
+        assert_eq!(server.effective_size, (60, 20), "used while attached");
+
+        server.remove_client_and_resize_if_needed(2);
+
+        assert_eq!(server.effective_size, (310, 56));
+    }
+
+    #[test]
+    fn background_client_size_is_ignored() {
+        let mut server = test_headless_server();
+        attach_remembering_test_client(&mut server, 1, (310, 56), true);
+        attach_remembering_test_client(&mut server, 2, (100, 30), false);
+        assert_eq!(server.foreground_client_id, Some(1));
+
+        server.remove_client_and_resize_if_needed(2);
+        server.remove_client_and_resize_if_needed(1);
+
+        assert_eq!(server.effective_size, (310, 56));
+    }
+
+    #[test]
+    fn handoff_size_beats_remembered_size() {
+        let mut server = test_headless_server();
+        server.app.state.last_client_size = Some((310, 56));
+        server.handoff_client_size = Some((200, 60));
+
+        server.sync_foreground_client_state();
+        assert_eq!(server.effective_size, (200, 60));
+
+        attach_remembering_test_client(&mut server, 1, (250, 50), true);
+        server.remove_client_and_resize_if_needed(1);
+        assert_eq!(server.effective_size, (250, 50), "an attach ends it");
+    }
+
+    #[test]
+    fn remember_client_size_false_keeps_todays_behaviour() {
+        let mut server = test_headless_server();
+        server.app.state.remember_client_size = false;
+        server.app.state.last_client_size = Some((300, 50));
+        attach_remembering_test_client(&mut server, 1, (310, 56), true);
+
+        server.remove_client_and_resize_if_needed(1);
+
+        assert_eq!(server.effective_size, server.app.state.headless_size);
+        assert_eq!(
+            server.app.state.last_client_size,
+            Some((300, 50)),
+            "nothing is recorded while it is off"
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_start_spawns_restored_panes_at_remembered_size() {
+        let config = crate::config::Config::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(&config, true, None, api_rx, api::EventHub::default());
+        app.state.local_sound_playback = false;
+        // What `App::new` restores from a session file holding 310x56.
+        app.state.last_client_size = Some((310, 56));
+        // Restored panes are spawned at 80x24 until the first layout.
+        let mut workspace = crate::workspace::Workspace::test_new("restored");
+        let pane_id = workspace.tabs[0].root_pane;
+        workspace.tabs[0].runtimes.insert(
+            pane_id,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b""),
+        );
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = crate::app::Mode::Terminal;
+        let mut server = test_headless_server_from_app(app);
+
+        server.render_and_stream();
+
+        assert_eq!(server.effective_size, (310, 56));
+        let terminal_area = server.app.state.view.terminal_area;
+        assert_eq!(terminal_area.width + terminal_area.x, 310);
+        assert_eq!(
+            server.app.state.workspaces[0].tabs[0].runtimes[&pane_id].current_size(),
+            (terminal_area.height, terminal_area.width.saturating_sub(1)),
+        );
     }
 
     #[tokio::test]

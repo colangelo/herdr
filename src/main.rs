@@ -299,6 +299,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 [server]
 # headless_cols = 120
 # headless_rows = 40
+# Keep the last attached client's size (80x24 or larger) for panes while no
+# client is attached, across restarts too. The headless size above is then
+# only the first-start fallback. false: always use the headless size.
+# remember_client_size = true
 
 # [worktrees]
 # directory = "~/.herdr/worktrees"

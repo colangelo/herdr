@@ -1306,6 +1306,18 @@ pub(crate) const SEARCH_QUERY_MAX_CHARS: usize = 256;
 /// takes one, and it is far past anything a name should be.
 pub(crate) const NAME_INPUT_MAX_CHARS: usize = 512;
 
+/// The smallest client size, (cols, rows), remembered as the no-client size.
+/// A quick look from a phone or a tiny split is used while it is attached,
+/// but must not leave every pane that small once it detaches.
+pub(crate) const REMEMBERED_CLIENT_SIZE_FLOOR: (u16, u16) = (80, 24);
+
+/// `size` if it is big enough to remember, or `None`. A zero or corrupt size
+/// from a session file falls below the floor too.
+pub(crate) fn rememberable_client_size(size: (u16, u16)) -> Option<(u16, u16)> {
+    let (min_cols, min_rows) = REMEMBERED_CLIENT_SIZE_FLOOR;
+    (size.0 >= min_cols && size.1 >= min_rows).then_some(size)
+}
+
 /// The overlay kit's list cursor, re-exported so overlay state can name it
 /// without every module reaching into `crate::ui`.
 pub(crate) use crate::ui::overlay::ListCursor;
@@ -2555,10 +2567,17 @@ pub struct AppState {
     /// Virtual terminal size (columns, rows) used when no client is attached.
     pub(crate) headless_size: (u16, u16),
     /// The size, (cols, rows), a server with no client attached lays new
-    /// panes out at: the configured headless size, or one a live handoff
-    /// carried. `None` while a client is attached, when the view is the
-    /// client's.
+    /// panes out at: one a live handoff carried, the remembered client size,
+    /// or the configured headless size. `None` while a client is attached,
+    /// when the view is the client's.
     pub(crate) detached_pane_size: Option<(u16, u16)>,
+    /// The size, (cols, rows), of the last foreground client that was at least
+    /// [`REMEMBERED_CLIENT_SIZE_FLOOR`]. The session file keeps it, so it
+    /// outlives the client and the server.
+    pub(crate) last_client_size: Option<(u16, u16)>,
+    /// `server.remember_client_size`: whether the last client size is kept
+    /// and used as the no-client size.
+    pub(crate) remember_client_size: bool,
     pub default_sidebar_width: u16,
     pub sidebar_width: u16,
     pub sidebar_min_width: u16,
@@ -3448,6 +3467,31 @@ impl AppState {
         crate::config::terminal_key_matches_combo(key, (self.prefix_code, self.prefix_mods))
     }
 
+    /// The size, (cols, rows), panes are laid out at while no client is
+    /// attached: a size a live handoff carried, then the remembered client
+    /// size, then the configured headless size.
+    pub(crate) fn no_client_size(&self, handoff_client_size: Option<(u16, u16)>) -> (u16, u16) {
+        handoff_client_size
+            .or(self.last_client_size.filter(|_| self.remember_client_size))
+            .unwrap_or(self.headless_size)
+    }
+
+    /// Remembers the foreground client's size, (cols, rows), unless
+    /// remembering is off or the size is below the floor. A change is saved
+    /// with the session.
+    pub(crate) fn remember_foreground_client_size(&mut self, size: (u16, u16)) {
+        if !self.remember_client_size {
+            return;
+        }
+        let Some(size) = rememberable_client_size(size) else {
+            return;
+        };
+        if self.last_client_size != Some(size) {
+            self.last_client_size = Some(size);
+            self.mark_session_dirty();
+        }
+    }
+
     pub fn estimate_pane_size(&self) -> (u16, u16) {
         // With no client attached the view is not what anyone sees, and its
         // first pane can be any size; new panes get the no-client size.
@@ -3651,6 +3695,8 @@ impl AppState {
                 crate::config::DEFAULT_HEADLESS_ROWS,
             ),
             detached_pane_size: None,
+            last_client_size: None,
+            remember_client_size: true,
             default_sidebar_width: 26,
             sidebar_width: 26,
             sidebar_min_width: 18,

@@ -1432,6 +1432,9 @@ pub struct ServerConfig {
     pub headless_cols: u16,
     /// Virtual terminal height used when no client is attached. Default: 40.
     pub headless_rows: u16,
+    /// Use the last attached client's size, not the headless size, while no
+    /// client is attached, and keep it across restarts. Default: true.
+    pub remember_client_size: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1787,6 +1790,7 @@ impl Default for ServerConfig {
         Self {
             headless_cols: crate::config::DEFAULT_HEADLESS_COLS,
             headless_rows: crate::config::DEFAULT_HEADLESS_ROWS,
+            remember_client_size: true,
         }
     }
 }
@@ -2802,15 +2806,19 @@ delay_seconds = {}
             crate::config::DEFAULT_HEADLESS_ROWS
         );
 
+        assert!(default_config.server.remember_client_size);
+
         let config: Config = toml::from_str(
             r#"[server]
 headless_cols = 160
 headless_rows = 50
+remember_client_size = false
 "#,
         )
         .unwrap();
         assert_eq!(config.server.headless_cols, 160);
         assert_eq!(config.server.headless_rows, 50);
+        assert!(!config.server.remember_client_size);
 
         let invalid: Config = toml::from_str(
             r#"[server]
