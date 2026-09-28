@@ -1706,6 +1706,7 @@ impl AppState {
             // The notification list has no detail block: a notification is
             // already one line by construction.
             detail_rows: 0,
+            header_rows: 0,
             vertical: match self.notification_center_position {
                 crate::config::NotificationCenterPositionConfig::TopRight => {
                     crate::ui::overlay::VerticalAnchor::Below
@@ -1812,6 +1813,7 @@ impl AppState {
             // dead end.
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
+            header_rows: 0,
             vertical: crate::ui::overlay::VerticalAnchor::InsideTop,
         };
         // A row shows one line, so a todo carrying several says so with a `⏎`

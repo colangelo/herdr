@@ -10,9 +10,18 @@ use ratatui::layout::Rect;
 
 use crate::ui::widgets::footer_split;
 
-/// Where the panel's top edge comes from. Horizontal placement is not a choice:
-/// both panels right-align to their anchor, so the resolver does that and this
-/// enum stays about the axis that actually varies.
+/// The widest a centred list dialog grows for its content: the navigator, the
+/// move picker and the todo board. Past this a row is read across too much
+/// empty screen, and the footer's buttons end up far from the rows they act on.
+pub(crate) const LIST_DIALOG_MAX_WIDTH: u16 = 120;
+
+/// The fewest rows a detail box is drawn in: its two borders and one row of
+/// text. Less than that is a lone rule, not a box.
+pub(crate) const DETAIL_MIN_ROWS: u16 = 3;
+
+/// Where the panel's top edge comes from. Horizontal placement follows from
+/// it: an anchored panel right-aligns to its anchor, and a centred one is
+/// centred on the screen in both directions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerticalAnchor {
     /// Hangs under the anchor's bottom edge — a dropdown from a tab bar.
@@ -24,6 +33,9 @@ pub(crate) enum VerticalAnchor {
     /// stays visible underneath it (the global-launcher idiom). An empty rect
     /// means there is nothing to clear, and the panel sits flush at the bottom.
     Above(Rect),
+    /// Centred on the screen, for a dialog that belongs to the session rather
+    /// than to anything on it. The anchor is ignored.
+    Centered,
 }
 
 /// What a caller knows about its own panel. Everything here is either constant
@@ -50,11 +62,15 @@ pub(crate) struct AnchoredPanelSpec {
     /// Rows reserved below the list, normally [`crate::ui::FOOTER_ROWS`]. Zero
     /// for a panel with no footer to show.
     pub footer_rows: u16,
-    /// Rows reserved between the list and the footer for a detail block, rule
-    /// row included. Zero for a panel that shows no detail, which is every
-    /// panel whose selection has nothing more to say — the block appears only
+    /// Rows reserved between the list and the footer for a detail box, its
+    /// borders included. Zero for a panel that shows no detail, which is
+    /// every panel whose rows have nothing more to say — the box appears only
     /// when it has something to hold.
     pub detail_rows: u16,
+    /// Rows above the list for the panel's own header — a title, a search
+    /// row, the blank row under them. Zero for a panel whose list starts at
+    /// its top border.
+    pub header_rows: u16,
     /// Where the panel's top edge comes from.
     pub vertical: VerticalAnchor,
 }
@@ -71,9 +87,11 @@ pub(crate) struct PanelGeometry {
     /// The footer's button row, absent when there is no room for the whole
     /// footer block or nothing to put in it.
     pub footer_row: Option<Rect>,
-    /// The detail block between list and footer, absent when the panel asked
-    /// for none or there was no room. Its first row is a rule.
+    /// The detail box between list and footer, borders included, absent when
+    /// the panel asked for none or fewer than [`DETAIL_MIN_ROWS`] were free.
     pub detail: Option<Rect>,
+    /// The header rows above the list; empty when the panel asked for none.
+    pub header: Rect,
 }
 
 impl AnchoredPanelSpec {
@@ -96,10 +114,15 @@ impl AnchoredPanelSpec {
 
         let width = self.resolved_width();
         let rows = self.rows.max(1).min(self.max_rows);
-        let height = (rows + 2 + self.footer_rows + self.detail_rows).min(screen.height.max(1));
+        let height = (self.header_rows + rows + 2 + self.footer_rows + self.detail_rows)
+            .min(screen.height.max(1));
 
-        let right = self.anchor.x.saturating_add(self.anchor.width);
-        let x = right.saturating_sub(width).max(screen.x);
+        let x = if self.vertical == VerticalAnchor::Centered {
+            screen.x + screen.width.saturating_sub(width) / 2
+        } else {
+            let right = self.anchor.x.saturating_add(self.anchor.width);
+            right.saturating_sub(width).max(screen.x)
+        };
 
         // The lowest top edge that still leaves room for the whole panel.
         let bottom_y = screen.y + screen.height.saturating_sub(height);
@@ -108,6 +131,7 @@ impl AnchoredPanelSpec {
             VerticalAnchor::InsideTop => self.anchor.y.saturating_add(1),
             VerticalAnchor::Above(over) if over.width > 0 => over.y.saturating_sub(height),
             VerticalAnchor::Above(_) => bottom_y,
+            VerticalAnchor::Centered => screen.y + screen.height.saturating_sub(height) / 2,
         };
         let y = top.min(bottom_y).max(screen.y);
 
@@ -126,12 +150,23 @@ impl AnchoredPanelSpec {
         let footer_row =
             has_footer.then(|| Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1));
 
-        // The detail block is carved off the bottom of the list, directly
-        // above the footer. It yields to the list rather than the other way
-        // round: a panel squeezed to nothing shows its todos, not a detail of
-        // one of them.
+        // The header is carved off the top of the list, so what is left is
+        // exactly the rows the list scrolls in.
+        let header_rows = self.header_rows.min(list.height);
+        let header = Rect::new(list.x, list.y, list.width, header_rows);
+        let list = Rect::new(
+            list.x,
+            list.y + header_rows,
+            list.width,
+            list.height - header_rows,
+        );
+
+        // The detail box is carved off the bottom of the list, directly above
+        // the footer. It yields to the list rather than the other way round: a
+        // panel squeezed to nothing shows its todos, not a detail of one of
+        // them, and a box with no room for a row of text is not drawn at all.
         let detail_rows = self.detail_rows.min(list.height.saturating_sub(1));
-        let (list, detail) = if detail_rows > 0 {
+        let (list, detail) = if detail_rows >= DETAIL_MIN_ROWS {
             (
                 Rect::new(list.x, list.y, list.width, list.height - detail_rows),
                 Some(Rect::new(
@@ -151,6 +186,7 @@ impl AnchoredPanelSpec {
             list,
             footer_row,
             detail,
+            header,
         })
     }
 }
@@ -176,8 +212,85 @@ mod tests {
             max_rows: 12,
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
+            header_rows: 0,
             vertical,
         }
+    }
+
+    #[test]
+    fn centred_panel_is_measured_bounded_and_centred() {
+        let screen = Rect::new(0, 0, 310, 56);
+        let centred = |content_width: u16, screen: Rect| AnchoredPanelSpec {
+            anchor: Rect::default(),
+            screen,
+            content_width,
+            width_bounds: (64, LIST_DIALOG_MAX_WIDTH),
+            rows: 10,
+            max_rows: 40,
+            footer_rows: crate::ui::FOOTER_ROWS,
+            detail_rows: 0,
+            header_rows: 3,
+            vertical: VerticalAnchor::Centered,
+        };
+
+        let small = centred(40, screen).resolve().expect("resolves");
+        assert_eq!(small.outer.width, 64, "the floor");
+        assert_eq!(small.outer.x, (310 - 64) / 2, "centred across");
+        assert_eq!(small.outer.y, (56 - small.outer.height) / 2, "centred down");
+        assert_eq!(small.outer.height, 3 + 10 + 2 + crate::ui::FOOTER_ROWS);
+
+        let measured = centred(90, screen).resolve().expect("resolves");
+        assert_eq!(measured.outer.width, 90, "its own content");
+
+        let wide = centred(272, screen).resolve().expect("resolves");
+        assert_eq!(wide.outer.width, LIST_DIALOG_MAX_WIDTH, "the shared cap");
+        assert_eq!(wide.outer.x, (310 - 120) / 2);
+
+        let narrow_screen = Rect::new(0, 0, 50, 20);
+        let cramped = centred(90, narrow_screen).resolve().expect("resolves");
+        assert_eq!(cramped.outer.width, 50, "never wider than the screen");
+        assert_eq!(cramped.outer.x, 0);
+
+        // The header sits above the list and the list starts under it.
+        assert_eq!(small.header.height, 3);
+        assert_eq!(small.header.y, small.inner.y);
+        assert_eq!(small.list.y, small.inner.y + 3);
+        assert_eq!(small.list.height, 10);
+    }
+
+    #[test]
+    fn detail_is_omitted_under_three_rows() {
+        let with_detail = |detail_rows: u16, screen_height: u16| AnchoredPanelSpec {
+            detail_rows,
+            screen: Rect::new(0, 0, 80, screen_height),
+            rows: 4,
+            ..spec(VerticalAnchor::Below)
+        };
+
+        let roomy = with_detail(5, 40).resolve().expect("resolves");
+        let detail = roomy.detail.expect("room for the box");
+        assert_eq!(detail.height, 5);
+        assert_eq!(detail.y, roomy.list.y + roomy.list.height);
+
+        // Squeezed until only two rows could go to the detail: no lone rule.
+        let squeezed = with_detail(5, 2 + 3 + crate::ui::FOOTER_ROWS)
+            .resolve()
+            .expect("resolves");
+        assert!(squeezed.detail.is_none(), "{squeezed:?}");
+        assert_eq!(squeezed.list.height, 3, "the list keeps the rows");
+
+        // Exactly three rows is a box.
+        let just = with_detail(5, 2 + 4 + crate::ui::FOOTER_ROWS)
+            .resolve()
+            .expect("resolves");
+        assert_eq!(just.detail.map(|detail| detail.height), Some(3));
+
+        // Asking for fewer than three is asking for none.
+        assert!(with_detail(2, 40)
+            .resolve()
+            .expect("resolves")
+            .detail
+            .is_none());
     }
 
     #[test]
