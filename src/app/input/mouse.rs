@@ -457,8 +457,12 @@ impl AppState {
                         Some(ButtonRowHit::NearMiss) => return None,
                         None => {}
                     }
-                    self.close_pane_todos();
-                    leave_modal(self);
+                    // Inside the panel but off its rows and buttons: inert.
+                    // Only a click outside it dismisses.
+                    if !self.pane_todo_panel_covers(mouse.column, mouse.row) {
+                        self.close_pane_todos();
+                        leave_modal(self);
+                    }
                 }
                 _ => {}
             }
@@ -4604,6 +4608,51 @@ mod tests {
             app.state.pane_move_target_picker().is_none(),
             "a click outside closes"
         );
+    }
+
+    #[test]
+    fn inside_click_off_rows_does_not_close_the_todo_panel() {
+        let mut app = app_for_pane_todo_indicator();
+        let pane_id = app.state.view.pane_infos[0].id;
+        let terminal_id = app
+            .state
+            .workspaces
+            .iter()
+            .find_map(|ws| ws.pane_state(pane_id))
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal")
+            .add_todo(
+                "one todo",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .expect("todo added");
+        app.state.open_pane_todos(pane_id);
+        let rect = app.state.pane_todo_panel_rect().expect("panel");
+        let (list, _) = app.state.pane_todo_panel_list_window().expect("list");
+        // The blank row between the list and the buttons: inside, on nothing.
+        let off_rows = (list.x + 2, list.y + list.height);
+        assert!(off_rows.1 < rect.y + rect.height - 2);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            off_rows.0,
+            off_rows.1,
+        ));
+        assert!(app.state.pane_todos().is_some(), "inert inside");
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            rect.x.saturating_sub(1),
+            rect.y + 1,
+        ));
+        assert!(app.state.pane_todos().is_none(), "a click outside closes");
     }
 
     #[test]
