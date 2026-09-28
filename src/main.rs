@@ -487,7 +487,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # blocked = "×"
 # unknown = "·"
 # An agent parked at its prompt while work it launched keeps running (a
-# background shell, a background agent, an MCP task) pulses slowly between
+# background shell, a background agent, an MCP task) turns slowly between
 # these two instead of spinning.
 # background = "■"
 # background_alt = "◆"
