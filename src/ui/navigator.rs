@@ -242,7 +242,13 @@ fn render_row(
         .flatten()
         .map(|id| format!("{id} "))
         .unwrap_or_default();
-    let meta_width = status_width(nav.status_width, rect.width);
+    let meta_width = status_width(
+        nav.status_width,
+        nav.content_width
+            .saturating_sub(nav.status_width)
+            .saturating_sub(2),
+        rect.width,
+    );
     let left_budget = rect
         .width
         .saturating_sub(meta_width)
@@ -459,10 +465,11 @@ fn status_measure(meta: &str) -> usize {
 }
 
 /// The status column a row of `width` draws: the measured one, unless the
-/// row is too narrow for it and its label floor, in which case the status
-/// gives way only after the labels have.
-fn status_width(measured: u16, width: u16) -> u16 {
-    measured.min(width.saturating_sub(NAVIGATOR_LABEL_FLOOR))
+/// row is too narrow for it and its labels, in which case the status gives way
+/// only after the labels have come down to their floor. Labels narrower than
+/// the floor keep only what they measured.
+fn status_width(measured: u16, label: u16, width: u16) -> u16 {
+    measured.min(width.saturating_sub(NAVIGATOR_LABEL_FLOOR.min(label)))
 }
 
 fn render_detail(
@@ -882,6 +889,15 @@ mod tests {
             rows.iter().any(|row| row.contains('…')),
             "the long space name gave way: {rows:#?}"
         );
+    }
+
+    /// #116: labels narrower than the floor never needed all of it, so a box
+    /// sized to labels + status must draw the status whole.
+    #[test]
+    fn a_status_is_not_cut_for_a_label_floor_the_labels_do_not_need() {
+        assert_eq!(status_width(38, 20, 20 + 38), 38);
+        // Labels wider than the floor keep the floor when the box is short.
+        assert_eq!(status_width(38, 40, 50), 50 - NAVIGATOR_LABEL_FLOOR);
     }
 
     #[test]

@@ -766,8 +766,7 @@ pub(super) fn render_pane_move_target_picker_overlay(
             Rect::new(list.x, list.y, list.width, 1),
         );
     }
-    let status_width = pane_move_target_status_width(&picker.all_items)
-        .min(list.width.saturating_sub(PANE_MOVE_TARGET_LABEL_FLOOR));
+    let status_width = pane_move_target_status_draw_width(&picker.all_items, list.width);
     let (start, visible) = picker.list.window(list, picker.items.len());
     for (visible_idx, item) in picker.items.iter().skip(start).take(visible).enumerate() {
         let item_idx = start + visible_idx;
@@ -817,6 +816,22 @@ pub(super) fn render_pane_move_target_picker_overlay(
             render_action_button(frame, placed.rect, placed.hint, placed.label, style);
         }
     }
+}
+
+/// The status column a list of `list_width` draws for `items`: the measured
+/// one, unless the list is narrower than labels and status need. The label
+/// floor protects labels only as far as they measured.
+pub(crate) fn pane_move_target_status_draw_width(
+    items: &[crate::app::state::PaneMoveTargetItem],
+    list_width: u16,
+) -> u16 {
+    let labels = items
+        .iter()
+        .map(pane_move_target_left_width)
+        .max()
+        .unwrap_or(0);
+    pane_move_target_status_width(items)
+        .min(list_width.saturating_sub(PANE_MOVE_TARGET_LABEL_FLOOR.min(labels)))
 }
 
 /// What the label side of a row keeps before its status column is cut: the
@@ -2482,16 +2497,16 @@ mod tests {
                 "│ / search destinations                     7 destinations │",
                 "│──────────────────────────────────────────────────────────│",
                 "│   ○ herdr (2)                                            │",
-                "│ ◆ ├── ○ tab 1 · cc   you are here                        │",
+                "│ ◆ ├── ○ tab 1 · cc  you are here                         │",
                 "│   └── + new tab                                          │",
                 "│                                                          │",
                 "│   ○ macOS (4)                                            │",
-                "│   ├── ○ tab 1        macos-relay-2, macos-relay-3, +1    │",
-                "│   ├── ○ tab 2        keyboard-shortcuts                  │",
+                "│   ├── ○ tab 1       macos-relay-2, macos-relay-3, +1     │",
+                "│   ├── ○ tab 2       keyboard-shortcuts                   │",
                 "│   └── + new tab                                          │",
                 "│                                                          │",
                 "│   ○ CONTEXT (1)                                          │",
-                "│   ├── ○ tab 1        context-relay                       │",
+                "│   ├── ○ tab 1       context-relay                        │",
                 "│   └── + new tab                                          │",
                 "│                                                          │",
                 "│   + new space                                            │",
@@ -2516,8 +2531,8 @@ mod tests {
                 "│ / mac                                     7 destinations │",
                 "│──────────────────────────────────────────────────────────│",
                 "│   ○ macOS (4)                                            │",
-                "│   ├── ○ tab 1        macos-relay-2, macos-relay-3, +1    │",
-                "│   ├── ○ tab 2        keyboard-shortcuts                  │",
+                "│   ├── ○ tab 1       macos-relay-2, macos-relay-3, +1     │",
+                "│   ├── ○ tab 2       keyboard-shortcuts                   │",
                 "│   └── + new tab                                          │",
                 "│                                                          │",
                 "│                                                          │",
@@ -2549,20 +2564,20 @@ mod tests {
                 "│ / search destinations                    15 destinations │",
                 "│──────────────────────────────────────────────────────────│",
                 "│   ○ herdr (2)                                           ▕│",
-                "│ ◆ ├── ○ tab 1 · cc   you are here                       ▕│",
+                "│ ◆ ├── ○ tab 1 · cc  you are here                        ▕│",
                 "│   └── + new tab                                         ▕│",
                 "│                                                         ▕│",
                 "│   ○ macOS (4)                                           ▕│",
-                "│   ├── ○ tab 1        macos-relay-2, macos-relay-3, +1   ▕│",
-                "│   ├── ○ tab 2        keyboard-shortcuts                 ▕│",
+                "│   ├── ○ tab 1       macos-relay-2, macos-relay-3, +1    ▕│",
+                "│   ├── ○ tab 2       keyboard-shortcuts                  ▕│",
                 "│   └── + new tab                                         ▕│",
                 "│                                                         ▕│",
                 "│   ○ CONTEXT (1)                                         ▕│",
-                "│   ├── ○ tab 1        context-relay                      ▕│",
+                "│   ├── ○ tab 1       context-relay                       ▕│",
                 "│   └── + new tab                                         ▕│",
                 "│                                                         ▕│",
                 "│   · space-0 (1)                                         ▕│",
-                "│   ├── · tab 1        pane 1                             ▕│",
+                "│   ├── · tab 1       pane 1                              ▕│",
                 "│   └── + new tab                                         ▕│",
                 "│──────────────────────────────────────────────────────────│",
                 "│ a new tab in herdr                                       │",
@@ -2722,6 +2737,40 @@ mod tests {
             super::pane_move_target_content_width(&long),
             left + super::PANE_MOVE_TARGET_STATUS_MAX_COLUMNS + 2 + 2,
             "the status column stops at its cap"
+        );
+    }
+
+    /// #116: the live proof showed `clipper-relay-3, +2` where
+    /// `clipper-relay-3, clipper-astra-2, +1` fits: a label floor wider than
+    /// the picker's labels cut the status column the box was sized for.
+    #[test]
+    fn move_picker_status_is_not_cut_for_a_label_floor_the_labels_do_not_need() {
+        use crate::app::state::{
+            PaneMoveTabFacts, PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem,
+        };
+        let items = vec![
+            PaneMoveTargetItem::heading("clipper"),
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some("w5".into()),
+                number: 1,
+                label: String::new(),
+                target: PaneMoveTarget::Tab {
+                    tab_id: "w5:t1".into(),
+                },
+                facts: PaneMoveTabFacts {
+                    pane_names: ["clipper-relay-3", "clipper-astra-2", "pane 7", "x"]
+                        .iter()
+                        .map(|name| name.to_string())
+                        .collect(),
+                    ..Default::default()
+                },
+            }),
+        ];
+        let list_width = super::pane_move_target_content_width(&items) - 2;
+
+        assert_eq!(
+            super::pane_move_target_status_draw_width(&items, list_width),
+            super::PANE_MOVE_TARGET_STATUS_MAX_COLUMNS + 2,
         );
     }
 
