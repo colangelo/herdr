@@ -47,6 +47,15 @@ pub(crate) fn middle_elide(text: &str, max_width: usize) -> String {
 
 /// Compact "time ago" label for notification timestamps: "now", "45s",
 /// "12m", "3h", "9d". Saturates safely when the clock moves backwards.
+/// `1 pane`, `3 panes`.
+pub(crate) fn pane_count(count: usize) -> String {
+    if count == 1 {
+        "1 pane".to_string()
+    } else {
+        format!("{count} panes")
+    }
+}
+
 pub(crate) fn relative_time_label(now_unix: u64, then_unix: u64) -> String {
     let seconds = now_unix.saturating_sub(then_unix);
     if seconds < 10 {

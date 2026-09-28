@@ -1152,8 +1152,11 @@ pub(crate) struct NavigatorState {
     pub selected: usize,
     pub scroll: usize,
     /// The width its rows asked for when it opened, border included; see
-    /// `crate::ui::navigator_content_width`.
+    /// `crate::ui::navigator_columns`.
     pub content_width: u16,
+    /// The status column its rows measured when it opened, padding included;
+    /// the renderer draws this width, not a guess from the box width.
+    pub status_width: u16,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
     /// Consulted at activation only, never threaded through rendering of the

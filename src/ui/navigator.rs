@@ -242,7 +242,7 @@ fn render_row(
         .flatten()
         .map(|id| format!("{id} "))
         .unwrap_or_default();
-    let meta_width = metadata_width(rect.width);
+    let meta_width = status_width(nav.status_width, rect.width);
     let left_budget = rect
         .width
         .saturating_sub(meta_width)
@@ -365,19 +365,48 @@ fn render_navigator_scrollbar(app: &AppState, line_count: usize, frame: &mut Fra
 /// would cut off the one that says how to leave.
 pub(crate) const NAVIGATOR_MIN_WIDTH: u16 = 73;
 
-/// The metadata column a navigator wide enough for it gives every row.
-const NAVIGATOR_META_COLUMNS: usize = 28;
+/// The widest the status column may measure, its padding included, so one
+/// very long agent name cannot eat the box.
+pub(crate) const NAVIGATOR_STATUS_MAX_COLUMNS: u16 = 40;
 
-/// The width the navigator's rows want, border included: the widest row's
-/// gutter, tree prefix, status icon, identifier and label, plus the metadata
-/// column. The same parts [`render_row`] budgets, so a row measured to fit is
-/// drawn whole.
+/// What the label side of a row keeps before the status column is cut: the
+/// gutter, the deepest tree prefix, the icon and 16 columns of label.
+const NAVIGATOR_LABEL_FLOOR: u16 = 3 + 6 + 3 + 16;
+
+/// The longest state word a status can end in. A status is measured as if it
+/// ended in this one, so a pane turning from `idle` to `working` while the
+/// navigator is open still fits the column it was given.
+const NAVIGATOR_LONGEST_STATE_WORD: usize = 7;
+
+/// The two columns the navigator's rows ask for, measured once when it opens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NavigatorColumns {
+    /// The widest row's gutter, tree prefix, icon, identifier and label, with
+    /// a spare column.
+    pub label: u16,
+    /// The widest status, a space before it and a spare after; 0 when no row
+    /// has one.
+    pub status: u16,
+}
+
+impl NavigatorColumns {
+    /// The box these columns want, border included.
+    pub(crate) fn content_width(self) -> u16 {
+        self.label.saturating_add(self.status).saturating_add(2)
+    }
+}
+
+/// Measure the navigator's rows: the same parts [`render_row`] draws, so a
+/// row measured to fit is drawn whole.
 ///
-/// Measured over the rows as they are when the navigator opens — every space
-/// expanded, nothing filtered — and kept, so the box does not change width
+/// Measured over the rows as they are when the navigator opens (every space
+/// expanded, nothing filtered) and kept, so the box does not change width
 /// while a query narrows the list or a space is folded.
-pub(crate) fn navigator_content_width(rows: &[NavigatorRow], purpose: NavigatorPurpose) -> u16 {
-    let widest = (0..rows.len())
+pub(crate) fn navigator_columns(
+    rows: &[NavigatorRow],
+    purpose: NavigatorPurpose,
+) -> NavigatorColumns {
+    let label = (0..rows.len())
         .map(|idx| {
             let row = &rows[idx];
             let public_id = if purpose == NavigatorPurpose::PaneTodoLink {
@@ -397,19 +426,43 @@ pub(crate) fn navigator_content_width(rows: &[NavigatorRow], purpose: NavigatorP
         })
         .max()
         .unwrap_or(0);
-    (widest + NAVIGATOR_META_COLUMNS + 2).min(usize::from(u16::MAX)) as u16
+    let status = rows
+        .iter()
+        .map(|row| status_measure(&row.meta))
+        .max()
+        .unwrap_or(0);
+    let status = if status == 0 {
+        0
+    } else {
+        (status + 2).min(usize::from(NAVIGATOR_STATUS_MAX_COLUMNS))
+    };
+    NavigatorColumns {
+        label: label.min(usize::from(u16::MAX)) as u16,
+        status: status as u16,
+    }
 }
 
-fn metadata_width(width: u16) -> u16 {
-    if width >= 90 {
-        NAVIGATOR_META_COLUMNS as u16
-    } else if width >= 68 {
-        20
-    } else if width >= 52 {
-        14
-    } else {
-        0
-    }
+/// A status's width with its state word counted at the longest a state word
+/// can be. Statuses that do not end in a built-in state word are measured as
+/// they are.
+fn status_measure(meta: &str) -> usize {
+    const STATE_WORDS: [&str; 5] = ["blocked", "working", "done", "idle", "unknown"];
+    let width = display_width_u16(meta) as usize;
+    STATE_WORDS
+        .iter()
+        .find(|word| {
+            meta.strip_suffix(**word)
+                .is_some_and(|rest| rest.ends_with(" · "))
+        })
+        .map(|word| width - word.len() + NAVIGATOR_LONGEST_STATE_WORD)
+        .unwrap_or(width)
+}
+
+/// The status column a row of `width` draws: the measured one, unless the
+/// row is too narrow for it and its label floor, in which case the status
+/// gives way only after the labels have.
+fn status_width(measured: u16, width: u16) -> u16 {
+    measured.min(width.saturating_sub(NAVIGATOR_LABEL_FLOOR))
 }
 
 fn render_detail(
@@ -466,7 +519,7 @@ fn workspace_detail(
     };
     let label = ws.display_name_from(&app.terminals, terminal_runtimes);
     let pane_count = ws.tabs.iter().map(|tab| tab.panes.len()).sum::<usize>();
-    let mut parts = vec![label, format!("{pane_count} panes")];
+    let mut parts = vec![label, crate::ui::text::pane_count(pane_count)];
     if !rowless_workspace_activity(app, terminal_runtimes, ws_idx).is_empty() {
         parts.push(rowless_workspace_activity(app, terminal_runtimes, ws_idx));
     }
@@ -492,7 +545,7 @@ fn tab_detail(
             ws.tab_display_name(tab_idx)
                 .unwrap_or_else(|| (tab_idx + 1).to_string())
         ),
-        format!("{} panes", tab.panes.len()),
+        crate::ui::text::pane_count(tab.panes.len()),
     ];
     let rows = app.navigator_rows_from(terminal_runtimes);
     if let Some(meta) = rows
@@ -751,6 +804,92 @@ mod tests {
         assert_eq!(popup.x, (310 - NAVIGATOR_MIN_WIDTH) / 2);
     }
 
+    fn name_the_pane_agent(app: &mut AppState, name: &str) {
+        let terminal_id = app.workspaces[0]
+            .pane_state(app.workspaces[0].tabs[0].root_pane)
+            .expect("pane")
+            .attached_terminal_id
+            .clone();
+        let terminal = app.terminals.get_mut(&terminal_id).expect("terminal");
+        terminal.agent_name = Some(name.into());
+        terminal.state = AgentState::Idle;
+    }
+
+    fn navigator_rows_text(app: &AppState, width: u16, height: u16) -> Vec<String> {
+        let buffer = crate::ui::test_support::draw_sized(app, width, height);
+        crate::ui::test_support::rect_rows(&buffer, app.navigator_popup_rect())
+    }
+
+    /// #109: the box was sized for a 28-column status column and then drawn
+    /// with 20, so `keyboard-shortcuts · idle` came out `keyboard-shortcut…`.
+    #[test]
+    fn navigator_draws_the_status_column_it_measured() {
+        let mut app = crate::ui::test_support::app_with_one_pane("macOS");
+        name_the_pane_agent(&mut app, "keyboard-shortcuts");
+        crate::ui::test_support::layout_sized(&mut app, 310, 56);
+        app.open_navigator();
+        crate::ui::test_support::layout_sized(&mut app, 310, 56);
+
+        let rows = navigator_rows_text(&app, 310, 56);
+
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("keyboard-shortcuts · idle")),
+            "the status is drawn whole: {rows:#?}"
+        );
+        assert!(!rows.iter().any(|row| row.contains('…')), "{rows:#?}");
+    }
+
+    #[test]
+    fn navigator_status_width_counts_the_longest_state_word() {
+        let mut idle = row(1, false);
+        idle.meta = "claude · idle".into();
+        let mut shell = row(1, false);
+        shell.meta = "shell".into();
+
+        let columns = navigator_columns(&[idle, shell], NavigatorPurpose::Goto);
+
+        // `claude · working` is 16; a space before it and one spare after.
+        assert_eq!(columns.status, 16 + 2);
+    }
+
+    #[test]
+    fn navigator_status_width_is_capped_at_40() {
+        let mut long = row(1, false);
+        long.meta = format!("{} · idle", "x".repeat(80));
+
+        let columns = navigator_columns(&[long], NavigatorPurpose::Goto);
+
+        assert_eq!(columns.status, NAVIGATOR_STATUS_MAX_COLUMNS);
+    }
+
+    #[test]
+    fn navigator_cuts_labels_before_statuses_in_a_small_window() {
+        let mut app = crate::ui::test_support::app_with_one_pane(&"a-long-space-name-".repeat(4));
+        name_the_pane_agent(&mut app, "keyboard-shortcuts");
+        crate::ui::test_support::layout_sized(&mut app, 60, 30);
+        app.open_navigator();
+        crate::ui::test_support::layout_sized(&mut app, 60, 30);
+
+        let rows = navigator_rows_text(&app, 60, 30);
+
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("keyboard-shortcuts · idle")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains('…')),
+            "the long space name gave way: {rows:#?}"
+        );
+    }
+
+    #[test]
+    fn a_count_of_one_pane_is_singular() {
+        assert_eq!(crate::ui::text::pane_count(1), "1 pane");
+        assert_eq!(crate::ui::text::pane_count(3), "3 panes");
+    }
+
     #[test]
     fn snapshot_navigator() {
         crate::ui::test_support::overlay_snapshot_of(|app| app.open_navigator()).assert(
@@ -760,7 +899,7 @@ mod tests {
                 "│ / search panes                                                 1 pane │",
                 "│───────────────────────────────────────────────────────────────────────│",
                 "│ ◆ ▾ · overlay (1)                                                     │",
-                "│ ◆ └── · pane 1                                     shell              │",
+                "│ ◆ └── · pane 1                                                  shell │",
                 "│                                                                       │",
                 "│                                                                       │",
                 "│                                                                       │",

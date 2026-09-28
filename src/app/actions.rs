@@ -376,17 +376,18 @@ impl AppState {
     }
 
     /// Measure the open navigator's rows for its width, once: see
-    /// `crate::ui::navigator_content_width`.
+    /// `crate::ui::navigator_columns`.
     fn measure_navigator_width_from(
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        let width = crate::ui::navigator_content_width(
+        let columns = crate::ui::navigator_columns(
             &self.navigator_rows_from(terminal_runtimes),
             self.navigator_purpose(),
         );
         if let Some(navigator) = self.navigator_mut() {
-            navigator.content_width = width;
+            navigator.content_width = columns.content_width();
+            navigator.status_width = columns.status;
         }
     }
 
@@ -575,9 +576,9 @@ impl AppState {
         let activity = tab_activity_summary(tab, &self.terminals);
         let pane_count = tab.panes.len();
         let meta = if activity.is_empty() {
-            format!("{pane_count} panes")
+            crate::ui::text::pane_count(pane_count)
         } else {
-            format!("{pane_count} panes · {activity}")
+            format!("{} · {activity}", crate::ui::text::pane_count(pane_count))
         };
         let search_text = format!("{label} {meta}").to_lowercase();
         NavigatorRow {
