@@ -92,7 +92,7 @@ fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel) {
     }
 }
 
-/// ` PANES  window 310x56 · panes 281x55  1-3 focus  any key close`: the
+/// ` PANES  window 310x56 · panes 281x55  1-3 focus  any key close  VERSION  0.8.2-…`: the
 /// window is the whole frame, the panes figure the area the tab's panes
 /// share.
 fn render_summary_bar(app: &AppState, frame: &mut Frame, area: Rect, labels: &[DisplayPaneLabel]) {
@@ -135,6 +135,23 @@ fn render_summary_bar(app: &AppState, frame: &mut Frame, area: Rect, labels: &[D
         area.width,
         1,
     );
+
+    // The build this session runs. The server draws this bar, so after a
+    // live handoff it names the server's build even if an older client is
+    // still attached. It goes first when the bar is too narrow, so the key
+    // hints always survive.
+    let version = crate::build_info::version();
+    let version_spans = [
+        Span::raw("  "),
+        Span::styled(" VERSION ", mode_style),
+        Span::raw(" "),
+        Span::styled(version, value),
+    ];
+    let used: usize = spans.iter().map(|span| span.width()).sum();
+    let wanted: usize = version_spans.iter().map(|span| span.width()).sum();
+    if used + wanted <= usize::from(bar.width) {
+        spans.extend(version_spans);
+    }
     render_bottom_bar(frame, bar, Line::from(spans), p.panel_bg);
 }
 
@@ -216,6 +233,56 @@ mod tests {
             "{text:?} is on screen:\n{}",
             rows.join("\n")
         );
+    }
+
+    fn mode_bar_row(app: &AppState, width: u16, height: u16) -> (String, ratatui::buffer::Buffer) {
+        let buffer = draw_sized(app, width, height);
+        let row =
+            crate::ui::test_support::row_text_trimmed(&buffer, Rect::new(0, height - 1, width, 1));
+        (row, buffer)
+    }
+
+    /// #117: after `any key close` the bar names the build it runs: a
+    /// `VERSION` chip styled like `PANES`, then the full version string. The
+    /// server draws this bar, so it is the server's version even when a live
+    /// handoff left an older client attached.
+    #[test]
+    fn the_mode_bar_ends_with_the_version_chip() {
+        let mut app = two_pane_app();
+        app.open_display_panes(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+
+        let (row, buffer) = mode_bar_row(&app, WIDTH, HEIGHT);
+        let version = crate::build_info::version();
+        assert!(
+            row.ends_with(&format!("any key close   VERSION  {version}")),
+            "{row:?}"
+        );
+
+        let col = |text: &str| row.find(text).expect("on the bar") as u16;
+        let chip = buffer[(col("VERSION"), HEIGHT - 1)].style();
+        let panes = buffer[(col("PANES"), HEIGHT - 1)].style();
+        assert_eq!(chip, panes, "the VERSION chip is styled like PANES");
+        assert_eq!(
+            buffer[(col(&version), HEIGHT - 1)].style().fg,
+            Some(app.palette.text),
+            "the version is in the normal colour"
+        );
+    }
+
+    /// A bar too narrow for everything drops the version first and keeps the
+    /// key hints.
+    #[test]
+    fn a_narrow_mode_bar_drops_the_version_before_the_key_hints() {
+        let width = 90;
+        let mut app = two_pane_app();
+        layout_sized(&mut app, width, HEIGHT);
+        app.open_display_panes(Instant::now());
+        layout_sized(&mut app, width, HEIGHT);
+
+        let (row, _) = mode_bar_row(&app, width, HEIGHT);
+        assert!(row.ends_with("any key close"), "{row:?}");
+        assert!(!row.contains("VERSION"), "{row:?}");
     }
 
     #[test]
