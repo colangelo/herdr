@@ -27,6 +27,12 @@
           "type": "integer",
           "default": "40",
           "description": "Virtual terminal height used for layout and newly created panes when no client is attached. Must be greater than zero."
+        },
+        {
+          "key": "server.remember_client_size",
+          "type": "boolean",
+          "default": "true",
+          "description": "Lay out panes at the last attached client's size while no client is attached, and keep that size across restarts. Clients smaller than 80x24 are not remembered. false uses the headless size every time."
         }
       ]
     },
