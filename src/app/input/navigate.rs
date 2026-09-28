@@ -5493,4 +5493,90 @@ navigate_pane_down = "ctrl+j"
         assert!(state.detach_requested);
         assert!(!state.should_quit);
     }
+
+    /// #103: a pane that `cd`'d away from its space's folder without an OSC 7
+    /// report keeps its spawn folder in `TerminalState::cwd`. Moved to a new
+    /// space, that new space is named after the folder the pane *came from*
+    /// ("master") by `display_name_from_terminals`, which the move picker's
+    /// space headings use, while the sidebar's agent panel resolves the live
+    /// runtime cwd and names it right ("CONTEXT").
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "red until #103 is fixed: the move picker names spaces from the stale terminal cwd"]
+    async fn move_picker_names_a_space_made_by_a_move_the_way_the_sidebar_does() {
+        use crate::app::state::PaneMoveTargetItem;
+
+        let root = unique_temp_path("herdr-issue-103");
+        let master_dir = root.join("master");
+        let context_dir = root.join("CONTEXT");
+        std::fs::create_dir_all(master_dir.join(".git")).unwrap();
+        std::fs::create_dir_all(context_dir.join(".git")).unwrap();
+
+        // The space "master", with three panes; the last one will be moved,
+        // and the two left behind keep "master" listed in the picker.
+        let mut app = app_with_test_workspaces(&["master"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        let moved = app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&moved]
+            .attached_terminal_id
+            .clone();
+        // Spawned in master's folder, then `cd ../CONTEXT` with no OSC 7:
+        // the stored cwd is stale, the runtime resolves the live one.
+        app.state.terminals.get_mut(&terminal_id).unwrap().cwd = master_dir.clone();
+        let (events, _) = tokio::sync::mpsc::channel(4);
+        let runtime = crate::terminal::TerminalRuntime::spawn(
+            moved,
+            24,
+            80,
+            context_dir.clone(),
+            0,
+            crate::terminal_theme::TerminalTheme::default(),
+            None,
+            crate::pane::PaneShellConfig::new("/bin/sh", crate::config::ShellModeConfig::NonLogin),
+            &crate::pane::PaneLaunchEnv::default(),
+            events,
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+            std::sync::Arc::new(crate::render_signal::RenderSignal::new()),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while runtime.cwd() != Some(context_dir.clone()) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        app.terminal_runtimes.insert(terminal_id, runtime);
+
+        // Move it to a new space, the way the picker's "new space" row does.
+        let public_id = app.public_pane_id(0, moved).expect("moved pane id");
+        app.dispatch_pane_move_to_target(public_id, crate::app::state::PaneMoveTarget::NewSpace);
+        assert_eq!(app.state.workspaces.len(), 2, "the move made a new space");
+
+        // Back in "master", open the picker again.
+        app.state.switch_workspace_tab(0, 0);
+        app.open_pane_move_target_picker();
+        let headings: Vec<String> = app
+            .state
+            .pane_move_target_picker()
+            .expect("picker open")
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                PaneMoveTargetItem::SpaceHeading { label } => Some(label.clone()),
+                PaneMoveTargetItem::Destination(_) => None,
+            })
+            .collect();
+        let sidebar_name =
+            app.state.workspaces[1].display_name_from(&app.state.terminals, &app.terminal_runtimes);
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(
+            sidebar_name, "CONTEXT",
+            "the sidebar names the new space by its live cwd"
+        );
+        assert_eq!(headings, vec!["master".to_string(), sidebar_name]);
+    }
 }
