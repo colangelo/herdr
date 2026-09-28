@@ -457,34 +457,15 @@ impl AppState {
                 leave_modal(self);
                 return None;
             };
-            let item_count = picker.items.len();
-            let inner = crate::ui::pane_move_target_inner_rect(self.screen_rect(), item_count)?;
-            let max_rows = usize::from(
-                inner
-                    .height
-                    .saturating_sub(crate::ui::PANE_MOVE_TARGET_HEADER_ROWS + 2),
-            );
-            let start = picker
-                .list
-                .selected
-                .saturating_sub(max_rows.saturating_sub(1));
-            let hovered_item = mouse
-                .row
-                .checked_sub(
-                    inner
-                        .y
-                        .saturating_add(crate::ui::PANE_MOVE_TARGET_HEADER_ROWS),
-                )
-                .map(usize::from)
-                .filter(|row| *row < max_rows)
-                .filter(|_| {
-                    mouse.column >= inner.x && mouse.column < inner.x.saturating_add(inner.width)
-                })
-                .map(|row| start + row)
-                .filter(|idx| *idx < item_count);
+            let geometry = self.pane_move_target_picker_geometry()?;
+            let hovered_item =
+                picker
+                    .list
+                    .row_at(geometry.list, mouse.column, mouse.row, picker.items.len());
             // Headings are rendered rows but not destinations, so pointing at
             // one neither moves the selection nor submits.
             let hovered_entry = hovered_item.filter(|idx| picker.destination_at(*idx).is_some());
+            let visible = geometry.list.height as usize;
 
             match mouse.kind {
                 MouseEventKind::Moved => {
@@ -497,11 +478,13 @@ impl AppState {
                 MouseEventKind::ScrollUp => {
                     if let Some(picker) = self.pane_move_target_picker_mut() {
                         picker.select_prev();
+                        picker.reveal(visible);
                     }
                 }
                 MouseEventKind::ScrollDown => {
                     if let Some(picker) = self.pane_move_target_picker_mut() {
                         picker.select_next();
+                        picker.reveal(visible);
                     }
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
@@ -515,27 +498,43 @@ impl AppState {
                         // A heading click is inert, not a dismissal.
                         return None;
                     }
-
-                    let (move_button, cancel_button) =
-                        crate::ui::pane_move_target_button_rects(inner);
-                    match modal_action_from_buttons(
-                        mouse.column,
-                        mouse.row,
-                        &[
-                            (move_button, ModalAction::Confirm),
-                            (cancel_button, ModalAction::Cancel),
-                        ],
-                    ) {
-                        Some(ModalAction::Confirm) => {
+                    use crate::app::state::PaneMoveTargetPickerButton;
+                    use crate::ui::overlay::ButtonRowHit;
+                    match self
+                        .pane_move_target_picker_buttons()
+                        .and_then(|buttons| buttons.hit(mouse.column, mouse.row))
+                    {
+                        Some(ButtonRowHit::Button(PaneMoveTargetPickerButton::Move)) => {
                             return Some(MouseAction::SubmitPaneMoveTarget);
                         }
-                        Some(ModalAction::Cancel) | None => {
+                        Some(ButtonRowHit::Button(PaneMoveTargetPickerButton::Cancel)) => {
                             self.close_overlay(
                                 crate::app::state::OverlayKind::PaneMoveTargetPicker,
                             );
                             leave_modal(self);
+                            return None;
                         }
-                        _ => {}
+                        // A near-miss on the buttons' row is inert.
+                        Some(ButtonRowHit::NearMiss) => return None,
+                        None => {}
+                    }
+                    let search_row = Rect::new(
+                        geometry.header.x,
+                        geometry.header.y + 1,
+                        geometry.header.width,
+                        1,
+                    );
+                    if rect_contains(search_row, mouse.column, mouse.row) {
+                        if let Some(picker) = self.pane_move_target_picker_mut() {
+                            picker.search.focus();
+                        }
+                        return None;
+                    }
+                    // Inside the picker but off its rows and buttons: inert.
+                    // Only a click outside it dismisses.
+                    if !rect_contains(geometry.outer, mouse.column, mouse.row) {
+                        self.close_overlay(crate::app::state::OverlayKind::PaneMoveTargetPicker);
+                        leave_modal(self);
                     }
                 }
                 _ => {}
@@ -1954,6 +1953,48 @@ impl AppState {
 
     /// The board's geometry, or `None` unless it is open — so render and
     /// hit-test go quiet together.
+    /// Where the move picker sits: centred through the kit, as wide as its
+    /// widest destination (between its floor and the shared cap) and as tall
+    /// as all of them, so a query narrows the list without resizing the box.
+    pub(crate) fn pane_move_target_picker_geometry(
+        &self,
+    ) -> Option<crate::ui::overlay::PanelGeometry> {
+        let picker = self.pane_move_target_picker()?;
+        let screen = self.screen_rect();
+        crate::ui::overlay::AnchoredPanelSpec {
+            anchor: screen,
+            screen,
+            content_width: crate::ui::pane_move_target_content_width(&picker.all_items),
+            width_bounds: (
+                crate::ui::PANE_MOVE_TARGET_MIN_WIDTH,
+                crate::ui::overlay::LIST_DIALOG_MAX_WIDTH,
+            ),
+            rows: picker.all_items.len().min(usize::from(u16::MAX)) as u16,
+            max_rows: u16::MAX,
+            footer_rows: crate::ui::FOOTER_ROWS,
+            detail_rows: 0,
+            header_rows: crate::ui::PANE_MOVE_TARGET_HEADER_ROWS,
+            vertical: crate::ui::overlay::VerticalAnchor::Centered,
+        }
+        .resolve()
+    }
+
+    pub(crate) fn pane_move_target_picker_buttons(
+        &self,
+    ) -> Option<crate::ui::overlay::ButtonRow<crate::app::state::PaneMoveTargetPickerButton>> {
+        crate::ui::overlay::ButtonRow::layout(
+            self.pane_move_target_picker_geometry()?.footer_row?,
+            &crate::ui::pane_move_target_button_specs(),
+        )
+    }
+
+    /// List rows the open picker can show, for revealing the selection.
+    pub(crate) fn pane_move_target_picker_visible_rows(&self) -> usize {
+        self.pane_move_target_picker_geometry()
+            .map(|geometry| geometry.list.height as usize)
+            .unwrap_or(0)
+    }
+
     pub(crate) fn todo_board_geometry(&self) -> Option<crate::ui::TodoBoardGeometry> {
         let board = self.todo_board()?;
         crate::ui::todo_board_geometry(
@@ -4415,19 +4456,120 @@ mod tests {
                     ],
                 ),
             ));
-        let inner = crate::ui::pane_move_target_inner_rect(app.state.screen_rect(), 2)
-            .expect("picker rect");
+        let list = app
+            .state
+            .pane_move_target_picker_geometry()
+            .expect("picker geometry")
+            .list;
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
-            inner.x + 1,
-            inner.y + crate::ui::PANE_MOVE_TARGET_HEADER_ROWS + 1,
+            list.x + 1,
+            list.y + 1,
         ));
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(source));
         assert!(app.state.pane_move_target_picker().is_none());
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    /// A picker with one heading and one destination, open over a one-space
+    /// session.
+    fn app_with_open_move_picker() -> crate::app::App {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("main")];
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let source_pane_id = app.public_pane_id(0, source).expect("source pane id");
+        let target = app.state.workspaces[0].test_add_tab(Some("target"));
+        let target_tab_id = app.public_tab_id(0, target).expect("target tab id");
+        app.state.workspaces[0].active_tab = 0;
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::PaneMoveTargetPicker;
+        app.state
+            .set_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(
+                crate::app::state::PaneMoveTargetPickerState::new(
+                    source_pane_id,
+                    vec![
+                        crate::app::state::PaneMoveTargetItem::SpaceHeading {
+                            label: "main".into(),
+                        },
+                        crate::app::state::PaneMoveTargetItem::Destination(
+                            crate::app::state::PaneMoveTargetEntry {
+                                workspace_id: Some(app.state.workspaces[0].id.clone()),
+                                number: 2,
+                                label: "target".into(),
+                                target: crate::app::state::PaneMoveTarget::Tab {
+                                    tab_id: target_tab_id,
+                                },
+                            },
+                        ),
+                    ],
+                ),
+            ));
+        app
+    }
+
+    #[test]
+    fn move_picker_button_row_near_miss_does_not_close() {
+        let mut app = app_with_open_move_picker();
+        let buttons = app
+            .state
+            .pane_move_target_picker_buttons()
+            .expect("the picker has buttons");
+        let geometry = app
+            .state
+            .pane_move_target_picker_geometry()
+            .expect("picker geometry");
+        let first = buttons.placed()[0].rect;
+        // Level with the buttons, left of the first one.
+        let near_miss = (geometry.inner.x, first.y);
+        assert!(buttons.button_at(near_miss.0, near_miss.1).is_none());
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            near_miss.0,
+            near_miss.1,
+        ));
+
+        assert!(app.state.pane_move_target_picker().is_some());
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2, "nothing moved");
+    }
+
+    #[test]
+    fn inside_click_off_rows_does_not_close_the_move_picker() {
+        let mut app = app_with_open_move_picker();
+        let geometry = app
+            .state
+            .pane_move_target_picker_geometry()
+            .expect("picker geometry");
+        // The blank row under the header: inside the picker, on no row, no
+        // button and not the search.
+        let list = geometry.list;
+        let off_rows = (list.x + 2, list.y - 1);
+        assert!(off_rows.1 > geometry.header.y + 1);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            off_rows.0,
+            off_rows.1,
+        ));
+        assert!(
+            app.state.pane_move_target_picker().is_some(),
+            "inert inside"
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            geometry.outer.x.saturating_sub(1),
+            geometry.outer.y,
+        ));
+        assert!(
+            app.state.pane_move_target_picker().is_none(),
+            "a click outside closes"
+        );
     }
 
     #[test]
@@ -4464,10 +4606,14 @@ mod tests {
                     ],
                 ),
             ));
-        let inner = crate::ui::pane_move_target_inner_rect(app.state.screen_rect(), 2)
-            .expect("picker rect");
+        let list = app
+            .state
+            .pane_move_target_picker_geometry()
+            .expect("picker geometry")
+            .list;
 
-        app.handle_mouse(mouse(MouseEventKind::Moved, inner.x + 1, inner.y + 2));
+        // The blank row under the header is not a row of the list.
+        app.handle_mouse(mouse(MouseEventKind::Moved, list.x + 1, list.y - 1));
         assert_eq!(
             app.state
                 .pane_move_target_picker()
@@ -4477,8 +4623,8 @@ mod tests {
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
-            inner.x + 1,
-            inner.y + crate::ui::PANE_MOVE_TARGET_HEADER_ROWS,
+            list.x + 1,
+            list.y,
         ));
 
         assert_eq!(app.state.workspaces[0].tabs.len(), 2);

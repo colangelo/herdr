@@ -1441,35 +1441,70 @@ impl App {
     }
 
     pub(crate) fn handle_pane_move_target_picker_key(&mut self, key: KeyEvent) {
+        use crate::app::input::list_keys::{list_chord, PlainChars};
+        use crate::ui::overlay::SearchKey;
+
+        let Some(picker) = self.state.pane_move_target_picker_mut() else {
+            return;
+        };
+        if picker.search.focused {
+            match picker.search.handle_key(key) {
+                SearchKey::Accept => self.submit_pane_move_target_picker(),
+                SearchKey::Chord(chord) => self.move_pane_move_target_selection(chord),
+                SearchKey::Edited => self.refilter_pane_move_target_picker(),
+                SearchKey::Left | SearchKey::Ignored => {}
+            }
+            return;
+        }
         match key.code {
+            // A set query is cleared before the picker closes.
+            KeyCode::Esc if picker.search.clear_on_escape() => {
+                self.refilter_pane_move_target_picker();
+            }
             KeyCode::Esc => {
                 self.state
                     .close_overlay(crate::app::state::OverlayKind::PaneMoveTargetPicker);
                 leave_navigate_mode(&mut self.state);
             }
             KeyCode::Enter => self.submit_pane_move_target_picker(),
-            // The shared list chords. The picker's rows include a
-            // non-selectable space heading, so a step is its own `select_prev`
-            // / `select_next` rather than a raw index move; a half page is
-            // that step repeated.
+            KeyCode::Char('/') if key.modifiers.is_empty() => picker.search.focus(),
             _ => {
-                use crate::app::input::list_keys::{list_chord, ListChord, PlainChars};
-                let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) else {
-                    return;
-                };
-                let Some(picker) = self.state.pane_move_target_picker_mut() else {
-                    return;
-                };
-                let half = (picker.items.len() / 2).max(1);
-                match chord {
-                    ListChord::Prev => picker.select_prev(),
-                    ListChord::Next => picker.select_next(),
-                    ListChord::HalfPageUp => (0..half).for_each(|_| picker.select_prev()),
-                    ListChord::HalfPageDown => (0..half).for_each(|_| picker.select_next()),
-                    ListChord::First => (0..picker.items.len()).for_each(|_| picker.select_prev()),
-                    ListChord::Last => (0..picker.items.len()).for_each(|_| picker.select_next()),
+                if let Some(chord) = list_chord(key.code, key.modifiers, PlainChars::AreChords) {
+                    self.move_pane_move_target_selection(chord);
                 }
             }
+        }
+    }
+
+    /// The shared list chords. The picker's rows include a non-selectable
+    /// space heading, so a step is its own `select_prev` / `select_next`
+    /// rather than a raw index move, and a half page is that step repeated
+    /// for half the rows on screen.
+    fn move_pane_move_target_selection(&mut self, chord: crate::app::input::list_keys::ListChord) {
+        use crate::app::input::list_keys::ListChord;
+
+        let visible = self.state.pane_move_target_picker_visible_rows();
+        let Some(picker) = self.state.pane_move_target_picker_mut() else {
+            return;
+        };
+        let half = (visible / 2).max(1);
+        match chord {
+            ListChord::Prev => picker.select_prev(),
+            ListChord::Next => picker.select_next(),
+            ListChord::HalfPageUp => (0..half).for_each(|_| picker.select_prev()),
+            ListChord::HalfPageDown => (0..half).for_each(|_| picker.select_next()),
+            ListChord::First => (0..picker.items.len()).for_each(|_| picker.select_prev()),
+            ListChord::Last => (0..picker.items.len()).for_each(|_| picker.select_next()),
+        }
+        picker.reveal(visible);
+    }
+
+    /// Refilter after the query changed, selecting the first match.
+    pub(crate) fn refilter_pane_move_target_picker(&mut self) {
+        let visible = self.state.pane_move_target_picker_visible_rows();
+        if let Some(picker) = self.state.pane_move_target_picker_mut() {
+            picker.refilter();
+            picker.reveal(visible);
         }
     }
 
@@ -1479,6 +1514,11 @@ impl App {
                 .selected_destination()
                 .map(|entry| (picker.source_pane_id.clone(), entry.target.clone()))
         });
+        // A query that matches nothing leaves nothing to accept: the picker
+        // stays open with its query, rather than closing on a no-op.
+        if selection.is_none() && self.state.pane_move_target_picker().is_some() {
+            return;
+        }
         self.state
             .close_overlay(crate::app::state::OverlayKind::PaneMoveTargetPicker);
         leave_navigate_mode(&mut self.state);
@@ -3125,6 +3165,133 @@ command = "echo custom"
             })
             .expect("target should be offered");
         assert!(picker.select_destination(idx));
+    }
+
+    fn type_into_picker(app: &mut App, text: &str) {
+        for ch in text.chars() {
+            app.handle_pane_move_target_picker_key(KeyEvent::new(
+                KeyCode::Char(ch),
+                KeyModifiers::empty(),
+            ));
+        }
+    }
+
+    /// Three spaces, the focused pane in "one" beside a second pane so it can
+    /// go anywhere, and the picker open on it.
+    fn app_with_open_picker() -> App {
+        let mut app = app_with_test_workspaces(&["one", "two", "three"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.workspaces[1].test_add_tab(Some("logs"));
+        app.state.workspaces[1].active_tab = 0;
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        assert_eq!(app.state.mode, Mode::PaneMoveTargetPicker);
+        app
+    }
+
+    #[test]
+    fn move_picker_slash_filters_to_a_space_and_enter_moves_there() {
+        let mut app = app_with_open_picker();
+        let three_tab = app.public_tab_id(2, 0).expect("public tab id");
+        let three_panes = app.state.workspaces[2].tabs[0].panes.len();
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::empty(),
+        ));
+        type_into_picker(&mut app, "thr");
+
+        let picker = picker_of(&app);
+        assert!(picker.search.focused);
+        assert_eq!(picker_headings(picker), vec!["three"]);
+        assert_eq!(
+            picker
+                .selected_destination()
+                .map(|entry| entry.target.clone()),
+            Some(crate::app::state::PaneMoveTarget::Tab { tab_id: three_tab }),
+            "the first match is selected"
+        );
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ));
+
+        assert!(app.state.pane_move_target_picker().is_none());
+        assert_eq!(
+            app.state.workspaces[2].tabs[0].panes.len(),
+            three_panes + 1,
+            "the pane moved to three's tab"
+        );
+    }
+
+    #[test]
+    fn move_picker_heading_stays_while_a_destination_matches() {
+        let mut app = app_with_open_picker();
+        let logs_tab = app.public_tab_id(1, 1).expect("public tab id");
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::empty(),
+        ));
+        type_into_picker(&mut app, "logs");
+
+        let picker = picker_of(&app);
+        // "two" does not match "logs", but its tab does: the heading stays
+        // above it, and only the matching destination is listed.
+        assert_eq!(picker_headings(picker), vec!["two"]);
+        assert_eq!(
+            picker_targets(picker),
+            vec![crate::app::state::PaneMoveTarget::Tab { tab_id: logs_tab }]
+        );
+
+        // A matching heading keeps all its destinations.
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        ));
+        type_into_picker(&mut app, "two");
+        let picker = picker_of(&app);
+        assert_eq!(picker_headings(picker), vec!["two"]);
+        assert_eq!(picker_targets(picker).len(), 3, "tab 1, logs and new tab");
+    }
+
+    #[test]
+    fn move_picker_no_match_keeps_the_query() {
+        let mut app = app_with_open_picker();
+        let spaces = app.state.workspaces.len();
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::empty(),
+        ));
+        type_into_picker(&mut app, "zzz");
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ));
+
+        let picker = picker_of(&app);
+        assert!(picker.items.is_empty(), "nothing matches");
+        assert_eq!(picker.search.text(), "zzz", "the query is kept");
+        assert_eq!(
+            app.state.mode,
+            Mode::PaneMoveTargetPicker,
+            "Enter did nothing"
+        );
+        assert_eq!(app.state.workspaces.len(), spaces);
+
+        // Esc leaves the search, the next clears the query, the third closes.
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::empty());
+        app.handle_pane_move_target_picker_key(esc);
+        assert!(!picker_of(&app).search.focused);
+        assert_eq!(picker_of(&app).search.text(), "zzz");
+        app.handle_pane_move_target_picker_key(esc);
+        assert_eq!(picker_of(&app).search.text(), "");
+        assert!(!picker_of(&app).items.is_empty(), "the list is back");
+        app.handle_pane_move_target_picker_key(esc);
+        assert!(app.state.pane_move_target_picker().is_none());
     }
 
     #[test]

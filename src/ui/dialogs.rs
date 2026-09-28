@@ -9,9 +9,8 @@ use ratatui::{
 use super::text::{display_width_u16, truncate_end};
 use super::text_field::TextField;
 use super::widgets::{
-    action_button_row_rects, centered_popup_rect, footer_split, panel_contrast_fg,
-    render_action_button, render_modal_header, render_modal_shell, render_panel_shell,
-    ActionButtonSpec, HEADER_ROWS,
+    action_button_row_rects, centered_popup_rect, panel_contrast_fg, render_action_button,
+    render_modal_header, render_modal_shell, render_panel_shell, ActionButtonSpec, HEADER_ROWS,
 };
 use crate::app::{state::WorktreeOpenState, AppState, Mode};
 use crate::terminal::TerminalRuntimeRegistry;
@@ -546,51 +545,59 @@ pub(crate) fn open_existing_worktree_button_rects(inner: Rect) -> (Rect, Rect) {
     (rects[0], rects[1])
 }
 
-/// Grows with the grouped list — space headings included — up to the same
-/// ceiling the flat picker used, past which the list scrolls.
-///
-/// Seven rows of chrome sit around the list: the modal border, the header
-/// block (its title, its subtitle and the blank row under them, per
-/// [`crate::ui::widgets::HEADER_ROWS`]) and the footer block.
-/// Rows the picker's header block occupies: its title, its subtitle, and the
-/// blank row under them. One more than [`crate::ui::widgets::HEADER_ROWS`]
+/// Rows the picker's header block occupies: its title, its search row, and
+/// the blank row under them. One more than [`crate::ui::widgets::HEADER_ROWS`]
 /// because this overlay's header is two lines rather than one.
 pub(crate) const PANE_MOVE_TARGET_HEADER_ROWS: u16 = crate::ui::widgets::HEADER_ROWS + 1;
 
-pub(crate) fn pane_move_target_height(item_count: usize) -> u16 {
-    (item_count as u16).saturating_add(7).clamp(8, 20)
+/// The picker's narrowest: a short session's names still leave its search row
+/// and its buttons room to read.
+pub(crate) const PANE_MOVE_TARGET_MIN_WIDTH: u16 = 48;
+
+/// The picker's footer. Both boxes always survive: moving is the point of it,
+/// and cancel is the way out.
+pub(crate) fn pane_move_target_button_specs(
+) -> [crate::ui::overlay::ButtonSpec<crate::app::state::PaneMoveTargetPickerButton>; 2] {
+    use crate::app::state::PaneMoveTargetPickerButton;
+    [
+        crate::ui::overlay::ButtonSpec {
+            button: PaneMoveTargetPickerButton::Move,
+            hint: Some("↵"),
+            label: "move",
+            drop_rank: None,
+        },
+        crate::ui::overlay::ButtonSpec {
+            button: PaneMoveTargetPickerButton::Cancel,
+            hint: Some("esc"),
+            label: "cancel",
+            drop_rank: None,
+        },
+    ]
 }
 
-pub(crate) fn pane_move_target_inner_rect(area: Rect, item_count: usize) -> Option<Rect> {
-    centered_popup_rect(area, 64, pane_move_target_height(item_count)).map(|popup| {
-        Rect::new(
-            popup.x + 1,
-            popup.y + 1,
-            popup.width.saturating_sub(2),
-            popup.height.saturating_sub(2),
-        )
-    })
-}
-
-pub(crate) fn pane_move_target_button_rects(inner: Rect) -> (Rect, Rect) {
-    let rects = action_button_row_rects(
-        inner,
-        &[
-            ActionButtonSpec {
-                hint: Some("↵"),
-                label: "move",
-            },
-            ActionButtonSpec {
-                hint: Some("esc"),
-                label: "cancel",
-            },
-        ],
-        2,
-        footer_split(inner, true)
-            .1
-            .unwrap_or_else(|| inner.height.saturating_sub(1)),
-    );
-    (rects[0], rects[1])
+/// The width the picker's rows want, border included: the widest space
+/// heading or destination row, and never less than its own buttons. Measured
+/// from every destination, not the filtered ones, so a query does not resize
+/// it.
+pub(crate) fn pane_move_target_content_width(
+    items: &[crate::app::state::PaneMoveTargetItem],
+) -> u16 {
+    use crate::app::state::PaneMoveTargetItem;
+    let widest = items
+        .iter()
+        .map(|item| match item {
+            PaneMoveTargetItem::SpaceHeading { label } => 1 + display_width_u16(label),
+            PaneMoveTargetItem::Destination(entry) => {
+                2 + display_width_u16(&pane_move_target_row_label(entry))
+            }
+        })
+        .max()
+        .unwrap_or(0);
+    // Border, and a spare column so the longest row is not flush against it.
+    widest.saturating_add(3).max(
+        crate::ui::overlay::ButtonRow::natural_width(&pane_move_target_button_specs())
+            .saturating_add(2),
+    )
 }
 
 /// Row text for a picked destination. Tabs keep the number/label shape the flat
@@ -614,53 +621,67 @@ pub(super) fn render_pane_move_target_picker_overlay(
     frame: &mut Frame,
     area: Rect,
 ) {
-    use crate::app::state::PaneMoveTargetItem;
+    use crate::app::state::{PaneMoveTargetItem, PaneMoveTargetPickerButton};
 
     let Some(picker) = app.pane_move_target_picker() else {
         return;
     };
-
-    super::dim_background(frame, area);
-    let Some(inner) = render_modal_shell(
-        frame,
-        area,
-        64,
-        pane_move_target_height(picker.items.len()),
-        &app.palette,
-    ) else {
+    // The resolved geometry the mouse hit-tests against, so what is drawn and
+    // what is clickable cannot diverge.
+    let Some(geometry) = app.pane_move_target_picker_geometry() else {
         return;
     };
-    if inner.height < 6 {
+    let p = &app.palette;
+    super::dim_background(frame, area);
+    if render_panel_shell(frame, geometry.outer, p.accent, p.panel_bg).is_none() {
         return;
     }
+    let header = geometry.header;
+    if header.height >= 2 {
+        render_modal_header(
+            frame,
+            Rect::new(header.x, header.y, header.width, 1),
+            "move pane",
+            p,
+        );
+        let destinations = picker
+            .all_items
+            .iter()
+            .filter(|item| matches!(item, PaneMoveTargetItem::Destination(_)))
+            .count();
+        crate::ui::overlay::render_search_row(
+            frame,
+            Rect::new(header.x, header.y + 1, header.width, 1),
+            &picker.search,
+            crate::ui::overlay::SearchRow {
+                placeholder: "search destinations",
+                count: format!(
+                    "{destinations} {}",
+                    if destinations == 1 {
+                        "destination"
+                    } else {
+                        "destinations"
+                    }
+                ),
+                chip: None,
+            },
+            p,
+        );
+    }
 
-    render_modal_header(
-        frame,
-        Rect::new(inner.x, inner.y, inner.width, 1),
-        "move pane",
-        &app.palette,
-    );
-    frame.render_widget(
-        Paragraph::new(" select a destination").style(Style::default().fg(app.palette.overlay0)),
-        Rect::new(inner.x, inner.y.saturating_add(1), inner.width, 1),
-    );
-
-    let (content, _) = footer_split(inner, true);
-    // The title and its subtitle are one header block, and the blank row that
-    // follows them belongs to it.
-    let max_rows = usize::from(content.height.saturating_sub(PANE_MOVE_TARGET_HEADER_ROWS));
-    let start = picker
-        .list
-        .selected
-        .saturating_sub(max_rows.saturating_sub(1));
-    for (visible_idx, item) in picker.items.iter().skip(start).take(max_rows).enumerate() {
+    if picker.items.is_empty() && geometry.list.height > 0 {
+        frame.render_widget(
+            Paragraph::new(" no match").style(Style::default().fg(p.overlay0)),
+            Rect::new(geometry.list.x, geometry.list.y, geometry.list.width, 1),
+        );
+    }
+    let (start, visible) = picker.list.window(geometry.list, picker.items.len());
+    for (visible_idx, item) in picker.items.iter().skip(start).take(visible).enumerate() {
         let item_idx = start + visible_idx;
         let row = Rect::new(
-            inner.x,
-            inner
-                .y
-                .saturating_add(PANE_MOVE_TARGET_HEADER_ROWS + visible_idx as u16),
-            inner.width,
+            geometry.list.x,
+            geometry.list.y + visible_idx as u16,
+            geometry.list.width,
             1,
         );
         let (text, style) = match item {
@@ -668,20 +689,18 @@ pub(super) fn render_pane_move_target_picker_overlay(
             // reads as a heading and never as a destination.
             PaneMoveTargetItem::SpaceHeading { label } => (
                 format!(" {label}"),
-                Style::default()
-                    .fg(app.palette.overlay0)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
             ),
             PaneMoveTargetItem::Destination(entry) => {
                 let selected = item_idx == picker.list.selected;
                 let marker = if selected { "›" } else { " " };
                 let style = if selected {
                     Style::default()
-                        .fg(app.palette.text)
-                        .bg(app.palette.surface0)
+                        .fg(p.text)
+                        .bg(p.surface0)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(app.palette.subtext0)
+                    Style::default().fg(p.subtext0)
                 };
                 (
                     format!("{marker} {}", pane_move_target_row_label(entry)),
@@ -690,32 +709,26 @@ pub(super) fn render_pane_move_target_picker_overlay(
             }
         };
         frame.render_widget(
-            Paragraph::new(truncate_end(&text, inner.width as usize)).style(style),
+            Paragraph::new(truncate_end(&text, row.width as usize)).style(style),
             row,
         );
     }
 
-    let (move_rect, cancel_rect) = pane_move_target_button_rects(inner);
-    render_action_button(
-        frame,
-        move_rect,
-        Some("↵"),
-        "move",
-        Style::default()
-            .fg(panel_contrast_fg(&app.palette))
-            .bg(app.palette.accent)
-            .add_modifier(Modifier::BOLD),
-    );
-    render_action_button(
-        frame,
-        cancel_rect,
-        Some("esc"),
-        "cancel",
-        Style::default()
-            .fg(app.palette.text)
-            .bg(app.palette.surface0)
-            .add_modifier(Modifier::BOLD),
-    );
+    if let Some(buttons) = app.pane_move_target_picker_buttons() {
+        for placed in buttons.placed() {
+            let style = match placed.button {
+                PaneMoveTargetPickerButton::Move => Style::default()
+                    .fg(panel_contrast_fg(p))
+                    .bg(p.accent)
+                    .add_modifier(Modifier::BOLD),
+                PaneMoveTargetPickerButton::Cancel => Style::default()
+                    .fg(p.text)
+                    .bg(p.surface0)
+                    .add_modifier(Modifier::BOLD),
+            };
+            render_action_button(frame, placed.rect, placed.hint, placed.label, style);
+        }
+    }
 }
 
 pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
@@ -1301,7 +1314,6 @@ mod tests {
         app::{state::WorktreeCreateState, AppState, Mode},
         ui::text_field::TextField,
         ui::widgets::HEADER_ROWS,
-        ui::PANE_MOVE_TARGET_HEADER_ROWS,
         workspace::Workspace,
     };
     use ratatui::{
@@ -1312,8 +1324,8 @@ mod tests {
     };
 
     use super::{
-        confirm_close_overlay_text, display_width_u16, pane_move_target_inner_rect,
-        pane_todo_edit_rects, pane_todo_edit_text_area, render_new_linked_worktree_overlay,
+        confirm_close_overlay_text, display_width_u16, pane_todo_edit_rects,
+        pane_todo_edit_text_area, render_new_linked_worktree_overlay,
         render_pane_move_target_picker_overlay, render_pane_todo_edit_overlay,
         render_rename_overlay, Modifier, PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     };
@@ -2051,6 +2063,119 @@ mod tests {
             "a pane with no todos should not mention them: {detail}"
         );
     }
+    /// Two spaces laid out on the snapshot frame, the background the picker is
+    /// diffed against, and the same with the picker open (and `query` typed
+    /// into its search).
+    fn move_picker_snapshot(query: Option<&str>) -> crate::ui::test_support::OverlaySnapshot {
+        use crate::app::state::{
+            PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem, PaneMoveTargetPickerState,
+        };
+        let background = || {
+            let mut app = crate::ui::test_support::app_with_one_pane("main");
+            app.workspaces.push(Workspace::test_new("CONTEXT"));
+            app.ensure_test_terminals();
+            crate::ui::test_support::layout(&mut app);
+            app
+        };
+        let base = background();
+        let mut open = background();
+        let own = open.workspaces[0].id.clone();
+        let other = open.workspaces[1].id.clone();
+        let items = vec![
+            PaneMoveTargetItem::SpaceHeading {
+                label: "main".into(),
+            },
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some(own.clone()),
+                number: 0,
+                label: String::new(),
+                target: PaneMoveTarget::NewTab {
+                    workspace_id: own.clone(),
+                },
+            }),
+            PaneMoveTargetItem::SpaceHeading {
+                label: "CONTEXT".into(),
+            },
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some(other.clone()),
+                number: 1,
+                label: "logs".into(),
+                target: PaneMoveTarget::Tab {
+                    tab_id: format!("{other}:t1"),
+                },
+            }),
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some(other.clone()),
+                number: 0,
+                label: String::new(),
+                target: PaneMoveTarget::NewTab {
+                    workspace_id: other.clone(),
+                },
+            }),
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: None,
+                number: 0,
+                label: String::new(),
+                target: PaneMoveTarget::NewSpace,
+            }),
+        ];
+        let mut picker = PaneMoveTargetPickerState::new("pane".into(), items);
+        if let Some(query) = query {
+            picker.search.focus();
+            picker.search.query.insert_str(query);
+            picker.refilter();
+        }
+        open.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
+        crate::ui::test_support::layout(&mut open);
+        crate::ui::test_support::overlay_snapshot(&base, &open)
+    }
+
+    #[test]
+    fn snapshot_move_picker() {
+        move_picker_snapshot(None).assert(
+            Rect::new(16, 6, 48, 13),
+            &[
+                "┌──────────────────────────────────────────────┐",
+                "│ move pane                                    │",
+                "│ / search destinations         4 destinations │",
+                "│                                              │",
+                "│ main                                         │",
+                "│› new tab                                     │",
+                "│ CONTEXT                                      │",
+                "│  1 · logs                                    │",
+                "│  new tab                                     │",
+                "│  new space                                   │",
+                "│                                              │",
+                "│             ↵ move    esc cancel             │",
+                "└──────────────────────────────────────────────┘",
+            ],
+        );
+    }
+
+    #[test]
+    fn snapshot_move_picker_searching() {
+        // The box keeps its size; CONTEXT's heading and destinations remain,
+        // and the first of them is selected.
+        move_picker_snapshot(Some("cont")).assert(
+            Rect::new(16, 6, 48, 13),
+            &[
+                "┌──────────────────────────────────────────────┐",
+                "│ move pane                                    │",
+                "│ / cont                        4 destinations │",
+                "│                                              │",
+                "│ CONTEXT                                      │",
+                "│› 1 · logs                                    │",
+                "│  new tab                                     │",
+                "│                                              │",
+                "│                                              │",
+                "│                                              │",
+                "│                                              │",
+                "│             ↵ move    esc cancel             │",
+                "└──────────────────────────────────────────────┘",
+            ],
+        );
+    }
+
     #[test]
     fn pane_move_picker_renders_space_headings_and_the_new_space_row_last() {
         use crate::app::state::{
@@ -2061,6 +2186,7 @@ mod tests {
         app.workspaces = vec![Workspace::test_new("main"), Workspace::test_new("other")];
         app.active = Some(0);
         app.ensure_test_terminals();
+        crate::ui::test_support::layout_sized(&mut app, 80, 24);
         let own = app.workspaces[0].id.clone();
         let other = app.workspaces[1].id.clone();
         let items = vec![
@@ -2104,19 +2230,21 @@ mod tests {
             .draw(|frame| render_pane_move_target_picker_overlay(&app, frame, area))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        let inner = pane_move_target_inner_rect(area, item_count).expect("picker rect");
+        let list = app
+            .pane_move_target_picker_geometry()
+            .expect("picker geometry")
+            .list;
 
-        // Rows start below the header block: the title, its subtitle, and the
-        // blank row under them.
+        // Rows start below the header block: the title, the search row, and
+        // the blank row under them.
         let row_text = |row: u16| -> String {
-            (inner.x..inner.x + inner.width)
-                .map(|x| buffer[(x, inner.y + PANE_MOVE_TARGET_HEADER_ROWS + row)].symbol())
+            (list.x..list.x + list.width)
+                .map(|x| buffer[(x, list.y + row)].symbol())
                 .collect::<String>()
                 .trim_end()
                 .to_string()
         };
-        let row_style =
-            |row: u16| buffer[(inner.x + 1, inner.y + PANE_MOVE_TARGET_HEADER_ROWS + row)].style();
+        let row_style = |row: u16| buffer[(list.x + 1, list.y + row)].style();
 
         assert_eq!(row_text(0), " main");
         assert_eq!(row_style(0).fg, Some(app.palette.overlay0));

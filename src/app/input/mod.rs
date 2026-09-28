@@ -255,6 +255,16 @@ impl App {
                 self.insert_worktree_open_search_text(text);
                 true
             }
+            Mode::PaneMoveTargetPicker => {
+                let pasted = self
+                    .state
+                    .pane_move_target_picker_mut()
+                    .is_some_and(|picker| picker.search.insert_str(text));
+                if pasted {
+                    self.refilter_pane_move_target_picker();
+                }
+                pasted
+            }
             Mode::Navigator => {
                 if !self.state.navigator().is_some_and(|nav| nav.search.focused) {
                     return false;
@@ -782,7 +792,9 @@ pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
         Mode::OpenExistingWorktree => state
             .worktree_open()
             .is_some_and(|open| open.search_focused),
-        Mode::PaneMoveTargetPicker => false,
+        Mode::PaneMoveTargetPicker => state
+            .pane_move_target_picker()
+            .is_some_and(|picker| picker.search.focused),
         Mode::Navigator => state.navigator().is_some_and(|nav| nav.search.focused),
         Mode::KeybindHelp => state.keybind_help().is_some_and(|help| help.search_focused),
         Mode::Copy => state
