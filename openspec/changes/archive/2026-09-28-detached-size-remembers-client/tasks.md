@@ -32,5 +32,12 @@ covers the new default.
 ## 3. Ship (with the batch)
 
 - [x] 3.1 `just check` green; `openspec validate detached-size-remembers-client --strict`
-- [ ] 3.2 Beta; live proof on m4m: attach at full size, detach, `herdr-beta pane list` shows real widths; restart the server detached, panes come back at the remembered size; the nightly reads an unclipped footer
+- [x] 3.2 Beta; live proof on m4m: attach at full size, detach, `herdr-beta pane list` shows real widths; restart the server detached, panes come back at the remembered size; the nightly reads an unclipped footer
 - [ ] 3.3 Comment the SHAs, beta and implementation notes on the issue; close it after the live check
+
+Live proof, 2026-09-28, beta 0.8.2-ac-beta.104-chiesa (master da2ea021), throwaway
+session on m4m: a 310x56 client's pane was 283x55; after the detach it stayed 283x55;
+a workspace created detached got 310x56 (the no-client size, was 120x40); session.json
+held `"last_client_size":[310,56]`; after `server stop` and a detached restart the
+restored panes were 283x55 (beta.103 gave 93x39). The nightly's footer read was not
+run here: it needs ac's real Claude Code panes.

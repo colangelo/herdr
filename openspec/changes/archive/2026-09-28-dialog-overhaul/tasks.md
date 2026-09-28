@@ -41,5 +41,14 @@ Decided while building (recorded so review can check them):
 ## 3. Ship (with the batch)
 
 - [x] 3.1 `just check` green; `openspec validate dialog-overhaul --strict`
-- [ ] 3.2 Beta (the same beta as JOB 8); live proof on m4m at 310x56: navigator at most 120 wide and centred; move a pane to a new space and reopen the picker, it shows the new space's own name; `/` in the picker and on the board; a multi-line and a cut one-line todo show the boxed detail in "master" and in "herdr"
+- [x] 3.2 Beta (the same beta as JOB 8); live proof on m4m at 310x56: navigator at most 120 wide and centred; move a pane to a new space and reopen the picker, it shows the new space's own name; `/` in the picker and on the board; a multi-line and a cut one-line todo show the boxed detail in "master" and in "herdr"
 - [ ] 3.3 Comment the SHAs, beta and implementation notes on #103 to #108; close each after the live check
+
+Live proof, 2026-09-28, beta 0.8.2-ac-beta.104-chiesa (master da2ea021), throwaway
+session on m4m at 310x56: navigator 73 wide at column 118 (was 272); a pane that `cd`'d
+to CONTEXT with no OSC 7 moved to a new space, and the picker reopened from "master"
+listed "master" and "CONTEXT"; `/con` in the picker left CONTEXT's heading and two
+destinations, and three Esc closed it; the pane todo panel showed the boxed detail
+for a multi-line and a cut one-line todo in "master" and in "CONTEXT", 9 rows high on
+every selection; the board was 120 wide, `/rebase` kept both headings, and its box
+showed the selected plan in full.
