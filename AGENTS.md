@@ -231,6 +231,28 @@ The point is structure we can rely on and review later. A plan in a gitignored s
 
 Exploratory conversation before that point is unconstrained — the Superpowers brainstorming skill is fine for working out what to build. But its outputs get written into the OpenSpec change, not into `docs/superpowers/`, `.local/prd/`, or any other parallel location. Do not invent a second home for planning artifacts.
 
+## Fork: every fix, bug and feature gets a Gitea issue
+
+Fork only (AC-forks/herdr). Every piece of fork work gets an issue on the fork's Gitea tracker,
+https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues, **opened when the work is approved or
+found, before it starts**. That covers a bug found, a fix, a feature, an upstream cherry-pick
+batch or port, and a follow-up spotted during other work. Don't file a closed record after the
+fact. On 2026-09-27/28, five jobs (the scroll-read fix, the unbound-key warning, cherry-pick
+batch A, the 9a2a7af5 port, and the display-panes overlay) shipped with no issue in progress,
+so nothing showed the requests while they ran.
+
+- **Title:** `[fork] <what is wrong or wanted>`. **Body:** current vs expected behaviour, the
+  repro or the ask, who asked, and the evidence (logs, timings, a video path).
+- **Hand-off:** a brief to another session links the issue. The implementer comments on it with
+  the SHAs, the beta version and, for anything non-trivial, implementation notes (files, key
+  types, tests, known limits); #96 is the model.
+- **Close** only after the change is verified in a running beta (`herdr-dogfood`), with a
+  closing comment on how it was checked. Reference the issue by its full URL in commit bodies:
+  a bare `#N` means GitHub here.
+- An OpenSpec change does not replace the issue: the issue tracks the request, and the change
+  holds the plan.
+- API, labels and token: the `herdr-fork-tracking` skill.
+
 ## Commit Style
 
 Use lowercase conventional commits, no emojis, and no AI co-author lines. Commit subjects feed preview release notes, so keep them descriptive.
