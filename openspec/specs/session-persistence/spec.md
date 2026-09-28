@@ -1,7 +1,9 @@
 # session-persistence Specification
 
 ## Purpose
-TBD - created by archiving change session-file-durability. Update Purpose after archive.
+How the session file is written and read so a session survives crashes and bad
+files: writes are durable before they replace the previous file, and an unusable
+file is kept rather than overwritten.
 
 ## Requirements
 

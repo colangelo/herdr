@@ -1,7 +1,9 @@
 # live-handoff-client Specification
 
 ## Purpose
-TBD - created by archiving change handoff-keeps-the-client. Update Purpose after archive.
+What a live handoff and a detached server do to the attached client and to pane
+sizes: panes keep their size through a handoff, the app client reattaches on its
+own, and panes created with no client attached get a sensible size.
 
 ## Requirements
 

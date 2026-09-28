@@ -1,7 +1,9 @@
 # codex-app-server-panes Specification
 
 ## Purpose
-TBD - created by archiving change codex-app-server-panes. Update Purpose after archive.
+Codex panes that run on the shared Codex app-server daemon: how they launch, how
+their threads are named after the pane's agent, and how a resolved thread becomes
+the pane's resumable agent session.
 
 ## Requirements
 

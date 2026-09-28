@@ -1,7 +1,9 @@
 # pane-activity-and-process Specification
 
 ## Purpose
-TBD - created by archiving change workspace-hibernation-primitives. Update Purpose after archive.
+The per-pane facts that idle maintenance and hibernation rely on: which process a
+pane is really running, even behind a wrapper such as atuin, and when it last
+received input.
 
 ## Requirements
 

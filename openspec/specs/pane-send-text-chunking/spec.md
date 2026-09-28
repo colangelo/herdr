@@ -1,7 +1,8 @@
 # pane-send-text-chunking Specification
 
 ## Purpose
-TBD - created by archiving change pane-send-text-chunking. Update Purpose after archive.
+Sending long text to a pane in paced pieces, so a program reading its input does
+not drop or truncate a large paste, without ever splitting a UTF-8 character.
 
 ## Requirements
 
