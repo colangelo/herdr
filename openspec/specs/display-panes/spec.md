@@ -1,7 +1,9 @@
 # display-panes Specification
 
 ## Purpose
-TBD - created by archiving change display-panes. Update Purpose after archive.
+A tmux-style display-panes overlay: one key labels every pane of the current tab
+with its number, address, name and size in characters, and shows the window size,
+so a user can read pane sizes and jump to a pane by number without the API.
 
 ## Requirements
 
