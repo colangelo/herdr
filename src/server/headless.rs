@@ -342,6 +342,10 @@ pub struct HeadlessServer {
     next_activity_stamp: u64,
     /// Configured virtual terminal size used when no clients are connected.
     headless_size: (u16, u16),
+    /// The size a live handoff carried from the previous server, used instead
+    /// of `headless_size` while no client is attached. The first client to
+    /// attach ends it.
+    handoff_client_size: Option<(u16, u16)>,
     /// Shared pane runtime size derived from the foreground client, or the
     /// configured headless size when no clients are connected.
     effective_size: (u16, u16),
@@ -545,6 +549,7 @@ impl HeadlessServer {
             deferred_alt_screen_reads: Vec::new(),
             next_activity_stamp: 1,
             headless_size,
+            handoff_client_size: None,
             effective_size: headless_size,
             shutting_down: false,
             handoff_in_progress: false,
@@ -1188,11 +1193,17 @@ impl HeadlessServer {
         }
     }
 
+    /// The size to lay panes out at while no client is attached.
+    fn detached_size(&self) -> (u16, u16) {
+        self.handoff_client_size.unwrap_or(self.headless_size)
+    }
+
     fn sync_headless_view_geometry(&mut self) {
+        let (cols, rows) = self.detached_size();
         crate::ui::compute_view_without_resizing_panes(
             &mut self.app.state,
             &self.app.terminal_runtimes,
-            Rect::new(0, 0, self.headless_size.0, self.headless_size.1),
+            Rect::new(0, 0, cols, rows),
         );
     }
 
@@ -1207,7 +1218,7 @@ impl HeadlessServer {
             self.retire_all_direct_graphics();
         }
         let Some(client_id) = self.foreground_client_id else {
-            self.effective_size = self.headless_size;
+            self.effective_size = self.detached_size();
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_headless_view_geometry();
@@ -1218,7 +1229,7 @@ impl HeadlessServer {
         };
         let Some(client) = self.clients.get(&client_id) else {
             self.foreground_client_id = None;
-            self.effective_size = self.headless_size;
+            self.effective_size = self.detached_size();
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_headless_view_geometry();
@@ -1230,6 +1241,7 @@ impl HeadlessServer {
 
         let terminal_size = client.terminal_size;
         let outer_terminal_focus = client.outer_terminal_focus;
+        self.handoff_client_size = None;
         let host_cell_size = if self.app.state.kitty_graphics_enabled && client.cell_size.is_known()
         {
             client.cell_size
@@ -1306,6 +1318,9 @@ impl HeadlessServer {
         }
 
         self.handoff_in_progress = true;
+        // Taken before the clients go: the importing server keeps panes at this
+        // size until one reattaches.
+        let export_size = self.effective_size;
         self.disconnect_all_clients_for_handoff();
         let _ = reject_pending_client_connections(&self.client_listener);
 
@@ -1364,6 +1379,7 @@ impl HeadlessServer {
             params.expected_protocol,
             params.expected_version,
             self.api_window_title.clone(),
+            Some(export_size),
         );
         let mut import_child = match crate::server::handoff::spawn_handoff_import(
             import_exe.as_deref(),
@@ -5310,6 +5326,10 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
         // Carried across before any client attaches, so the first title sent is
         // the override rather than the configured one it replaced.
         server.api_window_title = received.manifest.api_window_title.take();
+        // Keep panes at the size they had rather than shrinking them to the
+        // headless default on the first frame, until a client reattaches.
+        server.handoff_client_size = received.manifest.client_size;
+        server.effective_size = server.detached_size();
         crate::server::handoff::report_ready(&mut received.stream)?;
         crate::server::handoff::wait_committed(&mut received.stream)?;
         server.app.assume_handoff_ownership();
@@ -5483,6 +5503,7 @@ mod tests {
             deferred_alt_screen_reads: Vec::new(),
             next_activity_stamp: 1,
             headless_size,
+            handoff_client_size: None,
             effective_size: headless_size,
             shutting_down: false,
             handoff_in_progress: false,
@@ -5545,6 +5566,44 @@ mod tests {
                 crate::config::DEFAULT_HEADLESS_ROWS
             )
         );
+        assert_eq!(server.effective_size, server.headless_size);
+    }
+
+    #[test]
+    fn a_size_carried_over_a_handoff_is_the_no_client_size() {
+        let mut server = test_headless_server();
+        server.handoff_client_size = Some((200, 60));
+
+        server.sync_foreground_client_state();
+
+        assert_eq!(server.effective_size, (200, 60));
+    }
+
+    #[test]
+    fn a_client_attach_ends_the_carried_handoff_size() {
+        let mut server = test_headless_server();
+        server.handoff_client_size = Some((200, 60));
+        let (client_tx, _control_rx, _client_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(client_tx),
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+        assert_eq!(server.handoff_client_size, None);
+
+        let _ = server.remove_client(1);
+        server.foreground_client_id = None;
+        server.sync_foreground_client_state();
+
         assert_eq!(server.effective_size, server.headless_size);
     }
 
