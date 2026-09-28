@@ -889,6 +889,7 @@ fn do_handshake(
             info!(version, ?encoding, "handshake succeeded");
             Ok(encoding)
         }
+        ServerMessage::ServerShutdown { reason } => Err(ClientError::ServerShutdown { reason }),
         _ => Err(ClientError::Protocol(protocol::FramingError::Io(
             io::Error::new(io::ErrorKind::InvalidData, "expected Welcome message"),
         ))),
@@ -927,12 +928,98 @@ enum ClientLoopEvent {
 ///
 /// This is the entry point called from `main.rs` when running in client mode.
 pub fn run_client() -> io::Result<()> {
-    run_client_with_mode(
-        requested_render_encoding(),
-        None,
-        None,
-        "connecting to server",
+    let mut reconnect_deadline = None;
+    loop {
+        let log_message = if reconnect_deadline.is_some() {
+            "reconnecting to server after a live update"
+        } else {
+            "connecting to server"
+        };
+        let reconnecting = reconnect_deadline.is_some();
+        match run_client_with_mode(
+            requested_render_encoding(),
+            None,
+            None,
+            log_message,
+            reconnecting,
+        )? {
+            ClientExit::Done => return Ok(()),
+            ClientExit::HandedOff => {
+                let deadline = *reconnect_deadline.get_or_insert_with(|| {
+                    eprintln!("herdr: live update in progress; reconnecting…");
+                    std::time::Instant::now() + HANDOFF_RECONNECT_TIMEOUT
+                });
+                // The old server's socket can still answer, refusing, for a
+                // moment after it hands off; give the new one room to bind.
+                std::thread::sleep(Duration::from_millis(200));
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if !wait_for_server(&client_socket_path(), remaining, &client_quit_flag()) {
+                    eprintln!(
+                        "herdr: the updated server did not come back; run `{}` to reattach",
+                        crate::session::local_attach_command()
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+/// How an app client session ended.
+enum ClientExit {
+    Done,
+    /// The server handed off to a new one; reconnect to it.
+    HandedOff,
+}
+
+/// How long a client waits for the new server after a live handoff.
+const HANDOFF_RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn is_live_handoff_shutdown(err: &ClientError) -> bool {
+    matches!(
+        err,
+        ClientError::ServerShutdown { reason: Some(reason) }
+            if reason == crate::protocol::LIVE_HANDOFF_SHUTDOWN_REASON
     )
+}
+
+/// Wait until the client socket accepts a connection, up to `timeout`, or
+/// until `quit` is raised. True when a server is there.
+fn wait_for_server(path: &std::path::Path, timeout: Duration, quit: &AtomicBool) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if quit.load(Ordering::Acquire) {
+            return false;
+        }
+        if crate::ipc::connect_local_stream(path).is_ok() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// The process-wide quit flag, raised by SIGINT, SIGTERM and SIGHUP. The
+/// handler can be installed only once per process, and a client that
+/// reconnects after a handoff runs its session again, so the flag outlives
+/// each session.
+fn client_quit_flag() -> Arc<AtomicBool> {
+    static FLAG: std::sync::OnceLock<Arc<AtomicBool>> = std::sync::OnceLock::new();
+    FLAG.get_or_init(|| {
+        let flag = Arc::new(AtomicBool::new(false));
+        let handler_flag = flag.clone();
+        // ctrlc's "termination" feature also catches SIGTERM/SIGHUP so direct
+        // termination signals still run the quit path and TerminalGuard::Drop.
+        if let Err(err) = ctrlc::set_handler(move || {
+            handler_flag.store(true, Ordering::Release);
+        }) {
+            warn!(%err, "failed to install termination handler; terminal restore relies on TerminalGuard::Drop and the panic hook");
+        }
+        flag
+    })
+    .clone()
 }
 
 /// Runs a direct terminal attach client.
@@ -943,7 +1030,9 @@ pub fn run_terminal_attach(terminal_id: String, takeover: bool) -> io::Result<()
         Some((terminal_id, takeover)),
         Some(AttachEscapeState::default()),
         "attaching to terminal",
+        false,
     )
+    .map(|_| ())
 }
 
 /// Direct terminal attach is Unix raw-byte input only until Windows gets a semantic attach path.
@@ -1219,7 +1308,8 @@ fn run_client_with_mode(
     attach_request: Option<(String, bool)>,
     attach_escape: Option<AttachEscapeState>,
     log_message: &'static str,
-) -> io::Result<()> {
+    reconnecting: bool,
+) -> io::Result<ClientExit> {
     init_logging();
 
     let loaded_config = crate::config::Config::load();
@@ -1249,6 +1339,8 @@ fn run_client_with_mode(
     // Try to connect to the server.
     let mut stream = match crate::ipc::connect_local_stream(&socket_path) {
         Ok(s) => s,
+        // Mid-handoff the socket may be gone or not yet the new server's.
+        Err(_) if reconnecting => return Ok(ClientExit::HandedOff),
         Err(err) => {
             // Server unreachable — show clear error and exit.
             let client_err = ClientError::ConnectionFailed(err);
@@ -1273,6 +1365,14 @@ fn run_client_with_mode(
         direct_attach_requested,
     ) {
         Ok(encoding) => encoding,
+        // Still the old server, refusing, or the new one not ready yet.
+        Err(err) if reconnecting || is_live_handoff_shutdown(&err) => {
+            if !direct_attach_requested {
+                return Ok(ClientExit::HandedOff);
+            }
+            eprintln!("herdr: {err}");
+            std::process::exit(1);
+        }
         Err(err) => {
             eprintln!("herdr: {err}");
             std::process::exit(1);
@@ -1325,16 +1425,7 @@ fn run_client_with_mode(
         .build()
         .map_err(io::Error::other)?;
 
-    let should_quit = Arc::new(AtomicBool::new(false));
-
-    // ctrlc's "termination" feature also catches SIGTERM/SIGHUP so direct
-    // termination signals still run the quit path and TerminalGuard::Drop.
-    let quit_flag = should_quit.clone();
-    if let Err(err) = ctrlc::set_handler(move || {
-        quit_flag.store(true, Ordering::Release);
-    }) {
-        warn!(%err, "failed to install termination handler; terminal restore relies on TerminalGuard::Drop and the panic hook");
-    }
+    let should_quit = client_quit_flag();
 
     let result = rt.block_on(async {
         run_client_loop(
@@ -1355,6 +1446,12 @@ fn run_client_with_mode(
     let terminal_restore_failed = terminal_guard.restore().is_err();
 
     if let Err(err) = result {
+        // An app client follows its session to the server that took over. A
+        // direct terminal attach has no session to follow, so it exits.
+        if !direct_attach_requested && is_live_handoff_shutdown(&err) {
+            rt.shutdown_timeout(Duration::from_millis(100));
+            return Ok(ClientExit::HandedOff);
+        }
         let _ = writeln!(io::stderr(), "herdr: {err}");
         rt.shutdown_timeout(Duration::from_millis(100));
         crate::logging::shutdown("client");
@@ -1368,7 +1465,7 @@ fn run_client_with_mode(
         let connection_lost_during_terminal_hangup =
             terminal_restore_failed && matches!(&err, ClientError::ConnectionLost(_));
         if detached || connection_lost_during_terminal_hangup {
-            return Ok(());
+            return Ok(ClientExit::Done);
         }
 
         std::process::exit(1);
@@ -1376,7 +1473,7 @@ fn run_client_with_mode(
 
     rt.shutdown_timeout(Duration::from_millis(100));
     crate::logging::shutdown("client");
-    Ok(())
+    Ok(ClientExit::Done)
 }
 
 /// The main client event loop.
@@ -2652,6 +2749,52 @@ fn init_logging() {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[test]
+    fn only_the_live_handoff_shutdown_is_a_handoff() {
+        let handoff = ClientError::ServerShutdown {
+            reason: Some(crate::protocol::LIVE_HANDOFF_SHUTDOWN_REASON.to_owned()),
+        };
+        let detached = ClientError::ServerShutdown {
+            reason: Some("detached".to_owned()),
+        };
+        let stopped = ClientError::ServerShutdown { reason: None };
+
+        assert!(is_live_handoff_shutdown(&handoff));
+        assert!(!is_live_handoff_shutdown(&detached));
+        assert!(!is_live_handoff_shutdown(&stopped));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn waiting_for_the_server_ends_when_its_socket_accepts() {
+        let dir = std::env::temp_dir().join(format!("hcw-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("client.sock");
+        let _ = std::fs::remove_file(&path);
+        let bind_path = path.clone();
+        let binder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            std::os::unix::net::UnixListener::bind(&bind_path).expect("bind")
+        });
+        let quit = AtomicBool::new(false);
+
+        assert!(wait_for_server(&path, Duration::from_secs(5), &quit));
+        drop(binder.join());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn waiting_for_the_server_gives_up_on_timeout_or_quit() {
+        let path = std::env::temp_dir().join(format!("hcw-none-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let quit = AtomicBool::new(false);
+        assert!(!wait_for_server(&path, Duration::from_millis(200), &quit));
+
+        quit.store(true, Ordering::Release);
+        assert!(!wait_for_server(&path, Duration::from_secs(30), &quit));
+    }
     use std::sync::{Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
