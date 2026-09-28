@@ -497,7 +497,7 @@ impl HeadlessServer {
     /// 2. Binds the client socket listener
     /// 3. Returns the server ready to run
     pub fn new(
-        app: app::App,
+        mut app: app::App,
         config_diagnostics: &[String],
         api_tx: Option<api::ApiRequestSender>,
         api_server: Option<api::ServerHandle>,
@@ -522,6 +522,8 @@ impl HeadlessServer {
 
         let server_keybindings = app_keybindings(&app);
         let headless_size = app.state.headless_size;
+        // No client has attached yet.
+        app.state.detached_pane_size = Some(headless_size);
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =
             server_config_diagnostic_summaries(config_diagnostics);
         #[cfg(not(unix))]
@@ -1219,6 +1221,7 @@ impl HeadlessServer {
         }
         let Some(client_id) = self.foreground_client_id else {
             self.effective_size = self.detached_size();
+            self.app.state.detached_pane_size = Some(self.effective_size);
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_headless_view_geometry();
@@ -1230,6 +1233,7 @@ impl HeadlessServer {
         let Some(client) = self.clients.get(&client_id) else {
             self.foreground_client_id = None;
             self.effective_size = self.detached_size();
+            self.app.state.detached_pane_size = Some(self.effective_size);
             self.app.state.outer_terminal_focus = None;
             self.app.state.host_cell_size = crate::kitty_graphics::HostCellSize::default();
             self.sync_headless_view_geometry();
@@ -1260,6 +1264,7 @@ impl HeadlessServer {
         };
 
         self.effective_size = terminal_size;
+        self.app.state.detached_pane_size = None;
         self.app.state.outer_terminal_focus = outer_terminal_focus;
         self.app.state.host_cell_size = host_cell_size;
         apply_keybindings(&mut self.app, &keybindings);
@@ -5325,6 +5330,7 @@ fn run_handoff_import_server(socket_path: &Path, token: &str) -> io::Result<()> 
         // headless default on the first frame, until a client reattaches.
         server.handoff_client_size = received.manifest.client_size;
         server.effective_size = server.detached_size();
+        server.app.state.detached_pane_size = Some(server.effective_size);
         crate::server::handoff::report_ready(&mut received.stream)?;
         crate::server::handoff::wait_committed(&mut received.stream)?;
         server.app.assume_handoff_ownership();
@@ -5562,6 +5568,34 @@ mod tests {
             )
         );
         assert_eq!(server.effective_size, server.headless_size);
+    }
+
+    #[test]
+    fn new_panes_are_sized_for_no_client_only_while_none_is_attached() {
+        let mut server = test_headless_server();
+        server.sync_foreground_client_state();
+        assert_eq!(
+            server.app.state.detached_pane_size,
+            Some(server.headless_size)
+        );
+
+        let (client_tx, _control_rx, _client_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(client_tx),
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+
+        assert_eq!(server.app.state.detached_pane_size, None);
     }
 
     #[test]

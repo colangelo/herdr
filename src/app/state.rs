@@ -2545,6 +2545,11 @@ pub struct AppState {
     pub prefix_mods: KeyModifiers,
     /// Virtual terminal size (columns, rows) used when no client is attached.
     pub(crate) headless_size: (u16, u16),
+    /// The size, (cols, rows), a server with no client attached lays new
+    /// panes out at: the configured headless size, or one a live handoff
+    /// carried. `None` while a client is attached, when the view is the
+    /// client's.
+    pub(crate) detached_pane_size: Option<(u16, u16)>,
     pub default_sidebar_width: u16,
     pub sidebar_width: u16,
     pub sidebar_min_width: u16,
@@ -3435,6 +3440,11 @@ impl AppState {
     }
 
     pub fn estimate_pane_size(&self) -> (u16, u16) {
+        // With no client attached the view is not what anyone sees, and its
+        // first pane can be any size; new panes get the no-client size.
+        if let Some((cols, rows)) = self.detached_pane_size {
+            return (rows, cols);
+        }
         if let Some(info) = self.view.pane_infos.first() {
             (info.rect.height, info.rect.width)
         } else {
@@ -3631,6 +3641,7 @@ impl AppState {
                 crate::config::DEFAULT_HEADLESS_COLS,
                 crate::config::DEFAULT_HEADLESS_ROWS,
             ),
+            detached_pane_size: None,
             default_sidebar_width: 26,
             sidebar_width: 26,
             sidebar_min_width: 18,
@@ -4135,6 +4146,25 @@ impl AppState {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    #[test]
+    fn pane_size_estimate_uses_the_no_client_size_while_detached() {
+        let mut state = AppState::test_new();
+        state.headless_size = (132, 41);
+        state.view.pane_infos = vec![crate::layout::PaneInfo {
+            id: crate::layout::PaneId::from_raw(1),
+            rect: ratatui::layout::Rect::new(0, 0, 46, 39),
+            inner_rect: ratatui::layout::Rect::new(0, 0, 46, 39),
+            scrollbar_rect: None,
+            borders: ratatui::widgets::Borders::NONE,
+            is_focused: true,
+        }];
+        assert_eq!(state.estimate_pane_size(), (39, 46), "attached: the view");
+
+        state.detached_pane_size = Some((310, 56));
+
+        assert_eq!(state.estimate_pane_size(), (56, 310));
+    }
 
     #[test]
     fn pane_size_estimate_uses_headless_size_before_first_view() {

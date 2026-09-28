@@ -753,6 +753,7 @@ impl App {
             prefix_code,
             prefix_mods,
             headless_size: config.headless_size(),
+            detached_pane_size: None,
             default_sidebar_width: config.ui.sidebar_width,
             sidebar_width,
             sidebar_min_width,

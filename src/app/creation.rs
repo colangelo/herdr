@@ -405,6 +405,50 @@ impl App {
         self.pane_info(ws_idx, tab.root_pane)
     }
 
+    /// Sizes for splitting `target`: the new pane's, and the share `target`
+    /// keeps when it has to be resized now. With a client attached the next
+    /// frame lays both out, so the usual estimate does. With none, nothing
+    /// will, so the split divides the target's real size instead.
+    pub(super) fn split_sizes(
+        &self,
+        ws_idx: usize,
+        target: crate::layout::PaneId,
+        direction: ratatui::layout::Direction,
+        ratio: f32,
+    ) -> ((u16, u16), Option<(u16, u16)>) {
+        let estimate = self.state.estimate_pane_size();
+        if self.state.detached_pane_size.is_none() {
+            return (estimate, None);
+        }
+        let Some(size) = self
+            .state
+            .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, target)
+            .map(|runtime| runtime.current_size())
+        else {
+            return (estimate, None);
+        };
+        let (kept, new) = split_shares(size, direction, ratio);
+        (new, Some(kept))
+    }
+
+    /// Shrink a split's target to the share it kept (see `split_sizes`).
+    pub(super) fn resize_split_target(
+        &self,
+        ws_idx: usize,
+        target: crate::layout::PaneId,
+        kept: Option<(u16, u16)>,
+    ) {
+        let Some((rows, cols)) = kept else {
+            return;
+        };
+        if let Some(runtime) =
+            self.state
+                .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, target)
+        {
+            runtime.resize(rows, cols, 0, 0);
+        }
+    }
+
     pub(super) fn pane_info(
         &self,
         ws_idx: usize,
@@ -532,4 +576,62 @@ fn terminal_agent_session_info(
             kind: session.session_ref.kind,
             value: session.session_ref.value.clone(),
         })
+}
+
+/// Split a pane's size between the part it keeps and the new pane, the way the
+/// layout splits its slot: `ratio` is the kept (left or top) share.
+pub(crate) fn split_shares(
+    (rows, cols): (u16, u16),
+    direction: ratatui::layout::Direction,
+    ratio: f32,
+) -> ((u16, u16), (u16, u16)) {
+    let share = |total: u16| {
+        let kept = (f32::from(total) * ratio.clamp(0.0, 1.0)).round() as u16;
+        let kept = kept.clamp(1, total.saturating_sub(1).max(1));
+        (kept, total.saturating_sub(kept).max(1))
+    };
+    match direction {
+        ratatui::layout::Direction::Vertical => {
+            let (kept, new) = share(rows);
+            ((kept, cols), (new, cols))
+        }
+        ratatui::layout::Direction::Horizontal => {
+            let (kept, new) = share(cols);
+            ((rows, kept), (rows, new))
+        }
+    }
+}
+
+#[cfg(test)]
+mod split_share_tests {
+    use super::split_shares;
+    use ratatui::layout::Direction;
+
+    #[test]
+    fn a_down_split_divides_rows_by_the_ratio() {
+        assert_eq!(
+            split_shares((39, 91), Direction::Vertical, 0.65),
+            ((25, 91), (14, 91))
+        );
+    }
+
+    #[test]
+    fn a_right_split_divides_columns() {
+        assert_eq!(
+            split_shares((40, 120), Direction::Horizontal, 0.3),
+            ((40, 36), (40, 84))
+        );
+    }
+
+    #[test]
+    fn neither_side_collapses_to_nothing() {
+        assert_eq!(
+            split_shares((10, 80), Direction::Vertical, 0.0),
+            ((1, 80), (9, 80))
+        );
+        assert_eq!(
+            split_shares((10, 80), Direction::Vertical, 1.0),
+            ((9, 80), (1, 80))
+        );
+    }
 }

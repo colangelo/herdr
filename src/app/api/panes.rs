@@ -50,7 +50,16 @@ impl App {
             Ok(env) => env,
             Err((code, message)) => return encode_error(id, &code, message),
         };
-        let (rows, cols) = self.state.estimate_pane_size();
+        let split_direction = match params.direction {
+            crate::api::schema::SplitDirection::Right => ratatui::layout::Direction::Horizontal,
+            crate::api::schema::SplitDirection::Down => ratatui::layout::Direction::Vertical,
+        };
+        let ((rows, cols), kept_size) = self.split_sizes(
+            ws_idx,
+            target_pane_id,
+            split_direction,
+            params.ratio.unwrap_or(0.5),
+        );
         let split_cwd = params.cwd.map(std::path::PathBuf::from).or_else(|| {
             let follow_cwd = self.launch_cwd_for_pane_in_workspace(ws_idx, target_pane_id);
             Some(self.resolve_new_terminal_cwd(follow_cwd))
@@ -102,6 +111,7 @@ impl App {
             Some(Err(err)) => return encode_error(id, "pane_split_failed", err.to_string()),
             None => return encode_error(id, "pane_not_found", "pane not found"),
         };
+        self.resize_split_target(ws_idx, target_pane_id, kept_size);
         if let Some(pane) = self.state.workspaces[ws_idx].pane_state_mut(new_pane.pane_id) {
             pane.right_click_passthrough = matches!(
                 params.right_click,

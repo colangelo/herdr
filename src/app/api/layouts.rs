@@ -458,7 +458,12 @@ impl App {
         ratio: f32,
         pane: &LayoutPane,
     ) -> Result<PaneId, String> {
-        let (rows, cols) = self.state.estimate_pane_size();
+        let split_direction = match direction {
+            SplitDirection::Right => Direction::Horizontal,
+            SplitDirection::Down => Direction::Vertical,
+        };
+        let ((rows, cols), kept_size) =
+            self.split_sizes(ws_idx, target_pane_id, split_direction, ratio);
         let default_shell = self.state.default_shell.clone();
         let scrollback_limit_bytes = self.state.pane_scrollback_limit_bytes;
         let host_terminal_theme = self.state.host_terminal_theme;
@@ -515,6 +520,7 @@ impl App {
             .ok_or_else(|| "pane not found".to_string())?
             .map_err(|err| err.to_string())?;
         let new_pane_id = new_pane.pane_id;
+        self.resize_split_target(ws_idx, target_pane_id, kept_size);
         self.attach_new_layout_pane(new_pane);
         self.apply_layout_pane_label(ws_idx, new_pane_id, pane);
         Ok(new_pane_id)
