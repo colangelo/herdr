@@ -116,6 +116,11 @@ pub struct PaneSnapshot {
         skip_serializing_if = "is_initial_todo_id"
     )]
     pub next_todo_id: u64,
+    /// When input from a user or caller last reached the pane, in unix ms.
+    /// Absent when none was recorded, including every session saved before
+    /// this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_input_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -397,6 +402,9 @@ fn capture_tab(
         let next_todo_id = terminal
             .map(|terminal| terminal.next_todo_id)
             .unwrap_or_else(default_next_todo_id);
+        let last_input_at_ms = terminal.and_then(|terminal| {
+            crate::terminal::pane_last_input_at_ms(terminal, terminal_runtimes.get(&terminal.id))
+        });
         panes.insert(
             id.raw(),
             PaneSnapshot {
@@ -408,6 +416,7 @@ fn capture_tab(
                 launch_argv,
                 todos,
                 next_todo_id,
+                last_input_at_ms,
             },
         );
     }
@@ -713,6 +722,7 @@ mod tests {
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
+                last_input_at_ms: None,
             },
         );
         panes.insert(
@@ -726,6 +736,7 @@ mod tests {
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
+                last_input_at_ms: None,
             },
         );
 
@@ -1282,6 +1293,7 @@ mod tests {
                 updated_at_unix: 200,
             }],
             next_todo_id: 4,
+            last_input_at_ms: None,
         };
 
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -1310,6 +1322,7 @@ mod tests {
             launch_argv: None,
             todos: Vec::new(),
             next_todo_id: 1,
+            last_input_at_ms: None,
         };
 
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -1395,6 +1408,7 @@ mod tests {
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
+                last_input_at_ms: None,
             },
         );
         panes.insert(
@@ -1410,6 +1424,7 @@ mod tests {
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
+                last_input_at_ms: None,
             },
         );
 

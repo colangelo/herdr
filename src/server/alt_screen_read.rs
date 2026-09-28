@@ -538,7 +538,10 @@ fn send_wheel(
     for _ in 0..events {
         bytes.extend_from_slice(&event);
     }
-    runtime.try_send_bytes(Bytes::from(bytes)).map_err(|_| ())
+    // A read, not activity: the pane's last-input time must not move.
+    runtime
+        .try_send_bytes_untracked(Bytes::from(bytes))
+        .map_err(|_| ())
 }
 
 #[cfg(test)]

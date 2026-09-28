@@ -618,6 +618,7 @@ fn restore_tab(
         let saved_todos: &[PaneTodoSnapshot] =
             saved_pane.map(|p| p.todos.as_slice()).unwrap_or_default();
         let saved_next_todo_id = saved_pane.map(|p| p.next_todo_id).unwrap_or(1);
+        let saved_last_input_at_ms = saved_pane.and_then(|p| p.last_input_at_ms);
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
         let startup = {
@@ -689,6 +690,7 @@ fn restore_tab(
                 );
             }
             restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
+            terminal.restored_last_input_at_ms = saved_last_input_at_ms;
             panes.insert(*id, PaneState::new(terminal_id));
             terminals.push(terminal);
             continue;
@@ -791,6 +793,7 @@ fn restore_tab(
                     );
                 }
                 restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
+                terminal.restored_last_input_at_ms = saved_last_input_at_ms;
                 panes.insert(*id, PaneState::new(terminal_id.clone()));
                 terminal_runtimes.insert(terminal_id, runtime);
                 terminals.push(terminal);
@@ -1224,6 +1227,7 @@ mod tests {
                 ),
             ],
             next_todo_id: 7,
+            last_input_at_ms: Some(1_790_000_000_123),
         };
         let target_pane = super::super::snapshot::PaneSnapshot {
             cwd: cwd.clone(),
@@ -1234,6 +1238,7 @@ mod tests {
             launch_argv: None,
             todos: Vec::new(),
             next_todo_id: 1,
+            last_input_at_ms: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1295,6 +1300,19 @@ mod tests {
         let todos = terminals[&owner_terminal_id].todos();
 
         assert_eq!(todos.len(), 3, "no todo may be dropped by restore");
+        // The last-input time rides along with the pane; a pane saved without
+        // one stays unknown.
+        let target_terminal_id = workspace.tabs[1].panes[&target]
+            .attached_terminal_id
+            .clone();
+        assert_eq!(
+            terminals[&owner_terminal_id].restored_last_input_at_ms,
+            Some(1_790_000_000_123)
+        );
+        assert_eq!(
+            terminals[&target_terminal_id].restored_last_input_at_ms,
+            None
+        );
 
         // Scenario "Todos survive a restart" names text, done state, priority,
         // and ids explicitly, so assert every one of them rather than trusting
@@ -1656,6 +1674,7 @@ mod tests {
                             launch_argv: None,
                             todos: Vec::new(),
                             next_todo_id: 1,
+                            last_input_at_ms: None,
                         },
                     )]),
                     zoomed: false,
@@ -1739,6 +1758,7 @@ mod tests {
                                 launch_argv: None,
                                 todos: Vec::new(),
                                 next_todo_id: 1,
+                                last_input_at_ms: None,
                             },
                         ),
                         (
@@ -1752,6 +1772,7 @@ mod tests {
                                 launch_argv: None,
                                 todos: Vec::new(),
                                 next_todo_id: 1,
+                                last_input_at_ms: None,
                             },
                         ),
                     ]),
@@ -1807,6 +1828,7 @@ mod tests {
                     launch_argv: None,
                     todos: Vec::new(),
                     next_todo_id: 1,
+                    last_input_at_ms: None,
                 },
             )
         };
@@ -1824,6 +1846,7 @@ mod tests {
             launch_argv: None,
             todos: Vec::new(),
             next_todo_id: 1,
+            last_input_at_ms: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1977,6 +2000,7 @@ mod tests {
                             launch_argv: None,
                             todos: Vec::new(),
                             next_todo_id: 1,
+                            last_input_at_ms: None,
                         },
                     )]),
                     zoomed: false,
@@ -2140,6 +2164,7 @@ mod tests {
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
+                last_input_at_ms: None,
             },
         );
         let history = SessionHistorySnapshot {

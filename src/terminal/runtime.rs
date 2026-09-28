@@ -471,6 +471,19 @@ impl TerminalRuntime {
         self.0.send_bytes_after(bytes, delay);
     }
 
+    /// `try_send_bytes` for automatic writes that are not pane activity.
+    pub fn try_send_bytes_untracked(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        self.0.try_send_bytes_untracked(bytes)
+    }
+
+    /// When input from a user or caller last reached the pane, in unix ms.
+    pub fn last_input_at_ms(&self) -> Option<i64> {
+        self.0.last_input_at_ms()
+    }
+
     pub async fn send_paste(&self, text: String) -> Result<(), mpsc::error::SendError<Bytes>> {
         self.0.send_paste(text).await
     }

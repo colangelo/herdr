@@ -896,6 +896,14 @@
                 "null"
               ]
             },
+            "last_input_at_unix": {
+              "description": "When input from a user or caller last reached the pane, in unix\nseconds. Absent when none has been recorded; treat that as unknown.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "pane_id": {
               "type": "string"
             },
@@ -8062,6 +8070,14 @@
                 "null"
               ]
             },
+            "last_input_at_unix": {
+              "description": "When input from a user or caller last reached the pane, in unix\nseconds. Absent when none has been recorded; treat that as unknown.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "pane_id": {
               "type": "string"
             },
@@ -8389,8 +8405,28 @@
               },
               "type": "array"
             },
+            "nested_foreground_process_group_id": {
+              "description": "The foreground job of the PTY a recognised wrapper (such as `atuin\npty-proxy`) runs the pane's shell in. Absent for an unwrapped pane.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "nested_foreground_processes": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/PaneProcessInfoProcess"
+              },
+              "type": "array"
+            },
             "pane_id": {
               "type": "string"
+            },
+            "shell_at_prompt": {
+              "default": false,
+              "description": "The pane's shell, directly or behind a recognised wrapper, is alone at\nthe front of its terminal: nothing is running in the pane.",
+              "type": "boolean"
             },
             "shell_pid": {
               "format": "uint32",

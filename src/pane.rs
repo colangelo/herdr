@@ -1604,6 +1604,10 @@ pub struct PaneRuntime {
     detect_reset_notify: Arc<Notify>,
     pending_release: Arc<Mutex<Option<PendingAgentRelease>>>,
     preserve_processes_on_drop: bool,
+    /// When input from a user or caller last reached the PTY, in unix ms; 0
+    /// when none has. Automatic writes (terminal replies, the history harvest,
+    /// restore launches) leave it alone.
+    last_input_ms: AtomicU64,
     // Task handles for deterministic shutdown
     compression: TerminalCompressionTask,
     detect_handle: Option<tokio::task::AbortHandle>,
@@ -2595,6 +2599,7 @@ impl PaneRuntime {
             detect_reset_notify,
             pending_release,
             preserve_processes_on_drop: true,
+            last_input_ms: AtomicU64::new(0),
             compression,
             detect_handle: Some(detect_handle),
         })
@@ -3186,6 +3191,7 @@ impl PaneRuntime {
             detect_reset_notify,
             pending_release,
             preserve_processes_on_drop: false,
+            last_input_ms: AtomicU64::new(0),
             compression,
             detect_handle,
         })
@@ -3501,15 +3507,48 @@ impl PaneRuntime {
     }
 
     pub async fn send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::SendError<Bytes>> {
-        self.io.send_bytes(bytes).await
+        let sent = self.io.send_bytes(bytes).await;
+        if sent.is_ok() {
+            self.stamp_input();
+        }
+        sent
     }
 
     pub fn try_send_bytes(&self, bytes: Bytes) -> Result<(), mpsc::error::TrySendError<Bytes>> {
+        let sent = self.io.try_send_bytes(bytes);
+        if sent.is_ok() {
+            self.stamp_input();
+        }
+        sent
+    }
+
+    /// `try_send_bytes` for automatic writes that are not activity: the
+    /// history harvest behind a read, and restore or resume launches.
+    pub fn try_send_bytes_untracked(
+        &self,
+        bytes: Bytes,
+    ) -> Result<(), mpsc::error::TrySendError<Bytes>> {
         self.io.try_send_bytes(bytes)
     }
 
     pub fn send_bytes_after(&self, bytes: Bytes, delay: std::time::Duration) {
+        self.stamp_input();
         self.io.send_bytes_after(bytes, delay);
+    }
+
+    /// When input from a user or caller last reached the PTY, in unix ms.
+    pub fn last_input_at_ms(&self) -> Option<i64> {
+        let stamp = self.last_input_ms.load(Ordering::Relaxed);
+        (stamp > 0).then(|| i64::try_from(stamp).unwrap_or(i64::MAX))
+    }
+
+    fn stamp_input(&self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
+        self.last_input_ms.fetch_max(now, Ordering::Relaxed);
     }
 
     pub async fn send_paste(&self, text: String) -> Result<(), mpsc::error::SendError<Bytes>> {
@@ -3790,6 +3829,7 @@ impl PaneRuntime {
                 detect_reset_notify: Arc::new(Notify::new()),
                 pending_release: Arc::new(Mutex::new(None)),
                 preserve_processes_on_drop: true,
+                last_input_ms: AtomicU64::new(0),
                 compression,
                 detect_handle: Some(tokio::spawn(async {}).abort_handle()),
             },
@@ -4656,6 +4696,7 @@ mod tests {
             detect_reset_notify: Arc::new(Notify::new()),
             pending_release: Arc::new(Mutex::new(None)),
             preserve_processes_on_drop: true,
+            last_input_ms: AtomicU64::new(0),
             detect_handle: Some(tokio::spawn(async {}).abort_handle()),
         };
 
@@ -4707,6 +4748,7 @@ mod tests {
             detect_reset_notify: Arc::new(Notify::new()),
             pending_release: Arc::new(Mutex::new(None)),
             preserve_processes_on_drop: true,
+            last_input_ms: AtomicU64::new(0),
             detect_handle: Some(tokio::spawn(async {}).abort_handle()),
         };
 
@@ -4843,6 +4885,7 @@ mod tests {
             detect_reset_notify: Arc::new(Notify::new()),
             pending_release: Arc::new(Mutex::new(None)),
             preserve_processes_on_drop: true,
+            last_input_ms: AtomicU64::new(0),
             compression,
             detect_handle: Some(tokio::spawn(async {}).abort_handle()),
         };
@@ -4882,6 +4925,7 @@ mod tests {
             detect_reset_notify: Arc::new(Notify::new()),
             pending_release: Arc::new(Mutex::new(None)),
             preserve_processes_on_drop: true,
+            last_input_ms: AtomicU64::new(0),
             compression,
             detect_handle: Some(tokio::spawn(async {}).abort_handle()),
         };

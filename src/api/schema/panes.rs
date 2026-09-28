@@ -508,6 +508,10 @@ pub struct PaneInfo {
     pub tokens: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session: Option<AgentSessionInfo>,
+    /// When input from a user or caller last reached the pane, in unix
+    /// seconds. Absent when none has been recorded; treat that as unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_input_at_unix: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll: Option<PaneScrollInfo>,
     pub revision: u64,

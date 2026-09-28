@@ -451,6 +451,11 @@ impl App {
             state_labels: presentation.state_labels,
             tokens: terminal.metadata_tokens.values(),
             agent_session: terminal_agent_session_info(terminal),
+            last_input_at_unix: crate::terminal::pane_last_input_at_ms(
+                terminal,
+                self.terminal_runtimes.get(&terminal.id),
+            )
+            .map(|stamp| stamp / 1000),
             scroll,
             revision: terminal.revision,
         })

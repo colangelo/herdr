@@ -983,6 +983,7 @@ mod tests {
             state_labels: HashMap::new(),
             tokens: HashMap::new(),
             agent_session: None,
+            last_input_at_unix: None,
             scroll: None,
             revision: 0,
         }

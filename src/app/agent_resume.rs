@@ -290,7 +290,8 @@ impl App {
 
         let mut input = resume_command;
         input.push('\r');
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(input)) {
+        // Restore relaunches the agent; that is not activity in the pane.
+        if let Err(err) = runtime.try_send_bytes_untracked(Bytes::from(input)) {
             tracing::warn!(
                 pane = pane_id.raw(),
                 terminal = %terminal_id,

@@ -150,6 +150,9 @@ pub struct TerminalState {
     pub launch_argv: Option<Vec<String>>,
     pub(crate) todos: Vec<crate::terminal::todo::PaneTodo>,
     pub(crate) next_todo_id: u64,
+    /// The pane's last-input time carried over a restore, in unix ms. The live
+    /// time is on the pane runtime; `pane_last_input_at_ms` reads the newer.
+    pub(crate) restored_last_input_at_ms: Option<i64>,
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     agent_process_acquisition_pending: bool,
@@ -187,6 +190,7 @@ impl TerminalState {
             launch_argv: None,
             todos: Vec::new(),
             next_todo_id: 1,
+            restored_last_input_at_ms: None,
             respawn_shell_on_exit: false,
             recent_agent_process_exit: None,
             agent_process_acquisition_pending: false,
