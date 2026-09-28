@@ -14,4 +14,6 @@
 ## 4. Ship
 
 - [x] 4.1 `just check` green
-- [ ] 4.2 Beta; live proof on m4m in a throwaway session
+- [x] 4.2 Beta; live proof on m4m in a throwaway session
+
+Verified 2026-09-28 on m4m with the `0.8.2-ac-beta.100-alexsandro` release binary in a throwaway atuin-wrapped session: process-info saw `sleep` behind atuin and `shell_at_prompt` flipped; `last_input_at_unix` moved on `pane run`, stayed null through `pane read`, and survived a restart; a daemon Codex pane carried its thread as `herdr:codex` agent session across a restart.
