@@ -335,6 +335,17 @@ struct AgentDetectionPublishUpdate {
     process_exited: bool,
 }
 
+/// The per-detection-task "last published" trackers that a publish update
+/// mutates together, bundled so `apply_agent_detection_publish_update` stays
+/// under clippy's argument-count lint.
+struct DetectionPublishTrackers<'a> {
+    last_visible_idle: &'a mut bool,
+    last_visible_blocker: &'a mut bool,
+    last_visible_working: &'a mut bool,
+    last_background_work: &'a mut bool,
+    last_visible_signal_refresh: &'a mut Option<std::time::Instant>,
+}
+
 async fn apply_agent_detection_publish_update(
     state_events: mpsc::Sender<AppEvent>,
     pane_id: PaneId,
@@ -342,17 +353,15 @@ async fn apply_agent_detection_publish_update(
     update: AgentDetectionPublishUpdate,
     observed_at: std::time::Instant,
     state: &mut AgentState,
-    last_visible_idle: &mut bool,
-    last_visible_blocker: &mut bool,
-    last_visible_working: &mut bool,
-    last_visible_signal_refresh: &mut Option<std::time::Instant>,
+    trackers: DetectionPublishTrackers<'_>,
     foreground_shell_exit_reported: &mut bool,
 ) {
     *state = update.state;
-    *last_visible_idle = update.visible_idle;
-    *last_visible_blocker = update.visible_blocker;
-    *last_visible_working = update.visible_working;
-    *last_visible_signal_refresh = if update.visible_blocker || update.visible_working {
+    *trackers.last_visible_idle = update.visible_idle;
+    *trackers.last_visible_blocker = update.visible_blocker;
+    *trackers.last_visible_working = update.visible_working;
+    *trackers.last_background_work = update.background_work;
+    *trackers.last_visible_signal_refresh = if update.visible_blocker || update.visible_working {
         Some(observed_at)
     } else {
         None
@@ -1043,6 +1052,7 @@ fn spawn_basic_detection_task(
         let mut last_visible_idle = seed.last_visible_idle;
         let mut last_visible_blocker = seed.last_visible_blocker;
         let mut last_visible_working = seed.last_visible_working;
+        let mut last_background_work = seed.last_background_work;
         let mut seeded_hold = seed.agent.is_some();
         let mut last_visible_signal_refresh = None;
         let mut last_process_check = std::time::Instant::now();
@@ -1075,6 +1085,7 @@ fn spawn_basic_detection_task(
                     last_visible_idle = false;
                     last_visible_blocker = false;
                     last_visible_working = false;
+                    last_background_work = false;
                     last_visible_signal_refresh = None;
                     last_process_check = std::time::Instant::now();
                     last_foreground_pgid = None;
@@ -1297,6 +1308,7 @@ fn spawn_basic_detection_task(
                     last_visible_idle,
                     last_visible_blocker,
                     last_visible_working,
+                    last_background_work,
                     last_visible_signal_refresh,
                     process_exited,
                     agent_changed,
@@ -1327,10 +1339,13 @@ fn spawn_basic_detection_task(
                         },
                         now,
                         &mut state,
-                        &mut last_visible_idle,
-                        &mut last_visible_blocker,
-                        &mut last_visible_working,
-                        &mut last_visible_signal_refresh,
+                        DetectionPublishTrackers {
+                            last_visible_idle: &mut last_visible_idle,
+                            last_visible_blocker: &mut last_visible_blocker,
+                            last_visible_working: &mut last_visible_working,
+                            last_background_work: &mut last_background_work,
+                            last_visible_signal_refresh: &mut last_visible_signal_refresh,
+                        },
                         &mut foreground_shell_exit_reported,
                     )
                     .await;
@@ -2797,6 +2812,7 @@ impl PaneRuntime {
                 let mut pending_restore_probe = initial_state.detected_agent.is_some();
                 let mut last_visible_blocker = false;
                 let mut last_visible_working = false;
+                let mut last_background_work = false;
                 let mut last_visible_signal_refresh = None;
                 let mut last_detection_text = String::new();
                 let mut last_screen_scan_detection_content_seq = None;
@@ -2838,6 +2854,7 @@ impl PaneRuntime {
                             pending_restore_probe = false;
                             last_visible_blocker = false;
                             last_visible_working = false;
+                            last_background_work = false;
                             last_visible_signal_refresh = None;
                             last_detection_text.clear();
                             last_screen_scan_detection_content_seq = None;
@@ -3123,6 +3140,7 @@ impl PaneRuntime {
                             last_visible_idle,
                             last_visible_blocker,
                             last_visible_working,
+                            last_background_work,
                             last_visible_signal_refresh,
                             process_exited,
                             agent_changed,
@@ -3153,10 +3171,13 @@ impl PaneRuntime {
                                 },
                                 now,
                                 &mut state,
-                                &mut last_visible_idle,
-                                &mut last_visible_blocker,
-                                &mut last_visible_working,
-                                &mut last_visible_signal_refresh,
+                                DetectionPublishTrackers {
+                                    last_visible_idle: &mut last_visible_idle,
+                                    last_visible_blocker: &mut last_visible_blocker,
+                                    last_visible_working: &mut last_visible_working,
+                                    last_background_work: &mut last_background_work,
+                                    last_visible_signal_refresh: &mut last_visible_signal_refresh,
+                                },
                                 &mut foreground_shell_exit_reported,
                             )
                             .await;
