@@ -1,17 +1,34 @@
 ## ADDED Requirements
 
-### Requirement: A session report outlives an older process exit
+### Requirement: A restarted agent keeps its new session report
 
-An agent session reported for a pane SHALL NOT be cleared by the detected exit
-of an agent process that was last seen running before the report arrived. It
-SHALL be cleared, as today, by the exit of the process that reported it.
+When an agent in a pane is replaced by a new process of the same agent (a
+restart), the new process's startup session report SHALL become the pane's
+agent session, whether the report arrives before or after detection sees the
+replacement, and whether or not detection saw the old process exit. A startup
+report from the same agent with no replacement process (a nested `claude -p`,
+for example) SHALL still not take over the pane's session.
 
 #### Scenario: A Claude restarted with pane run keeps its session
 
 - **WHEN** the Claude in a pane exits and a new Claude is started at once with
-  `pane run`, its SessionStart hook reports a session, and detection then
-  observes the first Claude's exit
-- **THEN** the pane's agent session is the new Claude's
+  `pane run`, and its SessionStart hook reports a session before detection has
+  seen the old Claude exit
+- **THEN** the pane's agent session is the new Claude's once detection sees
+  the new process
+
+#### Scenario: The replacement is seen first
+
+- **WHEN** detection sees the new Claude process before its SessionStart
+  report arrives
+- **THEN** that one startup report becomes the pane's agent session, and a
+  second conflicting startup report does not
+
+#### Scenario: A nested agent does not take the session
+
+- **WHEN** a Claude inside the pane's Claude reports a startup session and no
+  replacement process is seen
+- **THEN** the pane keeps its session
 
 #### Scenario: A real exit still clears it
 

@@ -42,10 +42,11 @@ same beta:
 - **A moved pane's old ids survive a restart and a handoff** (#111). Each pane
   carries its former public ids in the session file. They are rebuilt into the
   alias map on restore and on handoff. A live id always wins over an alias.
-- **A session report is not wiped by an older process exit** (#112). The
-  build first reproduces the loss in a throwaway session and pins it. The
-  suspected cause is a race: the new Claude's SessionStart report lands, then
-  detection sees the previous Claude exit and clears the fresh record.
+- **A restarted agent keeps its new session report** (#112). Reproduced
+  first: the new Claude's startup report is refused while the old session is
+  on record, and the old one clears only when detection sees the old process
+  exit. Detection now marks a same-agent process in a new process group as a
+  replacement, and the refused report is held and adopted when it is seen.
 
 ## Impact
 
@@ -56,6 +57,7 @@ same beta:
 - #111 adds an optional field to the pane snapshot (`former_public_ids`),
   omitted when empty, so old session files read unchanged and new ones stay
   readable by older builds (serde ignores unknown fields). No protocol bump.
-- #112 touches `src/terminal/state.rs` (session-ref bookkeeping on process
-  exit). It is a server/runtime fact, not TUI state.
+- #112 touches `src/terminal/state.rs`, `src/pane.rs` (detection) and an
+  internal event. It is a server/runtime fact, not TUI state; no protocol
+  change.
 - Docs: none user-facing beyond the look. No keyboard change.
