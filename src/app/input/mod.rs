@@ -256,7 +256,7 @@ impl App {
                 true
             }
             Mode::Navigator => {
-                if !self.state.navigator().is_some_and(|nav| nav.search_focused) {
+                if !self.state.navigator().is_some_and(|nav| nav.search.focused) {
                     return false;
                 }
                 insert_navigator_search_text(&mut self.state, &self.terminal_runtimes, text);
@@ -783,7 +783,7 @@ pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
             .worktree_open()
             .is_some_and(|open| open.search_focused),
         Mode::PaneMoveTargetPicker => false,
-        Mode::Navigator => state.navigator().is_some_and(|nav| nav.search_focused),
+        Mode::Navigator => state.navigator().is_some_and(|nav| nav.search.focused),
         Mode::KeybindHelp => state.keybind_help().is_some_and(|help| help.search_focused),
         Mode::Copy => state
             .copy_mode
@@ -1139,7 +1139,7 @@ mod tests {
         ));
         assert!(!modal_paste_target_active(&state));
         if let Some(nav) = state.navigator_mut() {
-            nav.search_focused = true;
+            nav.search.focused = true;
         }
         assert!(modal_paste_target_active(&state));
 

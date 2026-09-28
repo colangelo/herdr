@@ -147,7 +147,7 @@ impl App {
                         .navigator_search_contains(mouse.column, mouse.row)
                     {
                         if let Some(nav) = self.state.navigator_mut() {
-                            nav.search_focused = true;
+                            nav.search.focused = true;
                         }
                     } else if let Some(idx) = self.state.navigator_row_index_at_from(
                         &self.terminal_runtimes,

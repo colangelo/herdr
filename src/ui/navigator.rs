@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use super::{
+    overlay::{render_search_row, SearchRow},
     scrollbar::{render_scrollbar, should_show_scrollbar},
     status::{state_icon, state_label_color},
     text::{display_width_u16, middle_elide, truncate_end},
@@ -51,72 +52,42 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
         return;
     };
 
-    let p = &app.palette;
-    let focus_style = if nav.search_focused {
-        Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(p.overlay0)
-    };
     let count = app
         .workspaces
         .iter()
         .flat_map(|workspace| workspace.tabs.iter())
         .map(|tab| tab.panes.len())
         .sum::<usize>();
-    let mut spans = vec![Span::styled(" / ", focus_style)];
-    let query = nav.query.text().trim();
-    match nav.state_filter {
-        Some(NavigatorStateFilter::Blocked) => push_state_chip(
-            &mut spans,
-            crate::detect::AgentState::Blocked,
-            true,
-            "blocked",
-            app,
-        ),
-        Some(NavigatorStateFilter::Working) => push_state_chip(
-            &mut spans,
-            crate::detect::AgentState::Working,
-            true,
-            "working",
-            app,
-        ),
-        Some(NavigatorStateFilter::Idle) => push_state_chip(
-            &mut spans,
-            crate::detect::AgentState::Idle,
-            true,
-            "idle",
-            app,
-        ),
-        Some(NavigatorStateFilter::Done) => push_state_chip(
-            &mut spans,
-            crate::detect::AgentState::Idle,
-            false,
-            "done",
-            app,
-        ),
-        // The picker has no title bar to name it, so the placeholder and the
-        // footer verb below are what say which job the overlay is doing.
-        None if query.is_empty() => spans.push(Span::styled(
-            if nav.purpose == NavigatorPurpose::PaneTodoLink {
+    // A state filter is shown as its chip in the query's place.
+    let chip = nav.state_filter.map(|filter| {
+        let mut spans = Vec::new();
+        let (state, seen, label) = match filter {
+            NavigatorStateFilter::Blocked => (crate::detect::AgentState::Blocked, true, "blocked"),
+            NavigatorStateFilter::Working => (crate::detect::AgentState::Working, true, "working"),
+            NavigatorStateFilter::Idle => (crate::detect::AgentState::Idle, true, "idle"),
+            NavigatorStateFilter::Done => (crate::detect::AgentState::Idle, false, "done"),
+        };
+        push_state_chip(&mut spans, state, seen, label, app);
+        spans
+    });
+    render_search_row(
+        frame,
+        area,
+        &nav.search,
+        SearchRow {
+            // The picker has no title bar to name it, so the placeholder and
+            // the footer verb below are what say which job the overlay is
+            // doing.
+            placeholder: if nav.purpose == NavigatorPurpose::PaneTodoLink {
                 "search panes to link"
             } else {
                 "search panes"
             },
-            Style::default().fg(p.overlay0),
-        )),
-        None => spans.push(Span::styled(query.to_string(), Style::default().fg(p.text))),
-    }
-    spans.push(Span::styled(
-        format!(
-            "{count:>width$} panes",
-            width = area.width.saturating_sub(16) as usize
-        ),
-        Style::default().fg(p.overlay0),
-    ));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-    if nav.search_focused && nav.state_filter.is_none() {
-        super::keybind_help::set_search_caret(frame, area, &nav.query);
-    }
+            count: format!("{count} panes"),
+            chip,
+        },
+        &app.palette,
+    );
 }
 
 fn push_state_chip(
@@ -206,7 +177,7 @@ fn render_row(
     } else {
         Style::default().fg(p.overlay0).bg(p.panel_bg)
     };
-    let filter_active = nav.state_filter.is_some() || !nav.query.text().trim().is_empty();
+    let filter_active = nav.state_filter.is_some() || !nav.search.query.text().trim().is_empty();
     let context_only = filter_active && !row.matched;
     let text_style = if selected {
         base_style.add_modifier(Modifier::BOLD)
@@ -600,7 +571,7 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     let p = &app.palette;
     let key = Style::default().fg(p.accent).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
-    let line = if nav.search_focused {
+    let line = if nav.search.focused {
         Line::from(vec![
             Span::styled(" enter", key),
             Span::styled(

@@ -12,7 +12,11 @@
 mod button_row;
 mod geometry;
 mod list_cursor;
+mod search;
 
 pub(crate) use button_row::{ButtonRow, ButtonRowHit, ButtonSpec};
 pub(crate) use geometry::{AnchoredPanelSpec, PanelGeometry, VerticalAnchor};
 pub(crate) use list_cursor::{reveal_scroll, ListCursor};
+pub(crate) use search::{
+    render_search_row, set_search_caret, text_matches_query, ListSearch, SearchKey, SearchRow,
+};

@@ -365,22 +365,6 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
 }
 
 /// Put the host cursor on a `" / "`-prefixed search row's insertion point.
-pub(super) fn set_search_caret(
-    frame: &mut Frame,
-    row: Rect,
-    field: &crate::ui::text_field::TextField,
-) {
-    if row.width == 0 {
-        return;
-    }
-    let caret_x = row
-        .x
-        .saturating_add(3)
-        .saturating_add(field.cursor_column().min(u16::MAX as usize) as u16)
-        .min(row.right().saturating_sub(1));
-    frame.set_cursor_position((caret_x, row.y));
-}
-
 fn filter_keybind_help_groups(groups: Vec<HelpGroup>, query: &str) -> Vec<HelpGroup> {
     if query.is_empty() {
         return groups;
@@ -506,7 +490,7 @@ pub(super) fn render_keybind_help_overlay(app: &AppState, frame: &mut Frame) {
         // The search box has an insertion point now, so the host cursor goes
         // where it is — an IME composes at the host cursor, and a caret the
         // user cannot see is a caret they cannot use.
-        set_search_caret(frame, header_rows[1], &help.query);
+        crate::ui::overlay::set_search_caret(frame, header_rows[1], &help.query);
     }
 
     let body_area = stack.content;

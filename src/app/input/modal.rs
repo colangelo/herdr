@@ -201,35 +201,28 @@ pub(crate) fn handle_navigator_key(
     key: KeyEvent,
 ) {
     if state.navigator_search_focused() {
-        match key.code {
-            KeyCode::Esc => {
-                state.set_navigator_search_focused(false);
-            }
-            KeyCode::Enter => {
+        use crate::ui::overlay::SearchKey;
+        let Some(outcome) = state
+            .navigator_mut()
+            .map(|navigator| navigator.search.handle_key(key))
+        else {
+            return;
+        };
+        match outcome {
+            SearchKey::Accept => {
                 state.accept_navigator_selection_from(terminal_runtimes);
             }
             // The shared chords, with plain characters as text: reaching for
             // the search never demotes the picker to the arrow keys, and
             // `j` / `k` are typed rather than moving.
-            _ if list_chord(key.code, key.modifiers, PlainChars::AreText).is_some() => {
+            SearchKey::Chord(_) => {
                 navigator_list_chord(state, terminal_runtimes, key, PlainChars::AreText);
             }
-            // Everything else is the shared editing set on the search box.
-            _ => {
-                let edited = state
-                    .edit_navigator_query(|query| {
-                        super::text_keys::apply_text_key(
-                            query,
-                            key,
-                            super::text_keys::Shape::SingleLine,
-                        )
-                    })
-                    .unwrap_or(false);
-                if edited {
-                    state.set_navigator_state_filter(None);
-                    state.select_first_navigator_match_from(terminal_runtimes);
-                }
+            SearchKey::Edited => {
+                state.set_navigator_state_filter(None);
+                state.select_first_navigator_match_from(terminal_runtimes);
             }
+            SearchKey::Left | SearchKey::Ignored => {}
         }
         return;
     }
@@ -249,7 +242,9 @@ pub(crate) fn handle_navigator_key(
         }
         KeyCode::Char('/') => {
             state.set_navigator_state_filter(None);
-            state.set_navigator_search_focused(true);
+            if let Some(navigator) = state.navigator_mut() {
+                navigator.search.focus();
+            }
             state.clamp_navigator_selection_from(terminal_runtimes);
         }
         KeyCode::Backspace if state.navigator_state_filter().is_some() => {
@@ -338,7 +333,9 @@ pub(crate) fn insert_navigator_search_text(
         return;
     }
     state.set_navigator_state_filter(None);
-    state.edit_navigator_query(|query| query.insert_str(text));
+    if let Some(navigator) = state.navigator_mut() {
+        navigator.search.insert_str(text);
+    }
     state.select_first_navigator_match_from(terminal_runtimes);
 }
 

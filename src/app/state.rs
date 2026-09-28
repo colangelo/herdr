@@ -961,13 +961,7 @@ impl WorktreeOpenState {
     }
 }
 
-pub(crate) fn text_matches_query(query: &str, text: &str) -> bool {
-    let haystack = text.to_lowercase();
-    query
-        .to_lowercase()
-        .split_whitespace()
-        .all(|needle| haystack.contains(needle))
-}
+pub(crate) use crate::ui::overlay::text_matches_query;
 
 /// Computed view geometry — derived from AppState + terminal size.
 /// Updated before each render, consumed by render and mouse handling.
@@ -1151,12 +1145,12 @@ pub(crate) enum NavigatorStateFilter {
     Done,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct NavigatorState {
-    pub query: crate::ui::text_field::TextField,
+    /// The kit's list search: the query and whether it has the keyboard.
+    pub search: crate::ui::overlay::ListSearch,
     pub selected: usize,
     pub scroll: usize,
-    pub search_focused: bool,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
     /// Consulted at activation only, never threaded through rendering of the
@@ -1169,21 +1163,6 @@ pub(crate) struct NavigatorState {
     /// is what made "two overlays open at once" representable. Carrying it on
     /// the overlay that suspended it makes the return path explicit instead.
     pub suspended_pane_todo_edit: Option<PaneTodoEditState>,
-}
-
-impl Default for NavigatorState {
-    fn default() -> Self {
-        Self {
-            query: search_query_field(),
-            selected: 0,
-            scroll: 0,
-            search_focused: false,
-            state_filter: None,
-            expanded_workspaces: std::collections::HashSet::new(),
-            purpose: NavigatorPurpose::default(),
-            suspended_pane_todo_edit: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2277,7 +2256,7 @@ impl AppState {
     /// The navigator's search text, empty when it is closed.
     pub(crate) fn navigator_query(&self) -> &str {
         self.navigator()
-            .map(|navigator| navigator.query.text())
+            .map(|navigator| navigator.search.query.text())
             .unwrap_or_default()
     }
 
@@ -2335,7 +2314,7 @@ impl AppState {
     #[cfg(test)]
     pub(crate) fn set_navigator_query(&mut self, query: &str) {
         if let Some(navigator) = self.navigator_mut() {
-            navigator.query =
+            navigator.search.query =
                 crate::ui::text_field::TextField::from_text(query, SEARCH_QUERY_MAX_CHARS);
         }
     }
@@ -2362,31 +2341,19 @@ impl AppState {
 
     pub(crate) fn navigator_search_focused(&self) -> bool {
         self.navigator()
-            .is_some_and(|navigator| navigator.search_focused)
+            .is_some_and(|navigator| navigator.search.focused)
     }
 
+    #[cfg(test)]
     pub(crate) fn set_navigator_search_focused(&mut self, focused: bool) {
         if let Some(navigator) = self.navigator_mut() {
-            navigator.search_focused = focused;
+            navigator.search.focused = focused;
         }
     }
 
     /// Run `f` on an overlay search box's text, if that overlay is open.
     /// The field is moved out for the duration so `f` can drive the shared
     /// editing set against it while the rest of `AppState` stays reachable.
-    pub(crate) fn edit_navigator_query<T>(
-        &mut self,
-        f: impl FnOnce(&mut crate::ui::text_field::TextField) -> T,
-    ) -> Option<T> {
-        let navigator = self.navigator_mut()?;
-        let mut query = std::mem::replace(&mut navigator.query, search_query_field());
-        let out = f(&mut query);
-        if let Some(navigator) = self.navigator_mut() {
-            navigator.query = query;
-        }
-        Some(out)
-    }
-
     pub(crate) fn edit_keybind_help_query<T>(
         &mut self,
         f: impl FnOnce(&mut crate::ui::text_field::TextField) -> T,
@@ -2402,7 +2369,7 @@ impl AppState {
 
     pub(crate) fn clear_navigator_query(&mut self) {
         if let Some(navigator) = self.navigator_mut() {
-            navigator.query.clear();
+            navigator.search.query.clear();
         }
     }
 
