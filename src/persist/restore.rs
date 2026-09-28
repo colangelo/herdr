@@ -246,14 +246,62 @@ pub fn handoff_pane_aliases(
     aliases
 }
 
-#[cfg(unix)]
+/// The former public ids saved in `snapshot`, each pointing at its pane in
+/// `workspaces` (restored from `snapshot`, so a pane's raw id may have
+/// changed). Spaces are matched by id and panes by their place in the layout,
+/// the way the restore built them. An id that names a live pane now is left
+/// out: a live id means the pane that has it.
+pub fn restored_former_public_ids(
+    snapshot: &SessionSnapshot,
+    workspaces: &[Workspace],
+) -> HashMap<String, PaneId> {
+    let live: HashSet<String> = workspaces
+        .iter()
+        .flat_map(|workspace| {
+            workspace
+                .public_pane_numbers
+                .values()
+                .map(|number| crate::workspace::public_pane_id_for_number(&workspace.id, *number))
+        })
+        .collect();
+    let mut aliases = HashMap::new();
+    for ws_snap in &snapshot.workspaces {
+        let Some(workspace) = workspaces
+            .iter()
+            .find(|workspace| ws_snap.id.as_deref() == Some(workspace.id.as_str()))
+        else {
+            continue;
+        };
+        if ws_snap.tabs.len() != workspace.tabs.len() {
+            continue;
+        }
+        for (tab_snap, tab) in ws_snap.tabs.iter().zip(&workspace.tabs) {
+            let old_ids = collect_snapshot_pane_ids(&tab_snap.layout);
+            let new_ids = tab.layout.pane_ids();
+            if old_ids.len() != new_ids.len() {
+                continue;
+            }
+            for (old_id, new_id) in old_ids.into_iter().zip(new_ids) {
+                let Some(pane) = tab_snap.panes.get(&old_id) else {
+                    continue;
+                };
+                for former in &pane.former_public_ids {
+                    if !live.contains(former) {
+                        aliases.insert(former.clone(), new_id);
+                    }
+                }
+            }
+        }
+    }
+    aliases
+}
+
 fn collect_snapshot_pane_ids(node: &LayoutSnapshot) -> Vec<u32> {
     let mut ids = Vec::new();
     collect_snapshot_ids_inner(node, &mut ids);
     ids
 }
 
-#[cfg(unix)]
 fn collect_snapshot_ids_inner(node: &LayoutSnapshot, ids: &mut Vec<u32>) {
     match node {
         LayoutSnapshot::Pane(id) => ids.push(*id),
@@ -1228,6 +1276,7 @@ mod tests {
             ],
             next_todo_id: 7,
             last_input_at_ms: Some(1_790_000_000_123),
+            former_public_ids: Vec::new(),
         };
         let target_pane = super::super::snapshot::PaneSnapshot {
             cwd: cwd.clone(),
@@ -1239,6 +1288,7 @@ mod tests {
             todos: Vec::new(),
             next_todo_id: 1,
             last_input_at_ms: None,
+            former_public_ids: Vec::new(),
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -1676,6 +1726,7 @@ mod tests {
                             todos: Vec::new(),
                             next_todo_id: 1,
                             last_input_at_ms: None,
+                            former_public_ids: Vec::new(),
                         },
                     )]),
                     zoomed: false,
@@ -1761,6 +1812,7 @@ mod tests {
                                 todos: Vec::new(),
                                 next_todo_id: 1,
                                 last_input_at_ms: None,
+                                former_public_ids: Vec::new(),
                             },
                         ),
                         (
@@ -1775,6 +1827,7 @@ mod tests {
                                 todos: Vec::new(),
                                 next_todo_id: 1,
                                 last_input_at_ms: None,
+                                former_public_ids: Vec::new(),
                             },
                         ),
                     ]),
@@ -1817,6 +1870,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_moved_panes_former_ids_survive_a_restore_that_remaps_pane_ids() {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("w1".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::from([(10, 1), (20, 3)]),
+                next_public_pane_number: 4,
+                public_tab_numbers: vec![5],
+                next_public_tab_number: 6,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Split {
+                        direction: super::super::snapshot::DirectionSnapshot::Horizontal,
+                        ratio: 0.5,
+                        first: Box::new(LayoutSnapshot::Pane(10)),
+                        second: Box::new(LayoutSnapshot::Pane(20)),
+                    },
+                    panes: HashMap::from([
+                        (
+                            10,
+                            super::super::snapshot::PaneSnapshot {
+                                cwd: cwd.clone(),
+                                label: None,
+                                agent_name: None,
+                                managed_agent_kind: None,
+                                agent_session: None,
+                                launch_argv: None,
+                                todos: Vec::new(),
+                                next_todo_id: 1,
+                                last_input_at_ms: None,
+                                former_public_ids: Vec::new(),
+                            },
+                        ),
+                        (
+                            20,
+                            super::super::snapshot::PaneSnapshot {
+                                cwd: cwd.clone(),
+                                label: None,
+                                agent_name: None,
+                                managed_agent_kind: None,
+                                agent_session: None,
+                                launch_argv: None,
+                                todos: Vec::new(),
+                                next_todo_id: 1,
+                                last_input_at_ms: None,
+                                former_public_ids: vec!["w1:p1".into(), "w9:p7".into()],
+                            },
+                        ),
+                    ]),
+                    zoomed: false,
+                    focused: Some(10),
+                    root_pane: Some(10),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+            last_client_size: None,
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (workspaces, _terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        // #111: pane 20 came from space w9 as `w9:p7`, and its shell still
+        // reports under that id. After the restore renumbers the panes, the
+        // id finds the pane that sits where 20 sat. `w1:p1` is the live id of
+        // the other pane, so it is not kept as a former id: a live id wins.
+        let aliases = restored_former_public_ids(&snapshot, &workspaces);
+        let second = workspaces[0].tabs[0].layout.pane_ids()[1];
+        assert_eq!(aliases.get("w9:p7"), Some(&second));
+        assert_eq!(aliases.get("w1:p1"), None);
+        assert_eq!(aliases.len(), 1);
+    }
+
+    #[tokio::test]
     async fn cold_restore_with_gapped_public_tab_numbers_drops_unmanaged_agent_name() {
         let cwd = std::env::current_dir().unwrap();
         let pane_snap = |id: &str| {
@@ -1832,6 +1979,7 @@ mod tests {
                     todos: Vec::new(),
                     next_todo_id: 1,
                     last_input_at_ms: None,
+                    former_public_ids: Vec::new(),
                 },
             )
         };
@@ -1850,6 +1998,7 @@ mod tests {
             todos: Vec::new(),
             next_todo_id: 1,
             last_input_at_ms: None,
+            former_public_ids: Vec::new(),
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -2005,6 +2154,7 @@ mod tests {
                             todos: Vec::new(),
                             next_todo_id: 1,
                             last_input_at_ms: None,
+                            former_public_ids: Vec::new(),
                         },
                     )]),
                     zoomed: false,
@@ -2170,6 +2320,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                former_public_ids: Vec::new(),
             },
         );
         let history = SessionHistorySnapshot {

@@ -135,6 +135,12 @@ pub struct PaneSnapshot {
     /// this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_input_at_ms: Option<i64>,
+    /// Public ids the pane had before it moved to another space. A shell in
+    /// the pane still exports the id it started under, so its hooks report
+    /// with it; keeping these across a restart or a handoff keeps those
+    /// reports landing. Omitted when the pane never moved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub former_public_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -338,6 +344,35 @@ pub fn capture(
     }
 }
 
+/// Write each pane's former public ids (the ids a move left behind, see
+/// `AppState::public_pane_id_aliases`) into `snapshot`, which was captured
+/// from `workspaces`. Sorted, so an unchanged session saves identically.
+pub fn record_former_public_ids(
+    snapshot: &mut SessionSnapshot,
+    workspaces: &[Workspace],
+    aliases: &std::collections::HashMap<String, crate::layout::PaneId>,
+) {
+    for (former_id, pane_id) in aliases {
+        let pane = workspaces
+            .iter()
+            .zip(snapshot.workspaces.iter_mut())
+            .flat_map(|(workspace, ws_snap)| workspace.tabs.iter().zip(ws_snap.tabs.iter_mut()))
+            .find(|(tab, _)| tab.panes.contains_key(pane_id))
+            .and_then(|(_, tab_snap)| tab_snap.panes.get_mut(&pane_id.raw()));
+        if let Some(pane) = pane {
+            pane.former_public_ids.push(former_id.clone());
+        }
+    }
+    for pane in snapshot
+        .workspaces
+        .iter_mut()
+        .flat_map(|ws| ws.tabs.iter_mut())
+        .flat_map(|tab| tab.panes.values_mut())
+    {
+        pane.former_public_ids.sort();
+    }
+}
+
 fn capture_workspace(
     ws: &Workspace,
     terminals: &std::collections::HashMap<
@@ -440,6 +475,7 @@ fn capture_tab(
                 todos,
                 next_todo_id,
                 last_input_at_ms,
+                former_public_ids: Vec::new(),
             },
         );
     }
@@ -574,6 +610,17 @@ pub(super) fn snapshot_file_version(content: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+
+    /// #111: a session saved before panes carried former ids reads as if no
+    /// pane ever moved, and a pane that never moved saves no field.
+    #[test]
+    fn a_pane_without_former_ids_reads_and_saves_unchanged() {
+        let json = r#"{"cwd":"/tmp","next_todo_id":1}"#;
+        let pane: PaneSnapshot = serde_json::from_str(json).expect("an old pane reads");
+        assert!(pane.former_public_ids.is_empty());
+        let saved = serde_json::to_string(&pane).expect("saves");
+        assert!(!saved.contains("former_public_ids"), "{saved}");
+    }
     use std::path::PathBuf;
 
     use ratatui::layout::{Direction, Rect};
@@ -748,6 +795,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                former_public_ids: Vec::new(),
             },
         );
         panes.insert(
@@ -762,6 +810,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                former_public_ids: Vec::new(),
             },
         );
 
@@ -1381,6 +1430,7 @@ mod tests {
             }],
             next_todo_id: 4,
             last_input_at_ms: None,
+            former_public_ids: Vec::new(),
         };
 
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -1410,6 +1460,7 @@ mod tests {
             todos: Vec::new(),
             next_todo_id: 1,
             last_input_at_ms: None,
+            former_public_ids: Vec::new(),
         };
 
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -1496,6 +1547,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                former_public_ids: Vec::new(),
             },
         );
         panes.insert(
@@ -1512,6 +1564,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                former_public_ids: Vec::new(),
             },
         );
 

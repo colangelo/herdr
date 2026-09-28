@@ -54,7 +54,7 @@ impl App {
         if self.state.workspaces.is_empty() {
             SessionSaveJob::Clear
         } else {
-            let snapshot = crate::persist::capture(
+            let mut snapshot = crate::persist::capture(
                 &self.state.workspaces,
                 &self.state.terminals,
                 &self.terminal_runtimes,
@@ -64,6 +64,11 @@ impl App {
                 self.state.sidebar_section_split,
                 self.state.collapsed_space_keys.clone(),
                 self.state.last_client_size,
+            );
+            crate::persist::record_former_public_ids(
+                &mut snapshot,
+                &self.state.workspaces,
+                &self.state.public_pane_id_aliases,
             );
             let history = self.persist_pane_history.then(|| {
                 crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)

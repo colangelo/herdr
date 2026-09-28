@@ -1341,7 +1341,7 @@ impl HeadlessServer {
             }
         }
 
-        let snapshot = crate::persist::capture(
+        let mut snapshot = crate::persist::capture(
             &self.app.state.workspaces,
             &self.app.state.terminals,
             &self.app.terminal_runtimes,
@@ -1351,6 +1351,11 @@ impl HeadlessServer {
             self.app.state.sidebar_section_split,
             self.app.state.collapsed_space_keys.clone(),
             self.app.state.last_client_size,
+        );
+        crate::persist::record_former_public_ids(
+            &mut snapshot,
+            &self.app.state.workspaces,
+            &self.app.state.public_pane_id_aliases,
         );
 
         let mut handoff_entries = Vec::new();

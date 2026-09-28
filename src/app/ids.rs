@@ -113,11 +113,17 @@ impl App {
         None
     }
 
+    /// Resolve a pane id from the API. A live id means the pane that has it;
+    /// only an id no live pane has falls back to the ids panes had before they
+    /// moved to another space (their shells still export those).
     pub(crate) fn parse_pane_id(&self, id: &str) -> Option<(usize, crate::layout::PaneId)> {
-        if let Some(alias) = self.state.public_pane_id_aliases.get(id).copied() {
-            return self.find_pane(alias).map(|(ws_idx, _)| (ws_idx, alias));
-        }
+        self.parse_live_pane_id(id).or_else(|| {
+            let alias = self.state.public_pane_id_aliases.get(id).copied()?;
+            self.find_pane(alias).map(|(ws_idx, _)| (ws_idx, alias))
+        })
+    }
 
+    fn parse_live_pane_id(&self, id: &str) -> Option<(usize, crate::layout::PaneId)> {
         if let Some(rest) = id.strip_prefix("p_") {
             if let Some((ws_raw, pane_raw)) = rest.rsplit_once('_') {
                 let ws_idx = self.parse_workspace_id(ws_raw)?;

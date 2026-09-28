@@ -3788,6 +3788,110 @@ command = "echo custom"
         assert!(app.state.toast.is_none());
     }
 
+    fn report_agent_session(app: &mut App, pane_id: &str, session: &str) -> String {
+        app.handle_api_request(crate::api::schema::Request {
+            id: "t".into(),
+            method: crate::api::schema::Method::PaneReportAgentSession(
+                crate::api::schema::PaneReportAgentSessionParams {
+                    pane_id: pane_id.to_string(),
+                    source: "herdr:claude".into(),
+                    agent: "claude".into(),
+                    seq: Some(1),
+                    agent_session_id: Some(session.to_string()),
+                    agent_session_path: None,
+                    session_start_source: Some("startup".into()),
+                },
+            ),
+        })
+    }
+
+    /// #111: a pane moved to another space keeps exporting its old
+    /// `HERDR_PANE_ID`. That id used to resolve only until the server
+    /// restarted or handed off, because the old-id map lived in memory. Now
+    /// the session file carries it.
+    #[test]
+    fn a_moved_panes_old_id_still_reports_after_a_save_and_restore() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let moved = app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let old_id = app.public_pane_id(0, moved).expect("old id");
+        let two_tab = app.public_tab_id(1, 0).expect("two's tab");
+        app.dispatch_pane_move_to_target(
+            old_id.clone(),
+            crate::app::state::PaneMoveTarget::Tab { tab_id: two_tab },
+        );
+        assert!(app.state.workspaces[1].tabs[0].panes.contains_key(&moved));
+
+        // Save the session as the server does, through the file format.
+        let mut snapshot = crate::persist::capture(
+            &app.state.workspaces,
+            &app.state.terminals,
+            &app.terminal_runtimes,
+            app.state.active,
+            app.state.selected,
+            app.state.sidebar_width,
+            app.state.sidebar_section_split,
+            app.state.collapsed_space_keys.clone(),
+            app.state.last_client_size,
+        );
+        crate::persist::record_former_public_ids(
+            &mut snapshot,
+            &app.state.workspaces,
+            &app.state.public_pane_id_aliases,
+        );
+        let snapshot: crate::persist::SessionSnapshot =
+            serde_json::from_str(&serde_json::to_string(&snapshot).expect("saves")).expect("reads");
+
+        // A new server starts with no old-id map: what every restart and
+        // handoff used to leave, so the report was lost.
+        app.state.public_pane_id_aliases.clear();
+        assert!(report_agent_session(&mut app, &old_id, "lost").contains("pane_not_found"));
+
+        app.state.public_pane_id_aliases =
+            crate::persist::restored_former_public_ids(&snapshot, &app.state.workspaces);
+        let response = report_agent_session(&mut app, &old_id, "kept-session");
+        assert!(!response.contains("error"), "{response}");
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&moved]
+            .attached_terminal_id
+            .clone();
+        let session = app.state.terminals[&terminal_id]
+            .persisted_agent_session
+            .as_ref()
+            .expect("the session is recorded on the moved pane");
+        assert_eq!(session.session_ref.value, "kept-session");
+    }
+
+    #[test]
+    fn a_live_pane_id_wins_over_a_former_id() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.ensure_test_terminals();
+        let one = app.state.workspaces[0].tabs[0].root_pane;
+        let two = app.state.workspaces[1].tabs[0].root_pane;
+        let two_id = app.public_pane_id(1, two).expect("two's id");
+        app.state.public_pane_id_aliases.insert(two_id.clone(), one);
+
+        assert_eq!(app.parse_pane_id(&two_id), Some((1, two)));
+    }
+
+    #[test]
+    fn closing_a_moved_pane_saves_no_former_ids() {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let moved = app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let old_id = app.public_pane_id(0, moved).expect("old id");
+        let two_tab = app.public_tab_id(1, 0).expect("two's tab");
+        app.dispatch_pane_move_to_target(
+            old_id,
+            crate::app::state::PaneMoveTarget::Tab { tab_id: two_tab },
+        );
+        app.state
+            .handle_app_event(crate::events::AppEvent::PaneDied { pane_id: moved });
+
+        assert!(app.state.public_pane_id_aliases.is_empty());
+    }
+
     #[test]
     fn move_target_picker_submit_preserves_terminal_and_focuses_moved_pane() {
         let mut app = app_with_test_workspaces(&["main"]);

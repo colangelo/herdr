@@ -519,6 +519,7 @@ impl App {
         let mut restored_terminals = std::collections::HashMap::new();
         let mut restored_terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         let mut restored_last_client_size = None;
+        let mut restored_former_public_ids = std::collections::HashMap::new();
         let (
             workspaces,
             active,
@@ -559,6 +560,7 @@ impl App {
             restored_terminals = terminals;
             restored_terminal_runtimes = terminal_runtimes.into();
             restored_last_client_size = snap.remembered_client_size();
+            restored_former_public_ids = crate::persist::restored_former_public_ids(&snap, &ws);
             if ws.is_empty() {
                 crate::logging::session_restored(0, "empty");
                 (
@@ -678,7 +680,7 @@ impl App {
             terminals: std::collections::HashMap::new(),
             direct_attach_resize_locks: std::collections::HashSet::new(),
             pane_id_aliases: std::collections::HashMap::new(),
-            public_pane_id_aliases: std::collections::HashMap::new(),
+            public_pane_id_aliases: restored_former_public_ids,
             workspaces,
             active,
             previous_pane_focus: None,
@@ -1052,6 +1054,7 @@ impl App {
             app.render_dirty.clone(),
         )?;
         let pane_id_aliases = crate::persist::handoff_pane_aliases(snapshot, &workspaces);
+        let former_public_ids = crate::persist::restored_former_public_ids(snapshot, &workspaces);
 
         app.no_session = false;
         app.state.installed_plugins = load_plugin_registry(app.no_session);
@@ -1068,6 +1071,7 @@ impl App {
         }
         app.state.detach_exits = false;
         app.state.pane_id_aliases = pane_id_aliases;
+        app.state.public_pane_id_aliases = former_public_ids;
         app.state.workspaces = workspaces;
         app.state.terminals = terminals;
         app.terminal_runtimes = runtimes.into();
