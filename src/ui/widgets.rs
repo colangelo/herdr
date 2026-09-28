@@ -28,25 +28,6 @@ pub(crate) const FOOTER_ROWS: u16 = 2;
 /// the pane-move picker and the three worktree dialogs did not.
 pub(crate) const HEADER_ROWS: u16 = 2;
 
-/// Splits a titled overlay's inner area into its title row and the content
-/// below the blank row that follows it, keeping [`HEADER_ROWS`] between them.
-///
-/// For the overlays that place their rows by offset from `inner`. The ones
-/// built from an explicit `Layout::vertical` spend the same rows as a
-/// `Constraint::Length(1)` spacer instead.
-pub(crate) fn header_split(inner: Rect) -> (Rect, Rect) {
-    let title = Rect {
-        height: inner.height.min(1),
-        ..inner
-    };
-    let content = Rect {
-        y: inner.y.saturating_add(HEADER_ROWS),
-        height: inner.height.saturating_sub(HEADER_ROWS),
-        ..inner
-    };
-    (title, content)
-}
-
 /// Splits a panel's inner area into the content rect and the row offset its
 /// buttons sit on, keeping [`FOOTER_ROWS`] between them.
 ///

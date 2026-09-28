@@ -17,12 +17,15 @@ use ratatui::{
     Frame,
 };
 
-use super::overlay::{ButtonRow, ButtonSpec};
+use super::overlay::{
+    render_search_row, AnchoredPanelSpec, ButtonRow, ButtonSpec, SearchRow, VerticalAnchor,
+    LIST_DIALOG_MAX_WIDTH,
+};
 use super::text::truncate_end;
-use super::todo_panel::render_pane_todo_row;
+use super::todo_panel::{pane_todo_row_hides_text, render_pane_todo_row};
 use super::widgets::{
-    centered_popup_rect, footer_split, header_split, panel_contrast_fg, render_action_button,
-    render_modal_header, render_modal_shell, FOOTER_ROWS, HEADER_ROWS,
+    panel_contrast_fg, render_action_button, render_modal_header, render_panel_shell, FOOTER_ROWS,
+    HEADER_ROWS,
 };
 use crate::app::state::{AppState, TodoBoardButton, TodoBoardItem};
 
@@ -33,11 +36,6 @@ use crate::app::state::{AppState, TodoBoardButton, TodoBoardItem};
 /// at a width the screen had no need to impose.
 const TODO_BOARD_MIN_WIDTH: u16 = 80;
 
-/// The widest the board will grow for its content, before the screen clamps
-/// it. A board spanning a very wide terminal would put its footer buttons a
-/// screen away from the rows they act on.
-const TODO_BOARD_MAX_WIDTH: u16 = 140;
-
 /// Columns a group's todos are drawn in from its heading.
 ///
 /// Applied by narrowing the rect a todo is drawn into rather than by teaching
@@ -47,12 +45,10 @@ const TODO_BOARD_MAX_WIDTH: u16 = 140;
 /// thing being indented *from*.
 pub(crate) const TODO_BOARD_TODO_INDENT: u16 = 2;
 
-/// The board never shrinks below this, so an empty one still reads as a panel.
-const TODO_BOARD_MIN_HEIGHT: u16 = 8;
-
-/// Rows of chrome around the list: the modal border, the header block (its
-/// title and the blank row under it), and the footer block.
-const TODO_BOARD_CHROME_ROWS: u16 = 2 + HEADER_ROWS + FOOTER_ROWS;
+/// Rows the board's header block occupies: its title, its search row, and the
+/// blank row under them. One more than [`HEADER_ROWS`] because this overlay's
+/// header is two lines rather than one.
+pub(crate) const TODO_BOARD_HEADER_ROWS: u16 = HEADER_ROWS + 1;
 
 /// The board's footer, in the panel's language: the shortcut hint inside the
 /// filled box, in render order.
@@ -110,62 +106,48 @@ pub(crate) fn todo_board_button_specs(
     specs
 }
 
-/// Everything the board is drawn and hit-tested against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TodoBoardGeometry {
-    pub outer: Rect,
-    pub inner: Rect,
-    /// The header row, above the list.
-    pub header: Rect,
-    /// The list rect, below the header and short of the footer block.
-    pub list: Rect,
-    pub footer_row: Rect,
-}
-
 /// Where the board sits. Centred rather than anchored: it belongs to the
 /// session, not to a pane, so there is nothing to hang it off.
 ///
 /// It grows to its content in both directions and lets the screen do the
 /// clamping, because the board's whole job is showing a session's worth of
 /// todos at once — a fixed box turned that into scrolling as soon as a few
-/// panes had work.
+/// panes had work. Width stops at the cap every centred list dialog shares.
 ///
-/// `content_width` is what the caller measured its rows to need. The result is
-/// never less than the footer's natural width, so the board cannot end up too
-/// narrow for the controls it means to show, and that is measured from the
-/// full set of boxes rather than the ones the current selection happens to
-/// offer, so the box does not resize as the selection moves.
+/// `content_width` is what the caller measured its rows to need, and
+/// `item_count` every row of the projection rather than the filtered ones, so
+/// a query does not resize the board. The width is never less than the
+/// footer's natural width, measured from the full set of boxes rather than
+/// the ones the current selection happens to offer, so the box does not
+/// resize as the selection moves either.
+pub(crate) fn todo_board_spec(
+    area: Rect,
+    item_count: usize,
+    content_width: u16,
+) -> AnchoredPanelSpec {
+    AnchoredPanelSpec {
+        anchor: area,
+        screen: area,
+        content_width: content_width
+            .max(ButtonRow::natural_width(&todo_board_button_specs(true, true)).saturating_add(2)),
+        width_bounds: (TODO_BOARD_MIN_WIDTH, LIST_DIALOG_MAX_WIDTH),
+        rows: item_count.min(usize::from(u16::MAX)) as u16,
+        max_rows: u16::MAX,
+        footer_rows: FOOTER_ROWS,
+        detail_rows: 0,
+        header_rows: TODO_BOARD_HEADER_ROWS,
+        vertical: VerticalAnchor::Centered,
+    }
+}
+
+/// [`todo_board_spec`] resolved with no detail box.
+#[cfg(test)]
 pub(crate) fn todo_board_geometry(
     area: Rect,
     item_count: usize,
     content_width: u16,
-) -> Option<TodoBoardGeometry> {
-    let width = content_width
-        .clamp(TODO_BOARD_MIN_WIDTH, TODO_BOARD_MAX_WIDTH)
-        .max(ButtonRow::natural_width(&todo_board_button_specs(true, true)).saturating_add(2));
-    let height = (item_count as u16)
-        .saturating_add(TODO_BOARD_CHROME_ROWS)
-        .max(TODO_BOARD_MIN_HEIGHT);
-    let outer = centered_popup_rect(area, width, height)?;
-    let inner = Rect::new(
-        outer.x + 1,
-        outer.y + 1,
-        outer.width.saturating_sub(2),
-        outer.height.saturating_sub(2),
-    );
-    if inner.width == 0 || inner.height < HEADER_ROWS + FOOTER_ROWS {
-        return None;
-    }
-    let (header, below_header) = header_split(inner);
-    let (list, _) = footer_split(below_header, true);
-    let footer_row = Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1);
-    Some(TodoBoardGeometry {
-        outer,
-        inner,
-        header,
-        list,
-        footer_row,
-    })
+) -> Option<super::overlay::PanelGeometry> {
+    todo_board_spec(area, item_count, content_width).resolve()
 }
 
 /// A group heading's text: the space, then the pane's label —
@@ -202,21 +184,51 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
     };
     let p = &app.palette;
     super::dim_background(frame, area);
-    if render_modal_shell(frame, area, geometry.outer.width, geometry.outer.height, p).is_none() {
+    if render_panel_shell(frame, geometry.outer, p.accent, p.panel_bg).is_none() {
         return;
     }
-    // `todos/notes`, not `todos`: what a pane records is as often a note to
-    // self as a task, and a title naming only one of them says the other does
-    // not belong here. Only the title changes — the CLI, the config key, the
-    // socket method and the protocol are addresses, and renaming those costs a
-    // protocol bump and a permanent divergence from upstream's `todo` naming.
-    render_modal_header(frame, geometry.header, "todos/notes", p);
+    let header = geometry.header;
+    if header.height >= 2 {
+        // `todos/notes`, not `todos`: what a pane records is as often a note
+        // to self as a task, and a title naming only one of them says the
+        // other does not belong here. Only the title changes — the CLI, the
+        // config key, the socket method and the protocol are addresses, and
+        // renaming those costs a protocol bump and a permanent divergence from
+        // upstream's `todo` naming.
+        render_modal_header(
+            frame,
+            Rect::new(header.x, header.y, header.width, 1),
+            "todos/notes",
+            p,
+        );
+        let count = board
+            .all_items
+            .iter()
+            .filter(|item| matches!(item, TodoBoardItem::Todo { .. }))
+            .count();
+        render_search_row(
+            frame,
+            Rect::new(header.x, header.y + 1, header.width, 1),
+            &board.search,
+            SearchRow {
+                placeholder: "search todos",
+                count: format!("{count} {}", if count == 1 { "todo" } else { "todos" }),
+                chip: None,
+            },
+            p,
+        );
+    }
 
     // The empty state still falls through to the footer: opening the board on
     // a quiet session must say so rather than look like a broken keybinding.
     if board.items.is_empty() {
+        let message = if board.all_items.is_empty() {
+            " nothing outstanding"
+        } else {
+            " no match"
+        };
         frame.render_widget(
-            Paragraph::new(" nothing outstanding").style(Style::default().fg(p.overlay0)),
+            Paragraph::new(message).style(Style::default().fg(p.overlay0)),
             Rect::new(
                 geometry.list.x,
                 geometry.list.y,
@@ -254,21 +266,25 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
                 let Some(todo) = app.pane_todo_ref(*pane_id, *todo_id) else {
                     continue;
                 };
-                let indented = Rect::new(
-                    row_rect.x.saturating_add(TODO_BOARD_TODO_INDENT),
-                    row_rect.y,
-                    row_rect.width.saturating_sub(TODO_BOARD_TODO_INDENT),
-                    row_rect.height,
-                );
                 render_pane_todo_row(
                     frame,
                     app,
-                    indented,
+                    todo_board_todo_rect(row_rect),
                     todo,
                     start + row == board.list.selected,
                 );
             }
         }
+    }
+
+    if let Some(detail) = geometry.detail {
+        let row = todo_board_todo_rect(Rect::new(detail.x, detail.y, detail.width, 1));
+        let text = board
+            .selected_todo()
+            .and_then(|(pane_id, todo_id)| app.pane_todo_ref(pane_id, todo_id))
+            .filter(|todo| pane_todo_row_hides_text(app, row, todo))
+            .map(|todo| todo.text.as_str());
+        crate::ui::overlay::render_detail_box(frame, detail, text, p);
     }
 
     if let Some(buttons) = app.todo_board_buttons() {
@@ -288,6 +304,17 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
             render_action_button(frame, placed.rect, placed.hint, placed.label, style);
         }
     }
+}
+
+/// A board row narrowed to where its todo is drawn: in from its heading by
+/// [`TODO_BOARD_TODO_INDENT`].
+pub(crate) fn todo_board_todo_rect(row_rect: Rect) -> Rect {
+    Rect::new(
+        row_rect.x.saturating_add(TODO_BOARD_TODO_INDENT),
+        row_rect.y,
+        row_rect.width.saturating_sub(TODO_BOARD_TODO_INDENT),
+        row_rect.height,
+    )
 }
 
 #[cfg(test)]
@@ -348,18 +375,19 @@ mod tests {
             ("archive the change", true, TodoPriority::Low),
         ])
         .assert(
-            Rect::new(2, 7, 76, 10),
+            Rect::new(0, 7, 80, 11),
             &[
-                "┌──────────────────────────────────────────────────────────────────────────┐",
-                "│ todos/notes                                                              │",
-                "│                                                                          │",
-                "│ board · pane 1                                                           │",
-                "│   ▲ rerun the deploy                                                   #1│",
-                "│   ● check the 403                                                      #2│",
-                "│   ✓ archive the change                                                 #3│",
-                "│                                                                          │",
-                "│          ↵ open pane    spc toggle    c clear done    esc close          │",
-                "└──────────────────────────────────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                                  │",
+                "│ / search todos                                                       3 todos │",
+                "│                                                                              │",
+                "│ board · pane 1                                                               │",
+                "│   ▲ rerun the deploy                                                       #1│",
+                "│   ● check the 403                                                          #2│",
+                "│   ✓ archive the change                                                     #3│",
+                "│                                                                              │",
+                "│            ↵ open pane    spc toggle    c clear done    esc close            │",
+                "└──────────────────────────────────────────────────────────────────────────────┘",
             ],
         );
     }
@@ -393,36 +421,98 @@ mod tests {
         open.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         test_support::layout(&mut open);
         test_support::overlay_snapshot(&base, &open).assert(
-            Rect::new(2, 7, 76, 11),
+            Rect::new(0, 6, 80, 12),
             &[
-                "┌──────────────────────────────────────────────────────────────────────────┐",
-                "│ todos/notes                                                              │",
-                "│                                                                          │",
-                "│ board · pane 1                                                           │",
-                "│   ● rerun the deploy                                                   #1│",
-                "│                                                                          │",
-                "│ board · pane 2                                                           │",
-                "│   ● check the 403                                                      #1│",
-                "│                                                                          │",
-                "│          ↵ open pane    spc toggle    c clear done    esc close          │",
-                "└──────────────────────────────────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                                  │",
+                "│ / search todos                                                       2 todos │",
+                "│                                                                              │",
+                "│ board · pane 1                                                               │",
+                "│   ● rerun the deploy                                                       #1│",
+                "│                                                                              │",
+                "│ board · pane 2                                                               │",
+                "│   ● check the 403                                                          #1│",
+                "│                                                                              │",
+                "│            ↵ open pane    spc toggle    c clear done    esc close            │",
+                "└──────────────────────────────────────────────────────────────────────────────┘",
             ],
         );
+    }
+
+    /// `/` and a word: the other group and its gap are gone, the heading of
+    /// the match stays, and the box keeps its size.
+    #[test]
+    fn snapshot_board_searching() {
+        let base = app_with_two_groups();
+        let mut open = app_with_two_groups();
+        open.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
+        if let Some(board) = open.todo_board_mut() {
+            board.search.focus();
+            board.search.query.insert_str("403");
+        }
+        open.refilter_todo_board();
+        test_support::layout(&mut open);
+        test_support::overlay_snapshot(&base, &open).assert(
+            Rect::new(0, 6, 80, 12),
+            &[
+                "┌──────────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                                  │",
+                "│ / 403                                                                2 todos │",
+                "│                                                                              │",
+                "│ board · pane 2                                                               │",
+                "│   ● check the 403                                                          #1│",
+                "│                                                                              │",
+                "│                                                                              │",
+                "│                                                                              │",
+                "│                                                                              │",
+                "│            ↵ open pane    spc toggle    c clear done    esc close            │",
+                "└──────────────────────────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
+
+    /// The board shows the selected todo's full text in the same kit box as
+    /// the pane panel, whenever a row hides text.
+    #[test]
+    fn the_board_shows_the_detail_box_for_a_todo_that_hides_text() {
+        let mut open = app_with_todos(&[
+            ("the plan\nstep one\nstep two", false, TodoPriority::High),
+            ("one line", false, TodoPriority::Normal),
+        ]);
+        open.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
+        test_support::layout(&mut open);
+        let geometry = open.todo_board_geometry().expect("board");
+        let detail = geometry
+            .detail
+            .expect("a row hides text, so the box is there");
+        let buffer = test_support::draw_sized(
+            &open,
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        let inside = Rect::new(
+            detail.x + 1,
+            detail.y + 1,
+            detail.width - 2,
+            detail.height - 2,
+        );
+        let rows = test_support::rect_rows(&buffer, inside).join(" ");
+        assert!(rows.contains("step two"), "{rows}");
     }
 
     #[test]
     fn snapshot_empty() {
         snapshot(&[]).assert(
-            Rect::new(2, 8, 76, 8),
+            Rect::new(0, 8, 80, 8),
             &[
-                "┌──────────────────────────────────────────────────────────────────────────┐",
-                "│ todos/notes                                                              │",
-                "│                                                                          │",
-                "│ nothing outstanding                                                      │",
-                "│                                                                          │",
-                "│                                                                          │",
-                "│                         ↵ open pane    esc close                         │",
-                "└──────────────────────────────────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────────────────────────┐",
+                "│ todos/notes                                                                  │",
+                "│ / search todos                                                       0 todos │",
+                "│                                                                              │",
+                "│ nothing outstanding                                                          │",
+                "│                                                                              │",
+                "│                           ↵ open pane    esc close                           │",
+                "└──────────────────────────────────────────────────────────────────────────────┘",
             ],
         );
     }
@@ -512,12 +602,12 @@ mod tests {
         .expect("geometry resolves");
         assert_eq!(
             geometry.list.y + geometry.list.height,
-            geometry.footer_row.y - 1
+            geometry.footer_row.expect("footer").y - 1
         );
         assert_eq!(
-            geometry.header.y + crate::ui::widgets::HEADER_ROWS,
+            geometry.header.y + TODO_BOARD_HEADER_ROWS,
             geometry.list.y,
-            "a blank row sits between the title and the first entry"
+            "a blank row sits between the search row and the first entry"
         );
     }
 
@@ -585,17 +675,14 @@ mod tests {
         );
     }
 
-    /// It stops growing before it swallows the terminal, in both directions.
+    /// It stops growing before it swallows the terminal, in both directions,
+    /// at the width every centred list dialog shares.
     #[test]
     fn the_board_stops_growing_at_its_cap_and_at_the_screen() {
         let screen = Rect::new(0, 0, 200, 60);
         let capped = todo_board_geometry(screen, 4, 400).expect("resolves");
-        assert_eq!(capped.outer.width, TODO_BOARD_MAX_WIDTH);
-        assert!(
-            capped.outer.width >= 140,
-            "the cap leaves room for a long heading and its todos, got {}",
-            capped.outer.width
-        );
+        assert_eq!(capped.outer.width, LIST_DIALOG_MAX_WIDTH);
+        assert_eq!(capped.outer.x, (200 - LIST_DIALOG_MAX_WIDTH) / 2, "centred");
 
         // A short screen clamps rather than overflowing it.
         let short = todo_board_geometry(Rect::new(0, 0, 80, 14), 40, TODO_BOARD_MIN_WIDTH)
@@ -610,7 +697,11 @@ mod tests {
     fn an_empty_board_keeps_a_minimum_height() {
         let geometry = todo_board_geometry(Rect::new(0, 0, 200, 60), 0, TODO_BOARD_MIN_WIDTH)
             .expect("resolves");
-        assert_eq!(geometry.outer.height, TODO_BOARD_MIN_HEIGHT);
+        // One row for the empty state between the header and the footer.
+        assert_eq!(
+            geometry.outer.height,
+            2 + TODO_BOARD_HEADER_ROWS + 1 + crate::ui::FOOTER_ROWS
+        );
     }
 
     #[test]

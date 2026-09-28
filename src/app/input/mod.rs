@@ -255,6 +255,16 @@ impl App {
                 self.insert_worktree_open_search_text(text);
                 true
             }
+            Mode::TodoBoard => {
+                let pasted = self
+                    .state
+                    .todo_board_mut()
+                    .is_some_and(|board| board.search.insert_str(text));
+                if pasted {
+                    self.state.refilter_todo_board();
+                }
+                pasted
+            }
             Mode::PaneMoveTargetPicker => {
                 let pasted = self
                     .state
@@ -795,6 +805,7 @@ pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
         Mode::PaneMoveTargetPicker => state
             .pane_move_target_picker()
             .is_some_and(|picker| picker.search.focused),
+        Mode::TodoBoard => state.todo_board().is_some_and(|board| board.search.focused),
         Mode::Navigator => state.navigator().is_some_and(|nav| nav.search.focused),
         Mode::KeybindHelp => state.keybind_help().is_some_and(|help| help.search_focused),
         Mode::Copy => state

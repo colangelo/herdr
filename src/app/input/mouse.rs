@@ -377,8 +377,25 @@ impl AppState {
                         Some(ButtonRowHit::NearMiss) => return None,
                         None => {}
                     }
-                    self.close_todo_board();
-                    leave_modal(self);
+                    let geometry = self.todo_board_geometry()?;
+                    let search_row = Rect::new(
+                        geometry.header.x,
+                        geometry.header.y + 1,
+                        geometry.header.width,
+                        1,
+                    );
+                    if rect_contains(search_row, mouse.column, mouse.row) {
+                        if let Some(board) = self.todo_board_mut() {
+                            board.search.focus();
+                        }
+                        return None;
+                    }
+                    // Inside the board but off its rows and buttons: inert.
+                    // Only a click outside it dismisses.
+                    if !rect_contains(geometry.outer, mouse.column, mouse.row) {
+                        self.close_todo_board();
+                        leave_modal(self);
+                    }
                 }
                 _ => {}
             }
@@ -1995,13 +2012,30 @@ impl AppState {
             .unwrap_or(0)
     }
 
-    pub(crate) fn todo_board_geometry(&self) -> Option<crate::ui::TodoBoardGeometry> {
+    /// Where the board sits, through the kit, with room reserved for the
+    /// detail box when any of its todos' rows hides text — sized for the
+    /// largest of them, so the board keeps its height as the selection moves.
+    pub(crate) fn todo_board_geometry(&self) -> Option<crate::ui::overlay::PanelGeometry> {
+        use crate::app::state::TodoBoardItem;
+
         let board = self.todo_board()?;
-        crate::ui::todo_board_geometry(
+        let spec = crate::ui::todo_board_spec(
             self.screen_rect(),
-            board.items.len(),
+            board.all_items.len(),
             self.todo_board_content_width(),
-        )
+        );
+        let list_width = spec.resolved_width().saturating_sub(2);
+        let row_width = crate::ui::todo_board_todo_rect(Rect::new(0, 0, list_width, 1)).width;
+        let todos = board.all_items.iter().filter_map(|item| match item {
+            TodoBoardItem::Todo { pane_id, todo_id } => self.pane_todo_ref(*pane_id, *todo_id),
+            _ => None,
+        });
+        let detail_rows = crate::ui::pane_todo_detail_rows(self, todos, row_width, list_width);
+        crate::ui::overlay::AnchoredPanelSpec {
+            detail_rows,
+            ..spec
+        }
+        .resolve()
     }
 
     /// The widest row the board would like to draw, chrome included: a
@@ -2017,7 +2051,7 @@ impl AppState {
             return 0;
         };
         let widest = board
-            .items
+            .all_items
             .iter()
             .map(|item| match item {
                 // A blank row asks for nothing, so it can never be what
@@ -2080,7 +2114,7 @@ impl AppState {
             .selected_todo_board_todo()
             .is_some_and(|todo| self.pane_todo_link_target(&todo).is_some());
         crate::ui::overlay::ButtonRow::layout(
-            self.todo_board_geometry()?.footer_row,
+            self.todo_board_geometry()?.footer_row?,
             &crate::ui::todo_board_button_specs(has_todos, has_live_link),
         )
     }
@@ -4570,6 +4604,40 @@ mod tests {
             app.state.pane_move_target_picker().is_none(),
             "a click outside closes"
         );
+    }
+
+    #[test]
+    fn inside_click_off_rows_does_not_close_the_todo_board() {
+        let mut app = app_for_mouse_test();
+        app.state.open_todo_board(&app.terminal_runtimes);
+        let geometry = app.state.todo_board_geometry().expect("board");
+        // The blank row under the search row: inside, on nothing.
+        let off_rows = (geometry.list.x + 2, geometry.list.y - 1);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            off_rows.0,
+            off_rows.1,
+        ));
+        assert!(app.state.todo_board().is_some(), "inert inside");
+
+        // A click on the search row gives the search the keyboard.
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            geometry.header.x + 4,
+            geometry.header.y + 1,
+        ));
+        assert!(app
+            .state
+            .todo_board()
+            .is_some_and(|board| board.search.focused));
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            geometry.outer.x + geometry.outer.width,
+            geometry.outer.y,
+        ));
+        assert!(app.state.todo_board().is_none(), "a click outside closes");
     }
 
     #[test]

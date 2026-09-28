@@ -1185,9 +1185,48 @@ impl App {
     /// over, and the letters carry the panel's modifier guard so their `ctrl+`
     /// forms fall through to the shared list chords.
     pub(crate) fn handle_todo_board_key_via_api(&mut self, key: KeyEvent) {
+        use crate::ui::overlay::SearchKey;
+
+        // While the search has the keyboard its letters are text, so none of
+        // the board's letter commands can fire from a word being typed.
+        let searching = self
+            .state
+            .todo_board()
+            .is_some_and(|board| board.search.focused);
+        if searching {
+            let Some(outcome) = self
+                .state
+                .todo_board_mut()
+                .map(|board| board.search.handle_key(key))
+            else {
+                return;
+            };
+            match outcome {
+                SearchKey::Accept => self.apply_todo_board_action(TodoBoardAction::OpenOwner),
+                SearchKey::Chord(chord) => self.move_todo_board_selection(chord),
+                SearchKey::Edited => self.state.refilter_todo_board(),
+                SearchKey::Left | SearchKey::Ignored => {}
+            }
+            return;
+        }
+
         let key = overlay_letter_key(key);
         let bare = key.modifiers.is_empty();
         match key.code {
+            KeyCode::Char('/') if bare => {
+                if let Some(board) = self.state.todo_board_mut() {
+                    board.search.focus();
+                }
+            }
+            // A set query is cleared before the board closes.
+            KeyCode::Esc
+                if self
+                    .state
+                    .todo_board_mut()
+                    .is_some_and(|board| board.search.clear_on_escape()) =>
+            {
+                self.state.refilter_todo_board();
+            }
             KeyCode::Enter => self.apply_todo_board_action(TodoBoardAction::OpenOwner),
             KeyCode::Char('e') if bare => self.apply_todo_board_action(TodoBoardAction::Edit),
             KeyCode::Char(' ') if bare => self.apply_todo_board_action(TodoBoardAction::ToggleDone),
@@ -3602,6 +3641,102 @@ mod tests {
         app.state.active = Some(0);
         app.state.open_todo_board(&app.terminal_runtimes);
         (app, here, there)
+    }
+
+    /// Two spaces, each pane holding a todo, and the board open.
+    fn app_with_board_of_two_spaces() -> (App, crate::layout::PaneId) {
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        let mut owner = None;
+        for (ws_idx, text) in [(0, "rerun the deploy"), (1, "check the 403")] {
+            let pane_id = app.state.workspaces[ws_idx].tabs[0].root_pane;
+            owner = Some(pane_id);
+            let terminal_id = app.state.workspaces[ws_idx].tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .expect("test terminal should exist")
+                .add_todo(text, crate::terminal::todo::TodoPriority::Normal, None, 100)
+                .expect("todo should be added");
+        }
+        app.state.active = Some(0);
+        app.state.open_todo_board(&app.terminal_runtimes);
+        (app, owner.expect("two panes"))
+    }
+
+    fn type_on_board(app: &mut App, text: &str) {
+        for ch in text.chars() {
+            app.handle_todo_board_key_via_api(key(KeyCode::Char(ch)));
+        }
+    }
+
+    fn board_rows(app: &App) -> Vec<String> {
+        use crate::app::state::TodoBoardItem;
+        let board = app.state.todo_board().expect("board open");
+        board
+            .items
+            .iter()
+            .map(|item| match item {
+                TodoBoardItem::PaneHeading { space, .. } => format!("# {space}"),
+                TodoBoardItem::Todo { pane_id, todo_id } => app
+                    .state
+                    .pane_todo_by_id(*pane_id, *todo_id)
+                    .map(|todo| todo.text)
+                    .unwrap_or_default(),
+                TodoBoardItem::GroupGap => String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn board_slash_filters_todos_and_keeps_their_heading() {
+        let (mut app, owner) = app_with_board_of_two_spaces();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('/')));
+        type_on_board(&mut app, "403");
+
+        assert_eq!(board_rows(&app), vec!["# two", "check the 403"]);
+        app.handle_todo_board_key_via_api(key(KeyCode::Enter));
+
+        assert!(app.state.todo_board().is_none());
+        assert_eq!(app.state.active, Some(1), "the owner's space");
+        assert_eq!(app.state.workspaces[1].focused_pane_id(), Some(owner));
+    }
+
+    #[test]
+    fn board_letters_type_while_searching() {
+        let (mut app, _) = app_with_board_of_two_spaces();
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('/')));
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('d')));
+
+        let board = app.state.todo_board().expect("board open");
+        assert_eq!(board.search.text(), "d", "`d` is text in the search");
+        assert_eq!(
+            board_rows(&app),
+            vec!["# one", "rerun the deploy"],
+            "nothing was removed; the query narrowed the list"
+        );
+        assert_eq!(board.all_items.len(), 5, "both groups are still there");
+    }
+
+    #[test]
+    fn board_esc_clears_the_query_then_closes() {
+        let (mut app, _) = app_with_board_of_two_spaces();
+        app.handle_todo_board_key_via_api(key(KeyCode::Char('/')));
+        type_on_board(&mut app, "403");
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Esc));
+        let board = app.state.todo_board().expect("still open");
+        assert!(!board.search.focused, "the search let go");
+        assert_eq!(board.search.text(), "403", "and kept its query");
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Esc));
+        assert_eq!(board_rows(&app).len(), 5, "the query is cleared");
+
+        app.handle_todo_board_key_via_api(key(KeyCode::Esc));
+        assert!(app.state.todo_board().is_none());
     }
 
     #[test]

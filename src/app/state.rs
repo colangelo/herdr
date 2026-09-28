@@ -1957,9 +1957,14 @@ pub enum TodoBoardItem {
 /// once per action instead of once per render.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TodoBoardState {
+    /// Every group of the projection. The list is `items`, this filtered by
+    /// the search; the board is sized from this, so a query does not resize
+    /// it.
+    pub all_items: Vec<TodoBoardItem>,
     pub items: Vec<TodoBoardItem>,
     pub list: ListCursor,
     pub hovered_button: Option<TodoBoardButton>,
+    pub search: crate::ui::overlay::ListSearch,
 }
 
 impl TodoBoardState {
@@ -1971,9 +1976,11 @@ impl TodoBoardState {
             .position(|item| matches!(item, TodoBoardItem::Todo { .. }))
             .unwrap_or(0);
         Self {
+            all_items: items.clone(),
             items,
             list: ListCursor::new(selected),
             hovered_button: None,
+            search: crate::ui::overlay::ListSearch::default(),
         }
     }
 

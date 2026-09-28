@@ -698,12 +698,17 @@ impl AppState {
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) {
-        let items = self.todo_board_items(terminal_runtimes);
+        let all_items = self.todo_board_items(terminal_runtimes);
+        let Some(board) = self.todo_board() else {
+            return;
+        };
+        let items = self.filter_todo_board_items(&all_items, &board.search);
         let Some(board) = self.todo_board_mut() else {
             return;
         };
         let previous = board.selected_todo();
         let index = board.list.selected;
+        board.all_items = all_items;
         board.items = items;
         let target = previous
             .and_then(|(pane_id, todo_id)| {
@@ -715,6 +720,69 @@ impl AppState {
             .or_else(|| board.nearest_todo(index, true))
             .unwrap_or(0);
         board.list.select(target);
+    }
+
+    /// The board's list for a search: every group, or with a query set, the
+    /// groups it reaches. A todo matches on its pane heading, its text and its
+    /// `#id` together, so `infra deploy` finds infra's deploy todo; a heading
+    /// stays while any of its todos match, and a matching heading keeps all of
+    /// them. Gaps separate the groups that survive.
+    pub(crate) fn filter_todo_board_items(
+        &self,
+        all_items: &[TodoBoardItem],
+        search: &crate::ui::overlay::ListSearch,
+    ) -> Vec<TodoBoardItem> {
+        if !search.is_active() {
+            return all_items.to_vec();
+        }
+        let mut items = Vec::new();
+        let mut idx = 0;
+        while idx < all_items.len() {
+            let TodoBoardItem::PaneHeading { space, label } = &all_items[idx] else {
+                idx += 1;
+                continue;
+            };
+            let heading = crate::ui::todo_board_heading_text(space, label);
+            let mut end = idx + 1;
+            let mut kept = Vec::new();
+            while let Some(TodoBoardItem::Todo { pane_id, todo_id }) = all_items.get(end) {
+                let text = self
+                    .pane_todo_ref(*pane_id, *todo_id)
+                    .map(|todo| format!("{heading} {} #{}", todo.text, todo.id))
+                    .unwrap_or_default();
+                if search.matches(&text) {
+                    kept.push(all_items[end].clone());
+                }
+                end += 1;
+            }
+            if !kept.is_empty() {
+                if !items.is_empty() {
+                    items.push(TodoBoardItem::GroupGap);
+                }
+                items.push(all_items[idx].clone());
+                items.append(&mut kept);
+            }
+            idx = end;
+        }
+        items
+    }
+
+    /// Refilter the board after its query changed, selecting the first match.
+    pub(crate) fn refilter_todo_board(&mut self) {
+        let visible = self.todo_board_visible_rows();
+        let Some(board) = self.todo_board() else {
+            return;
+        };
+        let items = self.filter_todo_board_items(&board.all_items, &board.search);
+        let Some(board) = self.todo_board_mut() else {
+            return;
+        };
+        board.items = items;
+        let first = board.nearest_todo(0, true).unwrap_or(0);
+        board.list = crate::app::state::ListCursor::new(first);
+        let heading = board.group_heading_index(first);
+        let len = board.items.len();
+        board.list.reveal_with_context(heading, visible, len);
     }
 
     fn navigator_pane_rows_for_tab(
