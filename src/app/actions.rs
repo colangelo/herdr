@@ -3215,6 +3215,12 @@ impl AppState {
                     .collect()
                 }
             }
+            AppEvent::CodexThreadResolved { pane_id, thread_id } => self
+                .update_terminal_state(pane_id, |terminal| {
+                    terminal.record_resolved_codex_thread(thread_id)
+                })
+                .into_iter()
+                .collect(),
             AppEvent::AgentSessionReported {
                 pane_id,
                 source,

@@ -1307,6 +1307,7 @@ impl App {
                         name,
                         only_if_unnamed: true,
                     },
+                    None,
                 );
             }
         }

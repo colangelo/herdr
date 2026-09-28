@@ -1386,6 +1386,45 @@ impl TerminalState {
             == ("herdr:opencode", "opencode", Some("select"), None)
     }
 
+    /// Keep the Codex daemon thread herdr resolved for this pane as its agent
+    /// session, under the official `herdr:codex` source so restore resumes it.
+    ///
+    /// Codex's own hook never reaches herdr from a daemon-hosted thread, so
+    /// this is the only way such a pane learns its session. It yields to a
+    /// session a hook reported, and to a pane that no longer runs Codex.
+    pub fn record_resolved_codex_thread(
+        &mut self,
+        thread_id: String,
+    ) -> Option<TerminalStateMutation> {
+        let runs_codex = self.effective_agent_label() == Some("codex")
+            || self.managed_agent_kind() == Some(Agent::Codex);
+        let hook_session = self
+            .hook_authority
+            .as_ref()
+            .is_some_and(|authority| authority.session_ref.is_some());
+        if !runs_codex || hook_session {
+            return None;
+        }
+        let session_ref = crate::agent_resume::AgentSessionRef::id(thread_id)?;
+        if self
+            .persisted_agent_session
+            .as_ref()
+            .is_some_and(|session| session.agent == "codex" && session.session_ref == session_ref)
+        {
+            return None;
+        }
+        self.persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
+            source: "herdr:codex".into(),
+            agent: "codex".into(),
+            session_ref,
+        });
+        Some(TerminalStateMutation {
+            effective_state_change: None,
+            session_ref_changed: true,
+            agent_released: false,
+        })
+    }
+
     pub fn set_persisted_agent_session(
         &mut self,
         session: crate::agent_resume::PersistedAgentSession,
@@ -2203,6 +2242,57 @@ mod tests {
 
     fn test_terminal() -> TerminalState {
         TerminalState::new(TerminalId::alloc(), "/tmp".into())
+    }
+
+    #[test]
+    fn a_resolved_codex_thread_becomes_the_pane_session() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Codex), terminal.fallback_state);
+
+        let mutation = terminal.record_resolved_codex_thread("thread-1".into());
+
+        assert!(mutation.is_some_and(|mutation| mutation.session_ref_changed));
+        let session = terminal.persisted_agent_session.clone().expect("recorded");
+        assert_eq!(session.source, "herdr:codex");
+        assert_eq!(session.agent, "codex");
+        assert_eq!(
+            session.session_ref.kind,
+            crate::agent_resume::AgentSessionRefKind::Id
+        );
+        assert_eq!(session.session_ref.value, "thread-1");
+        assert!(
+            terminal
+                .record_resolved_codex_thread("thread-1".into())
+                .is_none(),
+            "the same thread again changes nothing"
+        );
+    }
+
+    #[test]
+    fn a_resolved_codex_thread_counts_during_a_managed_launch() {
+        let mut terminal = test_terminal();
+        terminal.begin_managed_agent(
+            "worker".into(),
+            Agent::Codex,
+            Instant::now(),
+            Duration::from_millis(100),
+            Duration::from_secs(30),
+        );
+
+        assert!(terminal
+            .record_resolved_codex_thread("thread-1".into())
+            .is_some());
+    }
+
+    #[test]
+    fn a_resolved_codex_thread_is_dropped_when_the_pane_left_codex() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Claude), terminal.fallback_state);
+
+        assert!(terminal
+            .record_resolved_codex_thread("thread-1".into())
+            .is_none());
+        assert!(terminal.persisted_agent_session.is_none());
     }
 
     fn test_session_path(name: &str) -> String {

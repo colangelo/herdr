@@ -171,7 +171,11 @@ impl App {
             None => terminal.clear_agent_name(),
         }
         if let (Some(job), Some(socket)) = (codex_rename, self.codex_app_server.naming_socket()) {
-            crate::codex_app_server::spawn_name_job(socket.to_path_buf(), job);
+            crate::codex_app_server::spawn_name_job(
+                socket.to_path_buf(),
+                job,
+                Some(self.codex_thread_reply(resolved.pane_id)),
+            );
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
@@ -272,6 +276,7 @@ impl App {
                         launched_at: crate::codex_app_server::unix_now_ms(),
                         name: name.clone(),
                     },
+                    Some(self.codex_thread_reply(pane_id)),
                 );
             }
         }
@@ -483,6 +488,19 @@ fn agent_start_argv(
     argv.extend(args);
     argv.extend(codex_args);
     argv
+}
+
+impl App {
+    /// Where a naming job reports the Codex thread it resolved for `pane_id`.
+    fn codex_thread_reply(
+        &self,
+        pane_id: crate::layout::PaneId,
+    ) -> crate::codex_app_server::ThreadReply {
+        crate::codex_app_server::ThreadReply {
+            events: self.event_tx.clone(),
+            pane_id,
+        }
+    }
 }
 
 /// What naming needs to know about the Codex process running in a pane.

@@ -322,6 +322,7 @@ impl App {
                     name,
                     only_if_unnamed: false,
                 },
+                None,
             );
         }
         true

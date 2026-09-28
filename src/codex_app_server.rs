@@ -244,15 +244,33 @@ fn pick_unnamed_thread(
     }
 }
 
+/// Where to report the thread a naming job resolved for a pane.
+pub(crate) struct ThreadReply {
+    pub events: tokio::sync::mpsc::Sender<crate::events::AppEvent>,
+    pub pane_id: crate::layout::PaneId,
+}
+
 /// Run a naming job on its own thread, so the app loop never waits on the
-/// daemon. Failures are logged; they never affect the pane.
-pub(crate) fn spawn_name_job(socket: PathBuf, job: NameJob) {
+/// daemon. Failures are logged; they never affect the pane. With `reply`, the
+/// thread the job resolved is reported back as the pane's Codex thread.
+pub(crate) fn spawn_name_job(socket: PathBuf, job: NameJob, reply: Option<ThreadReply>) {
     let spawned = std::thread::Builder::new()
         .name("codex-thread-name".into())
         .spawn(move || {
             #[cfg(unix)]
             {
-                match client::run_name_job(&socket, &job) {
+                let mut resolved = None;
+                let result = client::run_name_job_resolving(&socket, &job, &mut resolved);
+                if let (Some(reply), Some(thread_id)) = (reply, resolved) {
+                    let event = crate::events::AppEvent::CodexThreadResolved {
+                        pane_id: reply.pane_id,
+                        thread_id,
+                    };
+                    if let Err(err) = reply.events.try_send(event) {
+                        tracing::warn!(err = %err, "failed to report the resolved codex thread");
+                    }
+                }
+                match result {
                     Ok(outcome) => {
                         tracing::info!(?job, %outcome, "codex thread naming finished");
                     }
@@ -263,7 +281,7 @@ pub(crate) fn spawn_name_job(socket: PathBuf, job: NameJob) {
             }
             #[cfg(not(unix))]
             {
-                let _ = (&socket, &job);
+                let _ = (&socket, &job, &reply);
             }
         });
     if let Err(err) = spawned {
@@ -570,16 +588,26 @@ mod client {
             .position(|window| window == needle)
     }
 
-    /// Name a thread unless it cannot take a name.
-    fn name_thread(rpc: &mut Rpc, thread: &ThreadSummary, name: &str) -> Result<String, RpcError> {
+    /// Name a thread unless it cannot take a name. A thread that carries the
+    /// name afterwards is the pane's, and goes into `resolved`.
+    fn name_thread(
+        rpc: &mut Rpc,
+        thread: &ThreadSummary,
+        name: &str,
+        resolved: &mut Option<String>,
+    ) -> Result<String, RpcError> {
         if !thread.nameable() {
             return Ok(format!("skipped {}: ephemeral or a sub-agent", thread.id));
         }
         if thread.name.as_deref() == Some(name) {
+            *resolved = Some(thread.id.clone());
             return Ok(format!("{} already named {name}", thread.id));
         }
         match rpc.set_name(&thread.id, name) {
-            Ok(()) => Ok(format!("named {} {name}", thread.id)),
+            Ok(()) => {
+                *resolved = Some(thread.id.clone());
+                Ok(format!("named {} {name}", thread.id))
+            }
             // Ephemeral threads refuse metadata updates; not an error for us.
             Err(RpcError::Call(message)) if message.contains("metadata updates") => {
                 Ok(format!("skipped {}: {message}", thread.id))
@@ -588,7 +616,18 @@ mod client {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn run_name_job(socket: &Path, job: &NameJob) -> Result<String, RpcError> {
+        run_name_job_resolving(socket, job, &mut None)
+    }
+
+    /// Run `job`; the thread it named, or found already named, goes into
+    /// `resolved`.
+    pub(super) fn run_name_job_resolving(
+        socket: &Path,
+        job: &NameJob,
+        resolved: &mut Option<String>,
+    ) -> Result<String, RpcError> {
         let deadline = Instant::now() + NAME_JOB_DEADLINE;
         let mut rpc = Rpc::connect(socket)?;
         loop {
@@ -601,7 +640,7 @@ mod client {
                     Ok(thread) if *only_if_unnamed && thread.name.is_some() => {
                         Some(Ok(format!("{thread_id} already named")))
                     }
-                    Ok(thread) => Some(name_thread(&mut rpc, &thread, name)),
+                    Ok(thread) => Some(name_thread(&mut rpc, &thread, name, resolved)),
                     // Not loaded yet: a resume attaches after the shell starts it.
                     Err(RpcError::Call(_)) => None,
                     Err(err) => Some(Err(err)),
@@ -618,7 +657,7 @@ mod client {
                                 .into_iter()
                                 .find(|thread| thread.id == id)
                                 .unwrap_or_default();
-                            Some(name_thread(&mut rpc, &thread, name))
+                            Some(name_thread(&mut rpc, &thread, name, resolved))
                         }
                         Pick::Ambiguous(count) => Some(Ok(format!(
                             "{count} new threads in {}; naming none until the session is reported",
@@ -632,7 +671,7 @@ mod client {
                     new_name,
                     ..
                 } => Some(match rpc.read_thread(id) {
-                    Ok(thread) => name_thread(&mut rpc, &thread, new_name),
+                    Ok(thread) => name_thread(&mut rpc, &thread, new_name, resolved),
                     Err(_) => Ok(format!("thread {id} is not on the daemon")),
                 }),
                 NameJob::Rename {
@@ -649,7 +688,9 @@ mod client {
                         })
                     });
                     Some(match (by_old_name, process_started_at) {
-                        (Some(thread), _) => name_thread(&mut rpc, &thread.clone(), new_name),
+                        (Some(thread), _) => {
+                            name_thread(&mut rpc, &thread.clone(), new_name, resolved)
+                        }
                         (None, Some(started_at)) => {
                             match pick_process_thread(&threads, cwd, *started_at) {
                                 Pick::One(id) => {
@@ -657,7 +698,7 @@ mod client {
                                         .into_iter()
                                         .find(|thread| thread.id == id)
                                         .unwrap_or_default();
-                                    name_thread(&mut rpc, &thread, new_name)
+                                    name_thread(&mut rpc, &thread, new_name, resolved)
                                 }
                                 Pick::Ambiguous(count) => Ok(format!(
                                     "{count} unnamed threads in {} started with the pane's codex; naming none",
@@ -1183,6 +1224,48 @@ mod tests {
             name_calls(&calls),
             [serde_json::json!({"threadId": "mine", "name": "worker"})]
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_naming_job_reports_the_thread_it_named_and_nothing_else() {
+        let dir = temp_dir("resolved");
+        let (socket, _calls) = loaded_daemon(
+            &dir,
+            vec![
+                serde_json::json!({"id": "mine", "cwd": "/repo", "ephemeral": false, "createdAt": 102}),
+            ],
+        );
+        let mut resolved = None;
+        client::run_name_job_resolving(
+            &socket,
+            &NameJob::Rename {
+                thread_id: None,
+                cwd: "/repo".into(),
+                old_name: None,
+                new_name: "worker".into(),
+                process_started_at: Some(100_000),
+            },
+            &mut resolved,
+        )
+        .expect("rename job");
+        assert_eq!(resolved.as_deref(), Some("mine"));
+
+        let mut unresolved = None;
+        client::run_name_job_resolving(
+            &socket,
+            &NameJob::Rename {
+                thread_id: None,
+                cwd: "/elsewhere".into(),
+                old_name: None,
+                new_name: "worker".into(),
+                process_started_at: Some(100_000),
+            },
+            &mut unresolved,
+        )
+        .expect("rename job");
+        assert_eq!(unresolved, None, "no thread found, none reported");
         let _ = std::fs::remove_dir_all(dir);
     }
 
