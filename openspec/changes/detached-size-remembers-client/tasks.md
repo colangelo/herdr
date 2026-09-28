@@ -31,6 +31,6 @@ covers the new default.
 
 ## 3. Ship (with the batch)
 
-- [ ] 3.1 `just check` green; `openspec validate detached-size-remembers-client --strict`
+- [x] 3.1 `just check` green; `openspec validate detached-size-remembers-client --strict`
 - [ ] 3.2 Beta; live proof on m4m: attach at full size, detach, `herdr-beta pane list` shows real widths; restart the server detached, panes come back at the remembered size; the nightly reads an unclipped footer
 - [ ] 3.3 Comment the SHAs, beta and implementation notes on the issue; close it after the live check
