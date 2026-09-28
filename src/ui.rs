@@ -108,8 +108,8 @@ pub(crate) use self::{
         pane_move_target_content_width, pane_move_target_row_label, pane_todo_edit_rects,
         pane_todo_edit_row_scroll, pane_todo_edit_text_area, remove_worktree_button_rects,
         remove_worktree_popup_rect, rename_button_rects, PaneTodoEditRects,
-        PANE_MOVE_TARGET_HEADER_ROWS, PANE_MOVE_TARGET_MIN_WIDTH, PANE_TODO_EDIT_POPUP_HEIGHT,
-        PANE_TODO_EDIT_POPUP_WIDTH,
+        PANE_MOVE_TARGET_DETAIL_ROWS, PANE_MOVE_TARGET_HEADER_ROWS, PANE_MOVE_TARGET_MIN_WIDTH,
+        PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     },
     settings::{
         settings_button_rects, settings_popup_height, settings_show_primary_action,

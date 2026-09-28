@@ -1982,7 +1982,8 @@ impl AppState {
     ) -> Option<crate::ui::overlay::PanelGeometry> {
         let picker = self.pane_move_target_picker()?;
         let screen = self.screen_rect();
-        crate::ui::overlay::AnchoredPanelSpec {
+        let detail_rows = crate::ui::PANE_MOVE_TARGET_DETAIL_ROWS;
+        let mut geometry = crate::ui::overlay::AnchoredPanelSpec {
             anchor: screen,
             screen,
             content_width: crate::ui::pane_move_target_content_width(&picker.all_items),
@@ -1990,14 +1991,29 @@ impl AppState {
                 crate::ui::PANE_MOVE_TARGET_MIN_WIDTH,
                 crate::ui::overlay::LIST_DIALOG_MAX_WIDTH,
             ),
-            rows: picker.all_items.len().min(usize::from(u16::MAX)) as u16,
+            rows: (picker.all_items.len() + usize::from(detail_rows)).min(usize::from(u16::MAX))
+                as u16,
             max_rows: u16::MAX,
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
             header_rows: crate::ui::PANE_MOVE_TARGET_HEADER_ROWS,
             vertical: crate::ui::overlay::VerticalAnchor::Centered,
         }
-        .resolve()
+        .resolve()?;
+        // A one-line detail (a rule and the line) under the list, not the
+        // kit's boxed detail: it names where the pane would go, it does not
+        // show text the row hides. Dropped before the list gets too short.
+        let list = geometry.list;
+        if list.height >= detail_rows + 3 {
+            geometry.list = Rect::new(list.x, list.y, list.width, list.height - detail_rows);
+            geometry.detail = Some(Rect::new(
+                list.x,
+                list.y + list.height - detail_rows,
+                list.width,
+                detail_rows,
+            ));
+        }
+        Some(geometry)
     }
 
     pub(crate) fn pane_move_target_picker_buttons(
@@ -4478,9 +4494,7 @@ mod tests {
                 crate::app::state::PaneMoveTargetPickerState::new(
                     source_pane_id,
                     vec![
-                        crate::app::state::PaneMoveTargetItem::SpaceHeading {
-                            label: "main".into(),
-                        },
+                        crate::app::state::PaneMoveTargetItem::heading("main"),
                         crate::app::state::PaneMoveTargetItem::Destination(
                             crate::app::state::PaneMoveTargetEntry {
                                 workspace_id: Some(app.state.workspaces[0].id.clone()),
@@ -4489,6 +4503,7 @@ mod tests {
                                 target: crate::app::state::PaneMoveTarget::Tab {
                                     tab_id: target_tab_id,
                                 },
+                                facts: Default::default(),
                             },
                         ),
                     ],
@@ -4531,9 +4546,7 @@ mod tests {
                 crate::app::state::PaneMoveTargetPickerState::new(
                     source_pane_id,
                     vec![
-                        crate::app::state::PaneMoveTargetItem::SpaceHeading {
-                            label: "main".into(),
-                        },
+                        crate::app::state::PaneMoveTargetItem::heading("main"),
                         crate::app::state::PaneMoveTargetItem::Destination(
                             crate::app::state::PaneMoveTargetEntry {
                                 workspace_id: Some(app.state.workspaces[0].id.clone()),
@@ -4542,6 +4555,7 @@ mod tests {
                                 target: crate::app::state::PaneMoveTarget::Tab {
                                     tab_id: target_tab_id,
                                 },
+                                facts: Default::default(),
                             },
                         ),
                     ],
@@ -4574,6 +4588,47 @@ mod tests {
 
         assert!(app.state.pane_move_target_picker().is_some());
         assert_eq!(app.state.workspaces[0].tabs.len(), 2, "nothing moved");
+    }
+
+    /// #110: the pane's own tab is drawn in the list but is not a place to go:
+    /// pointing at it or clicking it neither selects nor moves.
+    #[test]
+    fn move_picker_here_row_is_inert_under_the_mouse() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("main")];
+        app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.workspaces[0].test_add_tab(Some("target"));
+        app.state.workspaces[0].active_tab = 0;
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.open_pane_move_target_picker();
+        let picker = app.state.pane_move_target_picker().expect("picker open");
+        assert!(matches!(
+            picker.items.get(1),
+            Some(crate::app::state::PaneMoveTargetItem::Here(_))
+        ));
+        let selected = picker.list.selected;
+        let list = app
+            .state
+            .pane_move_target_picker_geometry()
+            .expect("picker geometry")
+            .list;
+
+        app.handle_mouse(mouse(MouseEventKind::Moved, list.x + 4, list.y + 1));
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            list.x + 4,
+            list.y + 1,
+        ));
+
+        let picker = app.state.pane_move_target_picker().expect("still open");
+        assert_eq!(picker.list.selected, selected);
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].panes.len(),
+            2,
+            "nothing moved"
+        );
     }
 
     #[test]
@@ -4707,9 +4762,7 @@ mod tests {
                 crate::app::state::PaneMoveTargetPickerState::new(
                     source_pane_id,
                     vec![
-                        crate::app::state::PaneMoveTargetItem::SpaceHeading {
-                            label: "main".into(),
-                        },
+                        crate::app::state::PaneMoveTargetItem::heading("main"),
                         crate::app::state::PaneMoveTargetItem::Destination(
                             crate::app::state::PaneMoveTargetEntry {
                                 workspace_id: Some(app.state.workspaces[0].id.clone()),
@@ -4718,6 +4771,7 @@ mod tests {
                                 target: crate::app::state::PaneMoveTarget::Tab {
                                     tab_id: target_tab_id,
                                 },
+                                facts: Default::default(),
                             },
                         ),
                     ],

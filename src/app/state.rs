@@ -1329,14 +1329,77 @@ pub struct PaneMoveTargetEntry {
     /// Tab label, when the destination is an existing named tab.
     pub label: String,
     pub target: PaneMoveTarget,
+    /// What the row shows about the place, beyond its name.
+    pub facts: PaneMoveTabFacts,
 }
 
-/// One row of the picker. Space headings are rendered but never selectable, so
-/// render and selection read the same list instead of deriving headings twice.
+/// What a tab row shows about the tab: its space, its panes and its state.
+/// Read once when the picker opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneMoveTabFacts {
+    /// The space's name as its heading shows it; empty for the new-space entry.
+    pub space: String,
+    /// The tab's panes, by the label the sidebar gives them, in layout order.
+    /// Empty for the new-tab and new-space entries.
+    pub pane_names: Vec<String>,
+    pub status: crate::detect::AgentState,
+    pub seen: bool,
+}
+
+impl Default for PaneMoveTabFacts {
+    fn default() -> Self {
+        Self {
+            space: String::new(),
+            pane_names: Vec::new(),
+            status: crate::detect::AgentState::Unknown,
+            seen: true,
+        }
+    }
+}
+
+/// One row of the picker. Only [`PaneMoveTargetItem::Destination`] can be
+/// selected; the rest are drawn for orientation, so render and selection read
+/// the same list instead of deriving headings twice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneMoveTargetItem {
-    SpaceHeading { label: String },
+    SpaceHeading {
+        label: String,
+        pane_count: usize,
+        /// The space's activity (`1 working`), empty when there is none.
+        activity: String,
+        status: crate::detect::AgentState,
+        seen: bool,
+    },
+    /// The tab the pane is in now. Moving there does nothing, so it is shown
+    /// greyed, in its place, and never selected or counted.
+    Here(PaneMoveTargetEntry),
     Destination(PaneMoveTargetEntry),
+    /// The blank line between two spaces.
+    Gap,
+}
+
+impl PaneMoveTargetItem {
+    /// A heading with no facts beyond its name, for tests that only care
+    /// about the list's shape.
+    #[cfg(test)]
+    pub fn heading(label: &str) -> Self {
+        Self::SpaceHeading {
+            label: label.to_string(),
+            pane_count: 0,
+            activity: String::new(),
+            status: crate::detect::AgentState::Unknown,
+            seen: true,
+        }
+    }
+
+    /// Whether this row belongs under a space heading as one of its branches.
+    pub fn is_branch(&self) -> bool {
+        match self {
+            Self::Here(_) => true,
+            Self::Destination(entry) => entry.workspace_id.is_some(),
+            Self::SpaceHeading { .. } | Self::Gap => false,
+        }
+    }
 }
 
 /// The move picker's footer buttons.
@@ -1349,6 +1412,10 @@ pub enum PaneMoveTargetPickerButton {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneMoveTargetPickerState {
     pub source_pane_id: String,
+    /// The moving pane's label and where it is (`herdr › tab 1 · cc`), for
+    /// the title. Empty in tests that build a picker by hand.
+    pub source_label: String,
+    pub source_place: String,
     /// Every destination the picker offers, grouped under its space's heading.
     /// The list is `items`, this filtered by the search; the picker is sized
     /// from this, so typing a query does not resize it.
@@ -1364,6 +1431,8 @@ impl PaneMoveTargetPickerState {
     pub fn new(source_pane_id: String, items: Vec<PaneMoveTargetItem>) -> Self {
         let mut picker = Self {
             source_pane_id,
+            source_label: String::new(),
+            source_place: String::new(),
             all_items: items.clone(),
             items,
             list: ListCursor::default(),
@@ -1384,53 +1453,62 @@ impl PaneMoveTargetPickerState {
 
     /// Rebuild the list from the search and select the first match.
     ///
-    /// A destination matches on its row text with its space's name in front,
-    /// so `ctx logs` finds CONTEXT's `logs` tab. A space heading stays while
-    /// any of its destinations match, and a heading that matches keeps all of
-    /// them: a space is a place, and finding it by name offers everything in
-    /// it.
+    /// A destination matches on its row text and its panes' names with its
+    /// space's name in front, so `ctx logs` finds CONTEXT's `logs` tab and
+    /// `keyboard` finds the tab holding `keyboard-shortcuts`. A space heading
+    /// stays while any of its destinations match, and a heading that matches
+    /// keeps all of them: a space is a place, and finding it by name offers
+    /// everything in it. The pane's own tab stays with its space. Surviving
+    /// spaces are kept apart by a gap, as in the full list.
     pub fn refilter(&mut self) {
         if !self.search.is_active() {
             self.items = self.all_items.clone();
             self.select_first_destination();
             return;
         }
-        let mut items = Vec::new();
+        let mut groups: Vec<Vec<PaneMoveTargetItem>> = Vec::new();
         let mut idx = 0;
         while idx < self.all_items.len() {
             match &self.all_items[idx] {
-                PaneMoveTargetItem::SpaceHeading { label } => {
+                PaneMoveTargetItem::SpaceHeading { label, .. } => {
                     let heading_matches = self.search.matches(label);
+                    let mut group = vec![self.all_items[idx].clone()];
+                    let mut kept_destination = false;
                     let mut end = idx + 1;
-                    let mut kept = Vec::new();
-                    while let Some(PaneMoveTargetItem::Destination(entry)) = self.all_items.get(end)
-                    {
-                        if entry.workspace_id.is_none() {
-                            break;
-                        }
-                        let text =
-                            format!("{label} {}", crate::ui::pane_move_target_row_label(entry));
-                        if heading_matches || self.search.matches(&text) {
-                            kept.push(self.all_items[end].clone());
+                    while let Some(item) = self.all_items.get(end).filter(|item| item.is_branch()) {
+                        match item {
+                            PaneMoveTargetItem::Destination(entry)
+                                if heading_matches
+                                    || self.search.matches(&pane_move_search_text(entry)) =>
+                            {
+                                kept_destination = true;
+                                group.push(item.clone());
+                            }
+                            PaneMoveTargetItem::Here(_) => group.push(item.clone()),
+                            _ => {}
                         }
                         end += 1;
                     }
-                    if !kept.is_empty() {
-                        items.push(self.all_items[idx].clone());
-                        items.append(&mut kept);
+                    if kept_destination {
+                        groups.push(group);
                     }
                     idx = end;
                 }
                 PaneMoveTargetItem::Destination(entry) => {
-                    if self
-                        .search
-                        .matches(&crate::ui::pane_move_target_row_label(entry))
-                    {
-                        items.push(self.all_items[idx].clone());
+                    if self.search.matches(&pane_move_search_text(entry)) {
+                        groups.push(vec![self.all_items[idx].clone()]);
                     }
                     idx += 1;
                 }
+                PaneMoveTargetItem::Here(_) | PaneMoveTargetItem::Gap => idx += 1,
             }
+        }
+        let mut items = Vec::new();
+        for (n, mut group) in groups.into_iter().enumerate() {
+            if n > 0 {
+                items.push(PaneMoveTargetItem::Gap);
+            }
+            items.append(&mut group);
         }
         self.items = items;
         self.select_first_destination();
@@ -1481,17 +1559,33 @@ impl PaneMoveTargetPickerState {
     /// when the two fit, so the first destination of a space never scrolls in
     /// without the space's name.
     pub fn reveal(&mut self, visible: usize) {
-        let heading = self.list.selected.saturating_sub(1);
         let len = self.items.len();
-        if matches!(
-            self.items.get(heading),
-            Some(PaneMoveTargetItem::SpaceHeading { .. })
-        ) {
-            self.list.reveal_with_context(heading, visible, len);
-        } else {
-            self.list.reveal(visible, len);
+        let heading = (0..self.list.selected)
+            .rev()
+            .take_while(|idx| !matches!(self.items.get(*idx), Some(PaneMoveTargetItem::Gap)))
+            .find(|idx| {
+                matches!(
+                    self.items.get(*idx),
+                    Some(PaneMoveTargetItem::SpaceHeading { .. })
+                )
+            });
+        match heading {
+            Some(heading) if self.list.selected - heading < visible => {
+                self.list.reveal_with_context(heading, visible, len);
+            }
+            _ => self.list.reveal(visible, len),
         }
     }
+}
+
+/// What a destination is found by: its space, its row text and its panes.
+fn pane_move_search_text(entry: &PaneMoveTargetEntry) -> String {
+    format!(
+        "{} {} {}",
+        entry.facts.space,
+        crate::ui::pane_move_target_row_label(entry),
+        entry.facts.pane_names.join(" ")
+    )
 }
 
 #[derive(Debug, Clone)]

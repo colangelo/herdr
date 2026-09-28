@@ -1210,7 +1210,7 @@ fn state_label_text(state: AgentState, seen: bool) -> &'static str {
     }
 }
 
-fn tab_activity_summary(
+pub(crate) fn tab_activity_summary(
     tab: &crate::workspace::Tab,
     terminals: &std::collections::HashMap<
         crate::terminal::TerminalId,
@@ -1220,7 +1220,7 @@ fn tab_activity_summary(
     activity_summary_for_panes(tab.panes.values(), terminals)
 }
 
-fn workspace_activity_summary(
+pub(crate) fn workspace_activity_summary(
     ws: &crate::workspace::Workspace,
     terminals: &std::collections::HashMap<
         crate::terminal::TerminalId,

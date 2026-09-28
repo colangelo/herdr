@@ -47,6 +47,8 @@ pub(crate) use modal::edits_the_name_input;
 mod modal;
 mod mouse;
 mod navigate;
+#[cfg(test)]
+pub(crate) use navigate::pane_move_target_picker_for_state;
 mod overlays;
 mod selection;
 mod settings;

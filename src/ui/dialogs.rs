@@ -575,44 +575,131 @@ pub(crate) fn pane_move_target_button_specs(
     ]
 }
 
-/// The width the picker's rows want, border included: the widest space
-/// heading or destination row, and never less than its own buttons. Measured
-/// from every destination, not the filtered ones, so a query does not resize
-/// it.
+/// The widest the picker's status column may measure, before its padding: a
+/// tab with many panes lists as many names as fit, then `+N`.
+pub(crate) const PANE_MOVE_TARGET_STATUS_MAX_COLUMNS: u16 = 36;
+
+/// What a row shows on the right: a tab's pane names, a space's activity, or
+/// the reminder on the pane's own tab.
+fn pane_move_target_status(item: &crate::app::state::PaneMoveTargetItem) -> String {
+    use crate::app::state::PaneMoveTargetItem;
+    match item {
+        PaneMoveTargetItem::SpaceHeading { activity, .. } => activity.clone(),
+        PaneMoveTargetItem::Here(_) => "you are here".to_string(),
+        PaneMoveTargetItem::Destination(entry) => entry.facts.pane_names.join(", "),
+        PaneMoveTargetItem::Gap => String::new(),
+    }
+}
+
+/// A heading's text: the space and its pane count, as the navigator writes it.
+fn pane_move_heading_text(label: &str, pane_count: usize) -> String {
+    format!("{label} ({pane_count})")
+}
+
+/// The width of a row's left side: gutter, branch, icon and text, with a spare
+/// column. The same parts [`render_pane_move_target_row`] draws.
+fn pane_move_target_left_width(item: &crate::app::state::PaneMoveTargetItem) -> u16 {
+    use crate::app::state::PaneMoveTargetItem;
+    let text = match item {
+        PaneMoveTargetItem::SpaceHeading {
+            label, pane_count, ..
+        } => pane_move_heading_text(label, *pane_count),
+        PaneMoveTargetItem::Here(entry) | PaneMoveTargetItem::Destination(entry) => {
+            pane_move_target_row_label(entry)
+        }
+        PaneMoveTargetItem::Gap => return 0,
+    };
+    let branch = if item.is_branch() { 4 } else { 0 };
+    3 + branch + 2 + display_width_u16(&text) + 1
+}
+
+/// The width the picker's rows want, border included: its widest tree row plus
+/// a status column as wide as its widest status (capped), and never less than
+/// its own buttons. Measured from every destination, not the filtered ones, so
+/// a query does not resize it.
 pub(crate) fn pane_move_target_content_width(
     items: &[crate::app::state::PaneMoveTargetItem],
 ) -> u16 {
-    use crate::app::state::PaneMoveTargetItem;
-    let widest = items
+    let left = items
         .iter()
-        .map(|item| match item {
-            PaneMoveTargetItem::SpaceHeading { label } => 1 + display_width_u16(label),
-            PaneMoveTargetItem::Destination(entry) => {
-                2 + display_width_u16(&pane_move_target_row_label(entry))
-            }
-        })
+        .map(pane_move_target_left_width)
         .max()
         .unwrap_or(0);
-    // Border, and a spare column so the longest row is not flush against it.
-    widest.saturating_add(3).max(
+    let status = pane_move_target_status_width(items);
+    left.saturating_add(status).saturating_add(2).max(
         crate::ui::overlay::ButtonRow::natural_width(&pane_move_target_button_specs())
             .saturating_add(2),
     )
 }
 
-/// Row text for a picked destination. Tabs keep the number/label shape the flat
-/// picker used; the two creating destinations name what they create.
+/// The status column, a space before it and a spare after; 0 when no row has
+/// one.
+fn pane_move_target_status_width(items: &[crate::app::state::PaneMoveTargetItem]) -> u16 {
+    let widest = items
+        .iter()
+        .map(|item| display_width_u16(&pane_move_target_status(item)))
+        .max()
+        .unwrap_or(0);
+    if widest == 0 {
+        0
+    } else {
+        widest.min(PANE_MOVE_TARGET_STATUS_MAX_COLUMNS) + 2
+    }
+}
+
+/// Row text for a destination: `tab 1`, `tab 1 · cc`, or the thing a creating
+/// destination makes.
 pub(crate) fn pane_move_target_row_label(entry: &crate::app::state::PaneMoveTargetEntry) -> String {
     match &entry.target {
         crate::app::state::PaneMoveTarget::Tab { .. } => {
             if entry.label.is_empty() {
                 format!("tab {}", entry.number)
             } else {
-                format!("{} · {}", entry.number, entry.label)
+                format!("tab {} · {}", entry.number, entry.label)
             }
         }
         crate::app::state::PaneMoveTarget::NewTab { .. } => "new tab".to_string(),
         crate::app::state::PaneMoveTarget::NewSpace => "new space".to_string(),
+    }
+}
+
+/// Pane names that fit `budget` columns: all of them, or as many as fit
+/// followed by `+N` for the rest.
+pub(crate) fn fit_pane_names(names: &[String], budget: usize) -> String {
+    let all = names.join(", ");
+    if crate::ui::text::display_width(&all) <= budget {
+        return all;
+    }
+    for shown in (1..names.len()).rev() {
+        let text = format!("{}, +{}", names[..shown].join(", "), names.len() - shown);
+        if crate::ui::text::display_width(&text) <= budget {
+            return text;
+        }
+    }
+    truncate_end(&all, budget)
+}
+
+/// The line under the list saying what the selected row would do.
+fn pane_move_target_detail(picker: &crate::app::state::PaneMoveTargetPickerState) -> String {
+    use crate::app::state::PaneMoveTarget;
+    let Some(entry) = picker.selected_destination() else {
+        return String::new();
+    };
+    match &entry.target {
+        PaneMoveTarget::Tab { .. } => format!(
+            "{} › {}: {}",
+            entry.facts.space,
+            pane_move_target_row_label(entry),
+            entry.facts.pane_names.join(", ")
+        ),
+        PaneMoveTarget::NewTab { .. } => format!("a new tab in {}", entry.facts.space),
+        PaneMoveTarget::NewSpace => {
+            if picker.source_label.is_empty() {
+                "a new space".to_string()
+            } else {
+                format!("a new space holding {}", picker.source_label)
+            }
+        }
     }
 }
 
@@ -638,10 +725,10 @@ pub(super) fn render_pane_move_target_picker_overlay(
     }
     let header = geometry.header;
     if header.height >= 2 {
-        render_modal_header(
+        render_pane_move_target_title(
             frame,
             Rect::new(header.x, header.y, header.width, 1),
-            "move pane",
+            picker,
             p,
         );
         let destinations = picker
@@ -668,49 +755,50 @@ pub(super) fn render_pane_move_target_picker_overlay(
             p,
         );
     }
+    if header.height >= 3 {
+        render_rule(frame, Rect::new(header.x, header.y + 2, header.width, 1), p);
+    }
 
-    if picker.items.is_empty() && geometry.list.height > 0 {
+    let list = geometry.list;
+    if picker.items.is_empty() && list.height > 0 {
         frame.render_widget(
             Paragraph::new(" no match").style(Style::default().fg(p.overlay0)),
-            Rect::new(geometry.list.x, geometry.list.y, geometry.list.width, 1),
+            Rect::new(list.x, list.y, list.width, 1),
         );
     }
-    let (start, visible) = picker.list.window(geometry.list, picker.items.len());
+    let status_width = pane_move_target_status_width(&picker.all_items)
+        .min(list.width.saturating_sub(PANE_MOVE_TARGET_LABEL_FLOOR));
+    let (start, visible) = picker.list.window(list, picker.items.len());
     for (visible_idx, item) in picker.items.iter().skip(start).take(visible).enumerate() {
         let item_idx = start + visible_idx;
-        let row = Rect::new(
-            geometry.list.x,
-            geometry.list.y + visible_idx as u16,
-            geometry.list.width,
-            1,
-        );
-        let (text, style) = match item {
-            // Same weight the sidebar gives its section headings, so the group
-            // reads as a heading and never as a destination.
-            PaneMoveTargetItem::SpaceHeading { label } => (
-                format!(" {label}"),
-                Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
-            ),
-            PaneMoveTargetItem::Destination(entry) => {
-                let selected = item_idx == picker.list.selected;
-                let marker = if selected { "›" } else { " " };
-                let style = if selected {
-                    Style::default()
-                        .fg(p.text)
-                        .bg(p.surface0)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(p.subtext0)
-                };
-                (
-                    format!("{marker} {}", pane_move_target_row_label(entry)),
-                    style,
-                )
-            }
-        };
-        frame.render_widget(
-            Paragraph::new(truncate_end(&text, row.width as usize)).style(style),
+        let row = Rect::new(list.x, list.y + visible_idx as u16, list.width, 1);
+        let last_branch = !picker
+            .items
+            .get(item_idx + 1)
+            .is_some_and(PaneMoveTargetItem::is_branch);
+        render_pane_move_target_row(
+            app,
+            frame,
             row,
+            item,
+            PaneMoveRowLook {
+                selected: item_idx == picker.list.selected,
+                last_branch,
+                status_width,
+            },
+        );
+    }
+    render_pane_move_target_scrollbar(app, picker, frame, list);
+
+    if let Some(detail) = geometry.detail {
+        render_rule(frame, Rect::new(detail.x, detail.y, detail.width, 1), p);
+        let text = crate::ui::text::middle_elide(
+            &pane_move_target_detail(picker),
+            detail.width.saturating_sub(2) as usize,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(" {text}")).style(Style::default().fg(p.overlay0)),
+            Rect::new(detail.x, detail.y + 1, detail.width, 1),
         );
     }
 
@@ -729,6 +817,251 @@ pub(super) fn render_pane_move_target_picker_overlay(
             render_action_button(frame, placed.rect, placed.hint, placed.label, style);
         }
     }
+}
+
+/// What the label side of a row keeps before its status column is cut: the
+/// gutter, a branch, the icon and 12 columns of text.
+const PANE_MOVE_TARGET_LABEL_FLOOR: u16 = 3 + 4 + 2 + 12;
+
+/// Rows the picker keeps under its list for the detail: a rule and one line.
+pub(crate) const PANE_MOVE_TARGET_DETAIL_ROWS: u16 = 2;
+
+fn render_rule(frame: &mut Frame, area: Rect, p: &crate::app::state::Palette) {
+    frame.render_widget(
+        Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(p.surface1)),
+        area,
+    );
+}
+
+/// `move pane  <pane>  from <space> › <tab>`: what moves, and from where.
+fn render_pane_move_target_title(
+    frame: &mut Frame,
+    area: Rect,
+    picker: &crate::app::state::PaneMoveTargetPickerState,
+    p: &crate::app::state::Palette,
+) {
+    let area = Rect::new(
+        area.x.saturating_add(1),
+        area.y,
+        area.width.saturating_sub(2),
+        1,
+    );
+    let mut spans = vec![Span::styled(
+        "move pane",
+        Style::default().fg(p.text).add_modifier(Modifier::BOLD),
+    )];
+    if !picker.source_label.is_empty() {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            picker.source_label.clone(),
+            Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if !picker.source_place.is_empty() {
+        spans.push(Span::styled(
+            format!("  from {}", picker.source_place),
+            Style::default().fg(p.overlay0),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PaneMoveRowLook {
+    selected: bool,
+    /// Whether this branch is the last one drawn under its heading, so it
+    /// takes `└──`. Worked out over the drawn rows, so a filter keeps the tree
+    /// closed.
+    last_branch: bool,
+    status_width: u16,
+}
+
+/// One row of the tree, in the navigator's language: accent headings, surface
+/// branches, the tab's number set apart from the word `tab`, and a status
+/// column on the right.
+fn render_pane_move_target_row(
+    app: &AppState,
+    frame: &mut Frame,
+    rect: Rect,
+    item: &crate::app::state::PaneMoveTargetItem,
+    look: PaneMoveRowLook,
+) {
+    use crate::app::state::{PaneMoveTarget, PaneMoveTargetItem};
+
+    let p = &app.palette;
+    if matches!(item, PaneMoveTargetItem::Gap) {
+        return;
+    }
+    let bar = Style::default()
+        .bg(p.accent)
+        .fg(panel_contrast_fg(p))
+        .add_modifier(Modifier::BOLD);
+    let pick = |style: Style| {
+        if look.selected {
+            bar
+        } else {
+            style.bg(p.panel_bg)
+        }
+    };
+    let dim = Style::default().fg(p.overlay0);
+    let symbols = app.state_icon_symbols();
+    let colors = app.state_icon_colors();
+    let here = matches!(item, PaneMoveTargetItem::Here(_));
+
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(
+        if here { " ◆ " } else { "   " },
+        pick(Style::default().fg(p.accent)),
+    ));
+    if item.is_branch() {
+        spans.push(Span::styled(
+            if look.last_branch {
+                "└── "
+            } else {
+                "├── "
+            },
+            pick(Style::default().fg(p.surface1)),
+        ));
+    }
+    let status_style;
+    match item {
+        PaneMoveTargetItem::SpaceHeading {
+            label,
+            pane_count,
+            status,
+            seen,
+            ..
+        } => {
+            let (icon, icon_style) = super::status::state_icon(*status, *seen, &symbols, &colors);
+            spans.push(Span::styled(icon, pick(icon_style)));
+            spans.push(Span::styled(" ", pick(Style::default())));
+            spans.push(Span::styled(
+                pane_move_heading_text(label, *pane_count),
+                pick(Style::default().fg(p.accent).add_modifier(Modifier::BOLD)),
+            ));
+            status_style = pick(dim);
+        }
+        PaneMoveTargetItem::Here(entry) => {
+            spans.push(Span::styled(
+                super::status::state_icon(entry.facts.status, entry.facts.seen, &symbols, &colors)
+                    .0,
+                pick(dim),
+            ));
+            spans.push(Span::styled(" ", pick(dim)));
+            spans.push(Span::styled(pane_move_target_row_label(entry), pick(dim)));
+            status_style = pick(dim.add_modifier(Modifier::ITALIC));
+        }
+        PaneMoveTargetItem::Destination(entry) => match &entry.target {
+            PaneMoveTarget::Tab { .. } => {
+                let (icon, icon_style) = super::status::state_icon(
+                    entry.facts.status,
+                    entry.facts.seen,
+                    &symbols,
+                    &colors,
+                );
+                spans.push(Span::styled(icon, pick(icon_style)));
+                spans.push(Span::styled(" ", pick(Style::default())));
+                spans.push(Span::styled("tab ", pick(dim)));
+                spans.push(Span::styled(
+                    entry.number.to_string(),
+                    pick(Style::default().fg(p.text).add_modifier(Modifier::BOLD)),
+                ));
+                if !entry.label.is_empty() {
+                    spans.push(Span::styled(" · ", pick(dim)));
+                    spans.push(Span::styled(
+                        entry.label.clone(),
+                        pick(Style::default().fg(p.text)),
+                    ));
+                }
+                status_style = pick(Style::default().fg(p.subtext0));
+            }
+            PaneMoveTarget::NewTab { .. } | PaneMoveTarget::NewSpace => {
+                spans.push(Span::styled("+", pick(Style::default().fg(p.accent))));
+                spans.push(Span::styled(" ", pick(Style::default())));
+                spans.push(Span::styled(
+                    pane_move_target_row_label(entry),
+                    pick(Style::default().fg(p.overlay1)),
+                ));
+                status_style = pick(dim);
+            }
+        },
+        PaneMoveTargetItem::Gap => return,
+    }
+
+    // Cut the left side to what the status column leaves it.
+    let left_budget = rect.width.saturating_sub(look.status_width) as usize;
+    let mut used = 0usize;
+    let mut left = Vec::with_capacity(spans.len());
+    for span in spans {
+        let width = crate::ui::text::display_width(&span.content);
+        if used + width <= left_budget {
+            used += width;
+            left.push(span);
+        } else {
+            let room = left_budget.saturating_sub(used);
+            if room > 0 {
+                left.push(Span::styled(truncate_end(&span.content, room), span.style));
+            }
+            break;
+        }
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(left)).style(pick(Style::default())),
+        rect,
+    );
+
+    if look.status_width > 0 {
+        let status = match item {
+            PaneMoveTargetItem::Destination(entry) => fit_pane_names(
+                &entry.facts.pane_names,
+                look.status_width.saturating_sub(2) as usize,
+            ),
+            _ => truncate_end(
+                &pane_move_target_status(item),
+                look.status_width.saturating_sub(2) as usize,
+            ),
+        };
+        let status_rect = Rect::new(
+            rect.x + rect.width.saturating_sub(look.status_width),
+            rect.y,
+            look.status_width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(" {status}")).style(status_style),
+            status_rect,
+        );
+    }
+}
+
+fn render_pane_move_target_scrollbar(
+    app: &AppState,
+    picker: &crate::app::state::PaneMoveTargetPickerState,
+    frame: &mut Frame,
+    list: Rect,
+) {
+    let len = picker.items.len();
+    let viewport = list.height as usize;
+    if list.width <= 1 || viewport == 0 || len <= viewport {
+        return;
+    }
+    let (start, _) = picker.list.window(list, len);
+    let metrics = crate::pane::ScrollMetrics {
+        viewport_rows: viewport,
+        offset_from_bottom: len.saturating_sub(viewport).saturating_sub(start),
+        max_offset_from_bottom: len.saturating_sub(viewport),
+    };
+    if !super::scrollbar::should_show_scrollbar(metrics) {
+        return;
+    }
+    super::scrollbar::render_scrollbar(
+        frame,
+        metrics,
+        Rect::new(list.x + list.width - 1, list.y, 1, list.height),
+        app.palette.surface_dim,
+        app.palette.overlay0,
+        "▕",
+    );
 }
 
 pub(super) fn render_new_linked_worktree_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
@@ -1326,8 +1659,8 @@ mod tests {
     use super::{
         confirm_close_overlay_text, display_width_u16, pane_todo_edit_rects,
         pane_todo_edit_text_area, render_new_linked_worktree_overlay,
-        render_pane_move_target_picker_overlay, render_pane_todo_edit_overlay,
-        render_rename_overlay, Modifier, PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
+        render_pane_todo_edit_overlay, render_rename_overlay, Modifier,
+        PANE_TODO_EDIT_POPUP_HEIGHT, PANE_TODO_EDIT_POPUP_WIDTH,
     };
 
     #[test]
@@ -2063,203 +2396,349 @@ mod tests {
             "a pane with no todos should not mention them: {detail}"
         );
     }
-    /// Two spaces laid out on the snapshot frame, the background the picker is
-    /// diffed against, and the same with the picker open (and `query` typed
-    /// into its search).
-    fn move_picker_snapshot(query: Option<&str>) -> crate::ui::test_support::OverlaySnapshot {
-        use crate::app::state::{
-            PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem, PaneMoveTargetPickerState,
-        };
-        let background = || {
-            let mut app = crate::ui::test_support::app_with_one_pane("main");
-            app.workspaces.push(Workspace::test_new("CONTEXT"));
-            app.ensure_test_terminals();
-            crate::ui::test_support::layout(&mut app);
-            app
-        };
-        let base = background();
-        let mut open = background();
-        let own = open.workspaces[0].id.clone();
-        let other = open.workspaces[1].id.clone();
-        let items = vec![
-            PaneMoveTargetItem::SpaceHeading {
-                label: "main".into(),
-            },
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: Some(own.clone()),
-                number: 0,
-                label: String::new(),
-                target: PaneMoveTarget::NewTab {
-                    workspace_id: own.clone(),
-                },
-            }),
-            PaneMoveTargetItem::SpaceHeading {
-                label: "CONTEXT".into(),
-            },
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: Some(other.clone()),
-                number: 1,
-                label: "logs".into(),
-                target: PaneMoveTarget::Tab {
-                    tab_id: format!("{other}:t1"),
-                },
-            }),
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: Some(other.clone()),
-                number: 0,
-                label: String::new(),
-                target: PaneMoveTarget::NewTab {
-                    workspace_id: other.clone(),
-                },
-            }),
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: None,
-                number: 0,
-                label: String::new(),
-                target: PaneMoveTarget::NewSpace,
-            }),
-        ];
-        let mut picker = PaneMoveTargetPickerState::new("pane".into(), items);
+    /// Name a tab's panes, in layout order, the way an agent names its pane.
+    fn name_tab_panes(app: &mut AppState, ws_idx: usize, tab_idx: usize, names: &[&str]) {
+        let pane_ids = app.workspaces[ws_idx].tabs[tab_idx].layout.pane_ids();
+        for (pane_id, name) in pane_ids.into_iter().zip(names) {
+            let terminal_id = app.workspaces[ws_idx]
+                .pane_state(pane_id)
+                .expect("pane")
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).expect("terminal");
+            terminal.agent_name = Some((*name).to_string());
+            terminal.state = crate::detect::AgentState::Idle;
+        }
+    }
+
+    /// ac's session in miniature: the moving pane `herdr-fixes` in herdr's
+    /// tab `cc`, macOS with two tabs, CONTEXT with one, and `extra` more
+    /// spaces for a list that has to scroll.
+    fn move_picker_session(extra: usize) -> AppState {
+        use ratatui::layout::Direction;
+        let mut app = crate::ui::test_support::app_with_one_pane("herdr");
+        app.workspaces[0].tabs[0].custom_name = Some("cc".into());
+        app.workspaces[0].test_split(Direction::Horizontal);
+        let mut macos = Workspace::test_new("macOS");
+        macos.test_split(Direction::Horizontal);
+        macos.test_split(Direction::Horizontal);
+        macos.test_add_tab(None);
+        macos.active_tab = 0;
+        app.workspaces.push(macos);
+        app.workspaces.push(Workspace::test_new("CONTEXT"));
+        for n in 0..extra {
+            app.workspaces
+                .push(Workspace::test_new(&format!("space-{n}")));
+        }
+        app.ensure_test_terminals();
+        name_tab_panes(&mut app, 0, 0, &["herdr-relay", "herdr-fixes"]);
+        name_tab_panes(
+            &mut app,
+            1,
+            0,
+            &["macos-relay-2", "macos-relay-3", "vpn-morning-issues-2"],
+        );
+        name_tab_panes(&mut app, 1, 1, &["keyboard-shortcuts"]);
+        name_tab_panes(&mut app, 2, 0, &["context-relay"]);
+        // The moving pane is the second one in herdr's tab.
+        let moving = app.workspaces[0].tabs[0].layout.pane_ids()[1];
+        app.workspaces[0].tabs[0].layout.focus_pane(moving);
+        crate::ui::test_support::layout(&mut app);
+        app
+    }
+
+    fn open_move_picker(app: &mut AppState, query: Option<&str>) {
+        let mut picker = crate::app::pane_move_target_picker_for_state(
+            app,
+            &crate::terminal::TerminalRuntimeRegistry::default(),
+        )
+        .expect("the picker opens");
         if let Some(query) = query {
             picker.search.focus();
             picker.search.query.insert_str(query);
             picker.refilter();
         }
-        open.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
+        app.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
+    }
+
+    fn move_picker_snapshot(
+        extra: usize,
+        query: Option<&str>,
+    ) -> crate::ui::test_support::OverlaySnapshot {
+        let base = move_picker_session(extra);
+        let mut open = move_picker_session(extra);
+        open_move_picker(&mut open, query);
         crate::ui::test_support::layout(&mut open);
         crate::ui::test_support::overlay_snapshot(&base, &open)
     }
 
     #[test]
     fn snapshot_move_picker() {
-        move_picker_snapshot(None).assert(
-            Rect::new(16, 6, 48, 13),
+        move_picker_snapshot(0, None).assert(
+            Rect::new(10, 1, 60, 23),
             &[
-                "┌──────────────────────────────────────────────┐",
-                "│ move pane                                    │",
-                "│ / search destinations         4 destinations │",
-                "│                                              │",
-                "│ main                                         │",
-                "│› new tab                                     │",
-                "│ CONTEXT                                      │",
-                "│  1 · logs                                    │",
-                "│  new tab                                     │",
-                "│  new space                                   │",
-                "│                                              │",
-                "│             ↵ move    esc cancel             │",
-                "└──────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────┐",
+                "│ move pane  herdr-fixes  from herdr › tab 1 · cc          │",
+                "│ / search destinations                     7 destinations │",
+                "│──────────────────────────────────────────────────────────│",
+                "│   ○ herdr (2)                                            │",
+                "│ ◆ ├── ○ tab 1 · cc   you are here                        │",
+                "│   └── + new tab                                          │",
+                "│                                                          │",
+                "│   ○ macOS (4)                                            │",
+                "│   ├── ○ tab 1        macos-relay-2, macos-relay-3, +1    │",
+                "│   ├── ○ tab 2        keyboard-shortcuts                  │",
+                "│   └── + new tab                                          │",
+                "│                                                          │",
+                "│   ○ CONTEXT (1)                                          │",
+                "│   ├── ○ tab 1        context-relay                       │",
+                "│   └── + new tab                                          │",
+                "│                                                          │",
+                "│   + new space                                            │",
+                "│──────────────────────────────────────────────────────────│",
+                "│ a new tab in herdr                                       │",
+                "│                                                          │",
+                "│                   ↵ move    esc cancel                   │",
+                "└──────────────────────────────────────────────────────────┘",
             ],
         );
     }
 
     #[test]
     fn snapshot_move_picker_searching() {
-        // The box keeps its size; CONTEXT's heading and destinations remain,
-        // and the first of them is selected.
-        move_picker_snapshot(Some("cont")).assert(
-            Rect::new(16, 6, 48, 13),
+        // The box keeps its size; macOS's heading and tabs remain, the first
+        // of them selected, and its last tab closes the tree.
+        move_picker_snapshot(0, Some("mac")).assert(
+            Rect::new(10, 1, 60, 23),
             &[
-                "┌──────────────────────────────────────────────┐",
-                "│ move pane                                    │",
-                "│ / cont                        4 destinations │",
-                "│                                              │",
-                "│ CONTEXT                                      │",
-                "│› 1 · logs                                    │",
-                "│  new tab                                     │",
-                "│                                              │",
-                "│                                              │",
-                "│                                              │",
-                "│                                              │",
-                "│             ↵ move    esc cancel             │",
-                "└──────────────────────────────────────────────┘",
+                "┌──────────────────────────────────────────────────────────┐",
+                "│ move pane  herdr-fixes  from herdr › tab 1 · cc          │",
+                "│ / mac                                     7 destinations │",
+                "│──────────────────────────────────────────────────────────│",
+                "│   ○ macOS (4)                                            │",
+                "│   ├── ○ tab 1        macos-relay-2, macos-relay-3, +1    │",
+                "│   ├── ○ tab 2        keyboard-shortcuts                  │",
+                "│   └── + new tab                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│                                                          │",
+                "│──────────────────────────────────────────────────────────│",
+                "│ macOS › tab 1: macos-relay-…elay-3, vpn-morning-issues-2 │",
+                "│                                                          │",
+                "│                   ↵ move    esc cancel                   │",
+                "└──────────────────────────────────────────────────────────┘",
             ],
         );
     }
 
     #[test]
-    fn pane_move_picker_renders_space_headings_and_the_new_space_row_last() {
-        use crate::app::state::{
-            PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem, PaneMoveTargetPickerState,
-        };
+    fn snapshot_move_picker_small() {
+        // More spaces than rows: the list scrolls and shows a scrollbar.
+        move_picker_snapshot(4, None).assert(
+            Rect::new(10, 0, 60, 25),
+            &[
+                "┌──────────────────────────────────────────────────────────┐",
+                "│ move pane  herdr-fixes  from herdr › tab 1 · cc          │",
+                "│ / search destinations                    15 destinations │",
+                "│──────────────────────────────────────────────────────────│",
+                "│   ○ herdr (2)                                           ▕│",
+                "│ ◆ ├── ○ tab 1 · cc   you are here                       ▕│",
+                "│   └── + new tab                                         ▕│",
+                "│                                                         ▕│",
+                "│   ○ macOS (4)                                           ▕│",
+                "│   ├── ○ tab 1        macos-relay-2, macos-relay-3, +1   ▕│",
+                "│   ├── ○ tab 2        keyboard-shortcuts                 ▕│",
+                "│   └── + new tab                                         ▕│",
+                "│                                                         ▕│",
+                "│   ○ CONTEXT (1)                                         ▕│",
+                "│   ├── ○ tab 1        context-relay                      ▕│",
+                "│   └── + new tab                                         ▕│",
+                "│                                                         ▕│",
+                "│   · space-0 (1)                                         ▕│",
+                "│   ├── · tab 1        pane 1                             ▕│",
+                "│   └── + new tab                                         ▕│",
+                "│──────────────────────────────────────────────────────────│",
+                "│ a new tab in herdr                                       │",
+                "│                                                          │",
+                "│                   ↵ move    esc cancel                   │",
+                "└──────────────────────────────────────────────────────────┘",
+            ],
+        );
+    }
 
-        let mut app = AppState::test_new();
-        app.workspaces = vec![Workspace::test_new("main"), Workspace::test_new("other")];
-        app.active = Some(0);
-        app.ensure_test_terminals();
-        crate::ui::test_support::layout_sized(&mut app, 80, 24);
-        let own = app.workspaces[0].id.clone();
-        let other = app.workspaces[1].id.clone();
-        let items = vec![
-            PaneMoveTargetItem::SpaceHeading {
-                label: "main".into(),
-            },
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: Some(own.clone()),
-                number: 2,
-                label: "logs".into(),
-                target: PaneMoveTarget::Tab {
-                    tab_id: format!("{own}:t2"),
-                },
-            }),
-            PaneMoveTargetItem::SpaceHeading {
-                label: "other".into(),
-            },
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: Some(other.clone()),
-                number: 1,
-                label: "shell".into(),
-                target: PaneMoveTarget::Tab {
-                    tab_id: format!("{other}:t1"),
-                },
-            }),
-            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                workspace_id: None,
-                number: 0,
-                label: String::new(),
-                target: PaneMoveTarget::NewSpace,
-            }),
-        ];
-        let item_count = items.len();
-        app.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(
-            PaneMoveTargetPickerState::new("pane".into(), items),
-        ));
-
-        let area = Rect::new(0, 0, 80, 24);
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal
-            .draw(|frame| render_pane_move_target_picker_overlay(&app, frame, area))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
+    /// The picker's list rows as drawn, trailing blanks dropped, with the
+    /// buffer to check styles on.
+    fn move_picker_rows(app: &AppState) -> (Vec<String>, ratatui::buffer::Buffer, Rect) {
+        let buffer = crate::ui::test_support::draw_sized(
+            app,
+            crate::ui::test_support::SNAPSHOT_WIDTH,
+            crate::ui::test_support::SNAPSHOT_HEIGHT,
+        );
         let list = app
             .pane_move_target_picker_geometry()
             .expect("picker geometry")
             .list;
+        (
+            crate::ui::test_support::rect_rows(&buffer, list),
+            buffer,
+            list,
+        )
+    }
 
-        // Rows start below the header block: the title, the search row, and
-        // the blank row under them.
-        let row_text = |row: u16| -> String {
-            (list.x..list.x + list.width)
-                .map(|x| buffer[(x, list.y + row)].symbol())
-                .collect::<String>()
-                .trim_end()
-                .to_string()
+    /// #110: the picker reads like the navigator: accent space names with a
+    /// count, the tab number apart from the word `tab`, actions marked `+`,
+    /// and the navigator's accent selection bar.
+    #[test]
+    fn move_picker_rows_are_styled_like_the_navigator() {
+        let mut app = move_picker_session(0);
+        open_move_picker(&mut app, None);
+        crate::ui::test_support::layout(&mut app);
+        let (rows, buffer, list) = move_picker_rows(&app);
+        let p = &app.palette;
+        let cell = |row: usize, text: &str| {
+            let col = rows[row].find(text).expect("text on the row");
+            let col = rows[row][..col].chars().count() as u16;
+            buffer[(list.x + col, list.y + row as u16)].style()
         };
-        let row_style = |row: u16| buffer[(list.x + 1, list.y + row)].style();
 
-        assert_eq!(row_text(0), " main");
-        assert_eq!(row_style(0).fg, Some(app.palette.overlay0));
-        assert!(row_style(0).add_modifier.contains(Modifier::BOLD));
-        assert_ne!(row_style(0).bg, Some(app.palette.surface0));
+        let macos = rows
+            .iter()
+            .position(|row| row.contains("macOS (4)"))
+            .expect("macOS heading");
+        assert_eq!(cell(macos, "macOS").fg, Some(p.accent));
+        assert!(cell(macos, "macOS").add_modifier.contains(Modifier::BOLD));
 
-        // The first destination, not the heading above it, carries the marker.
-        assert_eq!(row_text(1), "› 2 · logs");
-        assert_eq!(row_style(1).bg, Some(app.palette.surface0));
+        let tab = macos + 1;
+        assert!(rows[tab].contains("├── "), "{rows:#?}");
+        assert_eq!(cell(tab, "tab").fg, Some(p.overlay0));
+        assert_eq!(cell(tab, "1").fg, Some(p.text));
+        assert!(cell(tab, "1").add_modifier.contains(Modifier::BOLD));
+        assert_eq!(cell(tab, "macos-relay-2").fg, Some(p.subtext0));
 
-        // A destination in another space is shown under that space's heading.
-        assert_eq!(row_text(2), " other");
-        assert_eq!(row_text(3), "  1 · shell");
+        let new_tab = rows[macos..]
+            .iter()
+            .position(|row| row.contains("new tab"))
+            .expect("new tab")
+            + macos;
+        assert!(rows[new_tab].contains("└── + new tab"), "{rows:#?}");
+        assert_eq!(cell(new_tab, "+").fg, Some(p.accent));
+        assert_eq!(cell(new_tab, "new tab").fg, Some(p.overlay1));
 
-        assert_eq!(row_text(4), "  new space");
-        assert_eq!(item_count, 5, "the new-space row is the last item");
+        // The pane's own tab: greyed, marked, and not the selection.
+        assert!(rows[1].starts_with(" ◆ ├── "), "{rows:#?}");
+        assert!(rows[1].contains("tab 1 · cc"));
+        assert!(rows[1].ends_with("you are here"));
+        assert_eq!(cell(1, "tab 1").fg, Some(p.overlay0));
+
+        // The first destination is selected, drawn with the accent bar.
+        assert!(rows[2].contains("+ new tab"));
+        assert_eq!(cell(2, "new tab").bg, Some(p.accent));
+    }
+
+    #[test]
+    fn move_picker_last_visible_child_gets_the_corner_branch() {
+        let mut app = move_picker_session(0);
+        // `keyboard` keeps only macOS's second tab: it is the last branch
+        // drawn under the heading, so it closes the tree.
+        open_move_picker(&mut app, Some("keyboard"));
+        crate::ui::test_support::layout(&mut app);
+        let (rows, _, _) = move_picker_rows(&app);
+
+        assert!(rows[0].contains("macOS (4)"), "{rows:#?}");
+        assert!(
+            rows[1].contains("└── ") && rows[1].contains("tab 2"),
+            "{rows:#?}"
+        );
+    }
+
+    #[test]
+    fn move_picker_detail_line_names_the_selected_tabs_panes() {
+        let mut app = move_picker_session(0);
+        open_move_picker(&mut app, Some("macos-relay"));
+        crate::ui::test_support::layout(&mut app);
+        let detail = app
+            .pane_move_target_picker_geometry()
+            .and_then(|geometry| geometry.detail)
+            .expect("a detail line");
+        let buffer = crate::ui::test_support::draw_sized(
+            &app,
+            crate::ui::test_support::SNAPSHOT_WIDTH,
+            crate::ui::test_support::SNAPSHOT_HEIGHT,
+        );
+        let line = crate::ui::test_support::row_text_trimmed(
+            &buffer,
+            Rect::new(detail.x, detail.y + 1, detail.width, 1),
+        );
+
+        // Every pane is named; a line wider than the box is cut in the
+        // middle, so the space, the tab and the last pane stay readable.
+        assert!(line.starts_with(" macOS › tab 1: macos-relay-"), "{line}");
+        assert!(line.ends_with("vpn-morning-issues-2"), "{line}");
+    }
+
+    #[test]
+    fn move_picker_width_is_measured_from_tree_rows() {
+        use crate::app::state::{
+            PaneMoveTabFacts, PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem,
+        };
+        let tab = |names: &[&str]| {
+            PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+                workspace_id: Some("w1".into()),
+                number: 1,
+                label: String::new(),
+                target: PaneMoveTarget::Tab {
+                    tab_id: "w1:t1".into(),
+                },
+                facts: PaneMoveTabFacts {
+                    pane_names: names.iter().map(|name| name.to_string()).collect(),
+                    ..Default::default()
+                },
+            })
+        };
+        let short = vec![
+            PaneMoveTargetItem::heading("a-space-with-a-long-name"),
+            tab(&["one"]),
+        ];
+        // `├── ` branch, gutter, icon and `tab 1` are narrower than the
+        // heading: the heading sets the left side.
+        let left = 3 + 2 + display_width_u16("a-space-with-a-long-name (0)") + 1;
+        assert_eq!(
+            super::pane_move_target_content_width(&short),
+            left + 3 + 2 + 2,
+        );
+
+        let long = vec![
+            PaneMoveTargetItem::heading("a-space-with-a-long-name"),
+            tab(&["x".repeat(30).as_str(), "y".repeat(30).as_str()]),
+        ];
+        assert_eq!(
+            super::pane_move_target_content_width(&long),
+            left + super::PANE_MOVE_TARGET_STATUS_MAX_COLUMNS + 2 + 2,
+            "the status column stops at its cap"
+        );
+    }
+
+    #[test]
+    fn fit_pane_names_ends_with_the_count_of_the_rest() {
+        let names: Vec<String> = ["macos-relay-2", "macos-relay-3", "vpn-morning-issues-2"]
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        assert_eq!(
+            super::fit_pane_names(&names, 80),
+            "macos-relay-2, macos-relay-3, vpn-morning-issues-2"
+        );
+        assert_eq!(
+            super::fit_pane_names(&names, 34),
+            "macos-relay-2, macos-relay-3, +1"
+        );
+        assert_eq!(super::fit_pane_names(&names, 20), "macos-relay-2, +2");
     }
 }

@@ -1401,7 +1401,7 @@ impl App {
         }
     }
 
-    fn open_pane_move_target_picker(&mut self) {
+    pub(crate) fn open_pane_move_target_picker(&mut self) {
         match pane_move_target_picker_for_state(&self.state, &self.terminal_runtimes) {
             Ok(picker) => {
                 self.state
@@ -1894,13 +1894,20 @@ fn focused_pane_move_source(state: &AppState) -> Option<(usize, usize, String)> 
 /// Enumerates every place the focused pane can go: its own space first, then
 /// the remaining spaces in the order the sidebar lists them, and finally the
 /// new-space destination on its own.
-fn pane_move_target_picker_for_state(
+pub(crate) fn pane_move_target_picker_for_state(
     state: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
 ) -> Result<crate::app::state::PaneMoveTargetPickerState, &'static str> {
     use crate::app::state::{PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem};
 
     let Some((source_ws_idx, source_tab_idx, source_pane_id)) = focused_pane_move_source(state)
+    else {
+        return Err("no focused pane");
+    };
+    let Some(source_pane_id_raw) = state
+        .workspaces
+        .get(source_ws_idx)
+        .and_then(|workspace| workspace.focused_pane_id())
     else {
         return Err("no focused pane");
     };
@@ -1917,51 +1924,99 @@ fn pane_move_target_picker_for_state(
     // new tab in the same space, so that one destination is not offered.
     let source_pane_is_alone = source_tab.layout.pane_count() <= 1;
 
+    let tab_facts = |workspace: &crate::workspace::Workspace,
+                     ws_idx: usize,
+                     space: &str,
+                     tab: &crate::workspace::Tab| {
+        let (status, seen) = tab.display_state(&state.terminals);
+        crate::app::state::PaneMoveTabFacts {
+            space: space.to_string(),
+            pane_names: tab
+                .layout
+                .pane_ids()
+                .into_iter()
+                .filter(|pane_id| workspace.pane_state(*pane_id).is_some())
+                .map(|pane_id| state.pane_display_label(ws_idx, pane_id))
+                .collect(),
+            status,
+            seen,
+        }
+    };
+    let tab_entry = |workspace: &crate::workspace::Workspace,
+                     ws_idx: usize,
+                     space: &str,
+                     tab_idx: usize,
+                     tab: &crate::workspace::Tab| PaneMoveTargetEntry {
+        workspace_id: Some(workspace.id.clone()),
+        number: tab_idx + 1,
+        label: tab.custom_name.clone().unwrap_or_default(),
+        target: PaneMoveTarget::Tab {
+            tab_id: crate::workspace::public_tab_id_for_number(&workspace.id, tab.number),
+        },
+        facts: tab_facts(workspace, ws_idx, space, tab),
+    };
+
     let mut items = Vec::new();
+    let mut source_place = String::new();
     for ws_idx in workspace_move_target_order(state, source_ws_idx) {
         let Some(workspace) = state.workspaces.get(ws_idx) else {
             continue;
         };
+        // The sidebar's name: the live root-pane cwd, not the stored one an
+        // OSC 7 report last set.
+        let space = workspace.display_name_from(&state.terminals, terminal_runtimes);
         let own_space = ws_idx == source_ws_idx;
-        let mut destinations = workspace
-            .tabs
-            .iter()
-            .enumerate()
-            .filter(|(tab_idx, _)| !(own_space && *tab_idx == source_tab_idx))
-            .filter(|(_, tab)| !tab.zoomed)
-            .map(|(tab_idx, tab)| {
-                PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
-                    workspace_id: Some(workspace.id.clone()),
-                    number: tab_idx + 1,
-                    label: tab.custom_name.clone().unwrap_or_default(),
-                    target: PaneMoveTarget::Tab {
-                        tab_id: crate::workspace::public_tab_id_for_number(
-                            &workspace.id,
-                            tab.number,
-                        ),
-                    },
-                })
-            })
-            .collect::<Vec<_>>();
+        let mut branches = Vec::new();
+        let mut destination_count = 0;
+        for (tab_idx, tab) in workspace.tabs.iter().enumerate() {
+            let entry = tab_entry(workspace, ws_idx, &space, tab_idx, tab);
+            if own_space && tab_idx == source_tab_idx {
+                // Moving a pane into its own tab does nothing, so it is not a
+                // destination; shown greyed in its place, it says where the
+                // pane is now.
+                source_place = format!(
+                    "{space} › {}",
+                    crate::ui::pane_move_target_row_label(&entry)
+                );
+                branches.push(PaneMoveTargetItem::Here(entry));
+            } else if !tab.zoomed {
+                destination_count += 1;
+                branches.push(PaneMoveTargetItem::Destination(entry));
+            }
+        }
+        // Matches `break_pane`: a pane already alone in its tab gains nothing
+        // from a new tab in the same space, so that one destination is not
+        // offered.
         if !own_space || !source_pane_is_alone {
-            destinations.push(PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
+            destination_count += 1;
+            branches.push(PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
                 workspace_id: Some(workspace.id.clone()),
                 number: 0,
                 label: String::new(),
                 target: PaneMoveTarget::NewTab {
                     workspace_id: workspace.id.clone(),
                 },
+                facts: crate::app::state::PaneMoveTabFacts {
+                    space: space.clone(),
+                    ..Default::default()
+                },
             }));
         }
-        if destinations.is_empty() {
+        if destination_count == 0 {
             continue;
         }
-        // The sidebar's name: the live root-pane cwd, not the stored one an
-        // OSC 7 report last set.
+        if !items.is_empty() {
+            items.push(PaneMoveTargetItem::Gap);
+        }
+        let (status, seen) = workspace.display_state(&state.terminals);
         items.push(PaneMoveTargetItem::SpaceHeading {
-            label: workspace.display_name_from(&state.terminals, terminal_runtimes),
+            label: space,
+            pane_count: workspace.tabs.iter().map(|tab| tab.panes.len()).sum(),
+            activity: crate::app::actions::workspace_activity_summary(workspace, &state.terminals),
+            status,
+            seen,
         });
-        items.append(&mut destinations);
+        items.append(&mut branches);
     }
 
     // A new space is always offerable except when the pane is the whole
@@ -1969,11 +2024,15 @@ fn pane_move_target_picker_for_state(
     let pane_is_whole_session =
         state.workspaces.len() == 1 && source_workspace.tabs.len() == 1 && source_pane_is_alone;
     if !pane_is_whole_session {
+        if !items.is_empty() {
+            items.push(PaneMoveTargetItem::Gap);
+        }
         items.push(PaneMoveTargetItem::Destination(PaneMoveTargetEntry {
             workspace_id: None,
             number: 0,
             label: String::new(),
             target: PaneMoveTarget::NewSpace,
+            facts: Default::default(),
         }));
     }
 
@@ -1984,10 +2043,10 @@ fn pane_move_target_picker_for_state(
         return Err("there is nowhere to move this pane");
     }
 
-    Ok(crate::app::state::PaneMoveTargetPickerState::new(
-        source_pane_id,
-        items,
-    ))
+    let mut picker = crate::app::state::PaneMoveTargetPickerState::new(source_pane_id, items);
+    picker.source_label = state.pane_display_label(source_ws_idx, source_pane_id_raw);
+    picker.source_place = source_place;
+    Ok(picker)
 }
 
 /// Workspace indices in picker order: the pane's own space, then the rest as
@@ -3130,7 +3189,7 @@ command = "echo custom"
                 crate::app::state::PaneMoveTargetItem::Destination(entry) => {
                     Some(entry.target.clone())
                 }
-                crate::app::state::PaneMoveTargetItem::SpaceHeading { .. } => None,
+                _ => None,
             })
             .collect()
     }
@@ -3140,10 +3199,10 @@ command = "echo custom"
             .items
             .iter()
             .filter_map(|item| match item {
-                crate::app::state::PaneMoveTargetItem::SpaceHeading { label } => {
+                crate::app::state::PaneMoveTargetItem::SpaceHeading { label, .. } => {
                     Some(label.clone())
                 }
-                crate::app::state::PaneMoveTargetItem::Destination(_) => None,
+                _ => None,
             })
             .collect()
     }
@@ -3188,6 +3247,172 @@ command = "echo custom"
         app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
         assert_eq!(app.state.mode, Mode::PaneMoveTargetPicker);
         app
+    }
+
+    fn picker_kinds(picker: &crate::app::state::PaneMoveTargetPickerState) -> Vec<String> {
+        use crate::app::state::{PaneMoveTarget, PaneMoveTargetItem};
+        picker
+            .items
+            .iter()
+            .map(|item| match item {
+                PaneMoveTargetItem::SpaceHeading { label, .. } => format!("# {label}"),
+                PaneMoveTargetItem::Here(entry) => format!("here tab {}", entry.number),
+                PaneMoveTargetItem::Destination(entry) => match entry.target {
+                    PaneMoveTarget::Tab { .. } => format!("tab {}", entry.number),
+                    PaneMoveTarget::NewTab { .. } => "new tab".to_string(),
+                    PaneMoveTarget::NewSpace => "new space".to_string(),
+                },
+                PaneMoveTargetItem::Gap => String::new(),
+            })
+            .collect()
+    }
+
+    /// #110: the pane's own tab is shown, greyed, where it is; spaces are
+    /// kept apart by a gap, and the new space comes last after one.
+    #[test]
+    fn move_picker_shows_the_current_tab_as_context_and_gaps_between_spaces() {
+        let app = app_with_open_picker();
+        let picker = picker_of(&app);
+
+        assert_eq!(
+            picker_kinds(picker),
+            vec![
+                "# one",
+                "here tab 1",
+                "new tab",
+                "",
+                "# two",
+                "tab 1",
+                "tab 2",
+                "new tab",
+                "",
+                "# three",
+                "tab 1",
+                "new tab",
+                "",
+                "new space",
+            ]
+        );
+    }
+
+    #[test]
+    fn move_picker_never_selects_or_counts_the_current_tab() {
+        let mut app = app_with_open_picker();
+        let picker = app
+            .state
+            .pane_move_target_picker_mut()
+            .expect("picker open");
+        assert_eq!(
+            picker.list.selected, 2,
+            "the first destination, past the here row"
+        );
+
+        picker.select_prev();
+        assert_eq!(picker.list.selected, 2, "nothing above it can be selected");
+        assert!(
+            !picker.select_destination(1),
+            "the here row is not a destination"
+        );
+        for _ in 0..20 {
+            picker.select_next();
+            assert!(picker.selected_destination().is_some());
+        }
+        let destinations = picker
+            .all_items
+            .iter()
+            .filter(|item| matches!(item, crate::app::state::PaneMoveTargetItem::Destination(_)))
+            .count();
+        assert_eq!(
+            destinations, 7,
+            "new tab ×3, two's two tabs, three's tab, new space"
+        );
+    }
+
+    #[test]
+    fn move_picker_rows_carry_pane_names_state_and_counts() {
+        use crate::app::state::PaneMoveTargetItem;
+        let mut app = app_with_test_workspaces(&["one", "two"]);
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        app.state.workspaces[1].test_split(Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let two_panes = app.state.workspaces[1].tabs[0].layout.pane_ids();
+        for (pane_id, name) in two_panes.iter().zip(["alpha", "beta"]) {
+            let terminal_id = app.state.workspaces[1].tabs[0].panes[pane_id]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.state.terminals.get_mut(&terminal_id).expect("terminal");
+            terminal.agent_name = Some(name.to_string());
+            terminal.state = crate::detect::AgentState::Working;
+        }
+        app.state.active = Some(0);
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+        let picker = picker_of(&app);
+
+        let heading = picker
+            .items
+            .iter()
+            .find_map(|item| match item {
+                PaneMoveTargetItem::SpaceHeading {
+                    label,
+                    pane_count,
+                    status,
+                    ..
+                } if label == "two" => Some((*pane_count, *status)),
+                _ => None,
+            })
+            .expect("two's heading");
+        assert_eq!(heading, (2, crate::detect::AgentState::Working));
+
+        let tab = picker
+            .items
+            .iter()
+            .find_map(|item| match item {
+                PaneMoveTargetItem::Destination(entry)
+                    if entry.facts.space == "two" && entry.number == 1 =>
+                {
+                    Some(entry.facts.clone())
+                }
+                _ => None,
+            })
+            .expect("two's tab 1");
+        assert_eq!(tab.pane_names, vec!["alpha", "beta"]);
+        assert_eq!(tab.status, crate::detect::AgentState::Working);
+        assert!(!picker.source_label.is_empty());
+        assert_eq!(picker.source_place, "one › tab 1");
+    }
+
+    #[test]
+    fn move_picker_search_matches_pane_names_and_keeps_the_here_row_with_its_space() {
+        let mut app = app_with_open_picker();
+        let terminal_id = app.state.workspaces[2].tabs[0].panes
+            [&app.state.workspaces[2].tabs[0].root_pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("terminal")
+            .agent_name = Some("keyboard-shortcuts".into());
+        app.state.mode = Mode::Terminal;
+        app.execute_tui_navigate_action(NavigateAction::MovePaneToTab, ActionContext::Prefix);
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::empty(),
+        ));
+        type_into_picker(&mut app, "keyboard");
+        assert_eq!(picker_kinds(picker_of(&app)), vec!["# three", "tab 1"]);
+
+        app.handle_pane_move_target_picker_key(KeyEvent::new(
+            KeyCode::Char('u'),
+            KeyModifiers::CONTROL,
+        ));
+        type_into_picker(&mut app, "one");
+        assert_eq!(
+            picker_kinds(picker_of(&app)),
+            vec!["# one", "here tab 1", "new tab"],
+            "a matching space keeps its here row"
+        );
     }
 
     #[test]
@@ -5734,8 +5959,8 @@ navigate_pane_down = "ctrl+j"
             .items
             .iter()
             .filter_map(|item| match item {
-                PaneMoveTargetItem::SpaceHeading { label } => Some(label.clone()),
-                PaneMoveTargetItem::Destination(_) => None,
+                PaneMoveTargetItem::SpaceHeading { label, .. } => Some(label.clone()),
+                _ => None,
             })
             .collect();
         let sidebar_name =
