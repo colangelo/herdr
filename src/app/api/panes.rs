@@ -933,11 +933,18 @@ impl App {
                 (target_ws_idx, target_tab_idx, moved_pane_id)
             }
             ResolvedPaneMoveDestination::NewWorkspace { label, tab_label } => {
+                // The live cwd, as the sidebar names spaces: the stored one
+                // only moves on an OSC 7 report and can be the spawn folder.
                 let identity_cwd = self
-                    .state
-                    .terminals
+                    .terminal_runtimes
                     .get(&source_terminal_id)
-                    .map(|terminal| terminal.cwd.clone())
+                    .and_then(|runtime| runtime.cwd())
+                    .or_else(|| {
+                        self.state
+                            .terminals
+                            .get(&source_terminal_id)
+                            .map(|terminal| terminal.cwd.clone())
+                    })
                     .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
                 let moved_pane_id = moved.pane_id;
                 let workspace = crate::workspace::Workspace::from_existing_pane(
@@ -3147,6 +3154,84 @@ mod tests {
             &app.state.workspaces[0].tabs[0].render_dirty,
             &app.render_dirty
         ));
+    }
+
+    /// #103: a pane that `cd`'d away without an OSC 7 report still carries
+    /// its spawn folder in `TerminalState::cwd`. A new space made for it must
+    /// take its identity from the live folder, as the sidebar names it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pane_move_to_new_space_seeds_identity_from_the_live_cwd() {
+        let root = std::env::temp_dir().join(format!(
+            "herdr-issue-103-identity-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0)
+        ));
+        let stale_dir = root.join("master");
+        let live_dir = root.join("CONTEXT");
+        std::fs::create_dir_all(&stale_dir).unwrap();
+        std::fs::create_dir_all(&live_dir).unwrap();
+        // The runtime reports the resolved path (`/private/var/...` on macOS).
+        let live_dir = live_dir.canonicalize().unwrap();
+
+        let (mut app, _) = app_with_test_workspace();
+        let moved = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&moved]
+            .attached_terminal_id
+            .clone();
+        app.state.terminals.get_mut(&terminal_id).unwrap().cwd = stale_dir.clone();
+        let (events, _) = tokio::sync::mpsc::channel(4);
+        let runtime = crate::terminal::TerminalRuntime::spawn(
+            moved,
+            24,
+            80,
+            live_dir.clone(),
+            0,
+            crate::terminal_theme::TerminalTheme::default(),
+            None,
+            crate::pane::PaneShellConfig::new("/bin/sh", crate::config::ShellModeConfig::NonLogin),
+            &crate::pane::PaneLaunchEnv::default(),
+            events,
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+            std::sync::Arc::new(crate::render_signal::RenderSignal::new()),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while runtime.cwd() != Some(live_dir.clone()) && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        app.terminal_runtimes.insert(terminal_id, runtime);
+        let moved_public = app.public_pane_id(0, moved).unwrap();
+
+        let response = app.handle_pane_move(
+            "req".into(),
+            PaneMoveParams {
+                pane_id: moved_public,
+                destination: PaneMoveDestination::NewWorkspace {
+                    label: None,
+                    tab_label: None,
+                },
+                focus: false,
+            },
+        );
+        let identity_cwd = app
+            .state
+            .workspaces
+            .get(1)
+            .map(|ws| ws.identity_cwd.clone());
+
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+        let _ = std::fs::remove_dir_all(&root);
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::PaneMove { .. }));
+        assert_eq!(identity_cwd, Some(live_dir));
     }
 
     #[test]

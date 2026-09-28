@@ -633,7 +633,10 @@ impl AppState {
     /// with a pane's work is the common case. Panes holding nothing are
     /// omitted, so the board does not bury what it exists to show under panes
     /// saying "nothing here".
-    pub(crate) fn todo_board_items(&self) -> Vec<TodoBoardItem> {
+    pub(crate) fn todo_board_items(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) -> Vec<TodoBoardItem> {
         let mut items = Vec::new();
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
             for tab in &ws.tabs {
@@ -651,7 +654,8 @@ impl AppState {
                         items.push(TodoBoardItem::GroupGap);
                     }
                     items.push(TodoBoardItem::PaneHeading {
-                        space: ws.display_name_from_terminals(&self.terminals),
+                        // The sidebar's name, from the live root-pane cwd.
+                        space: ws.display_name_from(&self.terminals, terminal_runtimes),
                         label: self.pane_display_label(ws_idx, pane_id),
                     });
                     items.extend(todos.iter().map(|todo| TodoBoardItem::Todo {
@@ -672,8 +676,11 @@ impl AppState {
     /// the same place in the list instead of at the top, and the last todo of
     /// a pane taking its heading with it falls out of rebuilding rather than
     /// being a case to handle.
-    pub(crate) fn refresh_todo_board(&mut self) {
-        let items = self.todo_board_items();
+    pub(crate) fn refresh_todo_board(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        let items = self.todo_board_items(terminal_runtimes);
         let Some(board) = self.todo_board_mut() else {
             return;
         };
@@ -3612,6 +3619,9 @@ impl AppState {
         let sound = sound_for_toast_kind(kind, suppress_active_tab_notifications)
             .filter(|_| self.sound.allows(known_agent));
         let build_toast = || {
+            // The stored-cwd name: delivery is decided in `AppState`, without
+            // the runtime registry. The server's forwarded notification
+            // resolves the live name (`forward_agent_notification_delivery`).
             let workspace_label =
                 self.workspaces[ws_idx].display_name_from_terminals(&self.terminals);
             let context =
@@ -3834,7 +3844,7 @@ mod tests {
 
     fn board_texts(state: &AppState) -> Vec<String> {
         state
-            .todo_board_items()
+            .todo_board_items(&crate::terminal::TerminalRuntimeRegistry::new())
             .iter()
             .map(|item| match item {
                 TodoBoardItem::GroupGap => String::new(),
@@ -3978,7 +3988,7 @@ mod tests {
             .remove_todo(todo_id)
             .expect("todo should be removed");
 
-        let items = state.todo_board_items();
+        let items = state.todo_board_items(&crate::terminal::TerminalRuntimeRegistry::new());
         assert!(
             !items
                 .iter()
@@ -3993,7 +4003,7 @@ mod tests {
     #[test]
     fn selection_steps_over_the_blank_row_between_groups() {
         let (mut state, _, _, _) = app_with_board_todos();
-        state.open_todo_board();
+        state.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
 
         let gap = state
             .todo_board()
@@ -4022,7 +4032,7 @@ mod tests {
     #[test]
     fn clicking_the_blank_row_between_groups_is_inert() {
         let (mut state, _, _, _) = app_with_board_todos();
-        state.open_todo_board();
+        state.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         let board = state.todo_board_mut().expect("board");
         let gap = board
             .items
@@ -4046,7 +4056,7 @@ mod tests {
             .map(|todo| todo.text.clone())
             .collect();
         let board: Vec<String> = state
-            .todo_board_items()
+            .todo_board_items(&crate::terminal::TerminalRuntimeRegistry::new())
             .iter()
             .filter_map(|item| match item {
                 TodoBoardItem::Todo { pane_id, todo_id } if *pane_id == first_root => state
@@ -4119,7 +4129,7 @@ mod tests {
     #[test]
     fn a_heading_names_its_space_and_its_pane() {
         let (state, first_root, _, _) = app_with_board_todos();
-        match &state.todo_board_items()[0] {
+        match &state.todo_board_items(&crate::terminal::TerminalRuntimeRegistry::new())[0] {
             TodoBoardItem::PaneHeading { space, label } => {
                 assert_eq!(
                     space,
@@ -4134,7 +4144,7 @@ mod tests {
     #[test]
     fn selection_steps_over_headings_in_both_directions() {
         let (mut state, _, _, _) = app_with_board_todos();
-        state.open_todo_board();
+        state.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
 
         // The list is: heading, two todos, the gap between groups, the second
         // heading, its todo.
@@ -4163,7 +4173,7 @@ mod tests {
     #[test]
     fn the_selection_survives_a_todo_removed_underneath_it() {
         let (mut state, first_root, _, _) = app_with_board_todos();
-        state.open_todo_board();
+        state.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         state.move_todo_board_selection_by(1);
         let selected = state
             .todo_board()
@@ -4184,7 +4194,7 @@ mod tests {
             .expect("terminal")
             .remove_todo(selected.1)
             .expect("todo should be removed");
-        state.refresh_todo_board();
+        state.refresh_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
 
         let board = state.todo_board().expect("board");
         assert!(
@@ -4201,7 +4211,7 @@ mod tests {
     #[test]
     fn removing_a_panes_last_todo_drops_its_heading() {
         let (mut state, _, _, second_root) = app_with_board_todos();
-        state.open_todo_board();
+        state.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         // Headings carry no identifier, so the second space's own name is what
         // marks its group. Only `second_root` holds a todo there, so exactly
         // one heading starts with it.
@@ -4229,7 +4239,7 @@ mod tests {
             .expect("terminal")
             .remove_todo(todo_id)
             .expect("todo should be removed");
-        state.refresh_todo_board();
+        state.refresh_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
 
         assert!(
             !board_state(&state)

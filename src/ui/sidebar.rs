@@ -259,6 +259,9 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
 }
 
 fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {
+    // The stored-cwd name, not the live one the row draws: sidebar geometry
+    // is measured without the runtime registry, and the name only matters
+    // here when it changes how many rows the row's tokens wrap to.
     let (state, seen) = ws.display_state(&app.terminals);
     let label = if indented {
         grouped_child_display_label(

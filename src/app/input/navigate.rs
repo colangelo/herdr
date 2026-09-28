@@ -509,7 +509,7 @@ impl App {
             }
             NavigateAction::OpenPaneTodos => self.open_focused_pane_todos(),
             NavigateAction::AddPaneTodo => self.open_new_pane_todo_for_focused_pane(),
-            NavigateAction::OpenTodoBoard => self.state.open_todo_board(),
+            NavigateAction::OpenTodoBoard => self.state.open_todo_board(&self.terminal_runtimes),
             NavigateAction::DisplayPanes => {
                 self.state.open_display_panes(std::time::Instant::now())
             }
@@ -1402,7 +1402,7 @@ impl App {
     }
 
     fn open_pane_move_target_picker(&mut self) {
-        match pane_move_target_picker_for_state(&self.state) {
+        match pane_move_target_picker_for_state(&self.state, &self.terminal_runtimes) {
             Ok(picker) => {
                 self.state
                     .set_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
@@ -1856,6 +1856,7 @@ fn focused_pane_move_source(state: &AppState) -> Option<(usize, usize, String)> 
 /// new-space destination on its own.
 fn pane_move_target_picker_for_state(
     state: &AppState,
+    terminal_runtimes: &TerminalRuntimeRegistry,
 ) -> Result<crate::app::state::PaneMoveTargetPickerState, &'static str> {
     use crate::app::state::{PaneMoveTarget, PaneMoveTargetEntry, PaneMoveTargetItem};
 
@@ -1915,8 +1916,10 @@ fn pane_move_target_picker_for_state(
         if destinations.is_empty() {
             continue;
         }
+        // The sidebar's name: the live root-pane cwd, not the stored one an
+        // OSC 7 report last set.
         items.push(PaneMoveTargetItem::SpaceHeading {
-            label: workspace.display_name_from_terminals(&state.terminals),
+            label: workspace.display_name_from(&state.terminals, terminal_runtimes),
         });
         items.append(&mut destinations);
     }
@@ -2438,15 +2441,17 @@ pub(super) fn execute_navigate_action_in_context(
             }
             leave_navigate_mode(state);
         }
-        NavigateAction::MovePaneToTab => match pane_move_target_picker_for_state(state) {
-            Ok(picker) => {
-                state.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
+        NavigateAction::MovePaneToTab => {
+            match pane_move_target_picker_for_state(state, terminal_runtimes) {
+                Ok(picker) => {
+                    state.open_overlay(crate::app::state::Overlay::PaneMoveTargetPicker(picker));
+                }
+                Err(message) => {
+                    set_pane_move_feedback(state, "pane move unavailable", message);
+                    leave_navigate_mode(state);
+                }
             }
-            Err(message) => {
-                set_pane_move_feedback(state, "pane move unavailable", message);
-                leave_navigate_mode(state);
-            }
-        },
+        }
         NavigateAction::MovePaneToNextTab
         | NavigateAction::MovePaneToPrevTab
         | NavigateAction::ClearScrollback => leave_navigate_mode(state),
@@ -2615,7 +2620,7 @@ pub(super) fn execute_navigate_action_in_context(
             super::modal::request_detach(state);
             leave_navigate_mode(state);
         }
-        NavigateAction::OpenTodoBoard => state.open_todo_board(),
+        NavigateAction::OpenTodoBoard => state.open_todo_board(terminal_runtimes),
         NavigateAction::DisplayPanes => state.open_display_panes(std::time::Instant::now()),
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
     }
@@ -5502,7 +5507,6 @@ navigate_pane_down = "ctrl+j"
     /// runtime cwd and names it right ("CONTEXT").
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "red until #103 is fixed: the move picker names spaces from the stale terminal cwd"]
     async fn move_picker_names_a_space_made_by_a_move_the_way_the_sidebar_does() {
         use crate::app::state::PaneMoveTargetItem;
 
@@ -5511,6 +5515,8 @@ navigate_pane_down = "ctrl+j"
         let context_dir = root.join("CONTEXT");
         std::fs::create_dir_all(master_dir.join(".git")).unwrap();
         std::fs::create_dir_all(context_dir.join(".git")).unwrap();
+        // The runtime reports the resolved path (`/private/var/...` on macOS).
+        let context_dir = context_dir.canonicalize().unwrap();
 
         // The space "master", with three panes; the last one will be moved,
         // and the two left behind keep "master" listed in the picker.

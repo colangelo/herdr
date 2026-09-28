@@ -2933,8 +2933,11 @@ impl AppState {
             })
     }
 
-    pub(crate) fn open_todo_board(&mut self) {
-        let items = self.todo_board_items();
+    pub(crate) fn open_todo_board(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        let items = self.todo_board_items(terminal_runtimes);
         self.open_overlay(crate::app::state::Overlay::TodoBoard(TodoBoardState::new(
             items,
         )));
@@ -2953,9 +2956,12 @@ impl AppState {
 
     /// Re-settle whichever todo surface is open after a mutation: the panel
     /// re-clamps its cursor, the board rebuilds its projection.
-    pub(crate) fn refresh_open_todo_surface(&mut self) {
+    pub(crate) fn refresh_open_todo_surface(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
         self.pane_todos_move_selection(0);
-        self.refresh_todo_board();
+        self.refresh_todo_board(terminal_runtimes);
     }
 
     /// The todo panel, whether it is the open overlay or suspended behind the

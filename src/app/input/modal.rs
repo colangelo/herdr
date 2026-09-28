@@ -1261,7 +1261,7 @@ impl App {
                     },
                 );
             }
-            self.state.refresh_todo_board();
+            self.state.refresh_todo_board(&self.terminal_runtimes);
             return;
         }
 
@@ -1311,7 +1311,7 @@ impl App {
                         ..Default::default()
                     },
                 );
-                self.state.refresh_todo_board();
+                self.state.refresh_todo_board(&self.terminal_runtimes);
             }
             TodoBoardAction::Remove => {
                 self.runtime_todo_remove(
@@ -1321,7 +1321,7 @@ impl App {
                         id: todo.id,
                     },
                 );
-                self.state.refresh_todo_board();
+                self.state.refresh_todo_board(&self.terminal_runtimes);
             }
             // Handled above, before the selected-todo lookup.
             TodoBoardAction::ClearDone => {}
@@ -1550,7 +1550,8 @@ impl App {
             return;
         }
         self.close_pane_todo_edit_and_return();
-        self.state.refresh_open_todo_surface();
+        self.state
+            .refresh_open_todo_surface(&self.terminal_runtimes);
     }
 
     /// Save, then follow the link — exactly `ctrl+s` then the panel's `g`, in
@@ -3568,7 +3569,7 @@ mod tests {
             )
             .expect("todo should be added");
         app.state.active = Some(0);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
         (app, here, there)
     }
 
@@ -3614,7 +3615,7 @@ mod tests {
             )
             .expect("todo should be added");
         app.state.active = Some(1);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
 
         app.handle_todo_board_key_via_api(key(KeyCode::Char('g')));
 
@@ -3755,7 +3756,7 @@ mod tests {
             )
             .expect("todo should be added");
         app.state.active = Some(0);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
 
         app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
         app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
@@ -3807,7 +3808,7 @@ mod tests {
             )
             .expect("todo should be added");
         app.state.active = Some(1);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
 
         app.handle_todo_board_key_via_api(key(KeyCode::Char('e')));
         app.handle_pane_todo_edit_key_via_api(KeyEvent::new(
@@ -3862,7 +3863,7 @@ mod tests {
             )
             .expect("todo should be updated");
         app.state.active = Some(0);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
 
         app.handle_todo_board_key_via_api(key(KeyCode::Char('c')));
 
@@ -3921,7 +3922,7 @@ mod tests {
         add(&mut app, second, "second done", true);
 
         app.state.active = Some(0);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
         assert_eq!(
             app.state
                 .todo_board()
@@ -3967,7 +3968,7 @@ mod tests {
                 .expect("todo should be added");
         }
         app.state.active = Some(0);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
 
         app.handle_todo_board_key_via_api(key(KeyCode::Char('c')));
 

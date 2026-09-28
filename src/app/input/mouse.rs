@@ -217,7 +217,7 @@ impl AppState {
                 self.close_todo_board();
                 leave_modal(self);
             } else {
-                self.open_todo_board();
+                self.open_todo_board(terminal_runtimes);
             }
             return None;
         }
@@ -6134,7 +6134,7 @@ mod tests {
         infos.sort_by_key(|info| info.rect.y);
         let owner = infos[0].id;
         add_pane_todo(&mut app, owner, "rerun the deploy");
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         (app, owner)
     }
@@ -6194,7 +6194,7 @@ mod tests {
                 add_pane_todo(&mut app, info.id, &format!("pane {n} todo {i}"));
             }
         }
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
         app
     }

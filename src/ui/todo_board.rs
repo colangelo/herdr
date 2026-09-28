@@ -335,7 +335,7 @@ mod tests {
     fn snapshot(todos: &[(&str, bool, TodoPriority)]) -> test_support::OverlaySnapshot {
         let base = app_with_todos(todos);
         let mut open = app_with_todos(todos);
-        open.open_todo_board();
+        open.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         test_support::layout(&mut open);
         test_support::overlay_snapshot(&base, &open)
     }
@@ -390,7 +390,7 @@ mod tests {
     fn snapshot_two_groups_are_separated_by_a_blank_row() {
         let base = app_with_two_groups();
         let mut open = app_with_two_groups();
-        open.open_todo_board();
+        open.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         test_support::layout(&mut open);
         test_support::overlay_snapshot(&base, &open).assert(
             Rect::new(2, 7, 76, 11),
@@ -436,7 +436,7 @@ mod tests {
         let todos = &[("check the 403", false, TodoPriority::Normal)];
 
         let mut board = app_with_todos(todos);
-        board.open_todo_board();
+        board.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
         test_support::layout(&mut board);
         let board_buffer = test_support::draw_sized(
             &board,

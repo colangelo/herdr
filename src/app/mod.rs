@@ -2461,7 +2461,7 @@ mod tests {
     #[tokio::test]
     async fn held_key_repeats_move_the_todo_board_selection() {
         let (mut app, _) = app_with_pane_todos(3);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
         assert_eq!(app.state.todo_board().expect("board").list.selected, 1);
 
         app.route_client_events(
@@ -2525,7 +2525,7 @@ mod tests {
     #[tokio::test]
     async fn repeats_do_not_cross_an_overlay_transition() {
         let (mut app, _) = app_with_pane_todos(1);
-        app.state.open_todo_board();
+        app.state.open_todo_board(&app.terminal_runtimes);
 
         // `e` on the board opens the editor on the selected todo...
         app.route_client_events(
