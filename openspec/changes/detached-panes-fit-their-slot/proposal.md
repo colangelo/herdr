@@ -1,26 +1,21 @@
 ## Why
 
 With no client attached, a new pane is spawned at `estimate_pane_size()` (the
-first pane of whatever tab the server shows) and is never sized to its own layout
-slot until a client attaches. Agent-driven workspaces created while ac is away run
-their agents at a wrong width: both panes of a down split came out 39×46 where the
-layout said 91×25 and 91×14.
+first pane of whatever tab the server shows) and is never resized until a client
+attaches. Agent-driven workspaces created while ac is away ran their agents at an
+arbitrary width: both panes of a down split came out 39×46.
 https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/95
 
 ## What Changes
 
-- When the last client detaches, the server keeps that client's size as its
-  no-client size instead of dropping to `server.headless_cols/rows`. Panes already
-  keep that size (nothing resizes them on detach), so layout and PTYs now agree.
-  The headless default applies only before any client has attached, or when a
-  handoff carried no size.
-- The no-client render sizes every pane to its slot at the no-client size, not
-  only on a fresh server's first frame. New panes and splits therefore fit their
-  slots, and existing panes are unchanged because they already have that size.
+- While no client is attached, `estimate_pane_size()` returns the no-client size:
+  `server.headless_cols/rows`, or a size a live handoff carried. Upstream's
+  `pane_created_after_detach_uses_configured_headless_size` already expects this.
+- A split made while no client is attached sizes the new pane from the target's
+  real PTY size divided by the ratio, and shrinks the target to its share.
+- With a client attached nothing changes: its next frame lays panes out as today.
 
 ## Impact
 
-- `src/server/headless.rs`; the `live-handoff-client` spec's carried-size
-  requirement generalises to any detach.
-- Cost: with no client attached, a render resizes panes whose size changed; the
-  resize is a no-op compare for the rest.
+- `src/app/state.rs`, `src/app/creation.rs`, `src/app/api/{panes,layouts}.rs`,
+  `src/server/headless.rs`.

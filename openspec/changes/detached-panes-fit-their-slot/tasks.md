@@ -1,9 +1,9 @@
 ## 1. Detached sizing (issue 95)
 
-- [ ] 1.1 Keep the last client's size as the no-client size; tests
-- [ ] 1.2 No-client render resizes panes to their slots; test with a wrongly sized pane
+- [x] 1.1 `detached_pane_size` set by the headless server; `estimate_pane_size` uses it; tests
+- [x] 1.2 Splits divide the target's size while detached (`split_shares`, `split_sizes`); tests
 
 ## 2. Ship
 
-- [ ] 2.1 `just check` green
-- [ ] 2.2 Beta; throwaway proof: a split created with no client attached gets its slot sizes
+- [x] 2.1 `just check` green
+- [ ] 2.2 Beta; throwaway proof: a split created with no client attached divides the target

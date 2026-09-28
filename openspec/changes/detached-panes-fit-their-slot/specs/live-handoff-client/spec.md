@@ -1,17 +1,17 @@
 ## ADDED Requirements
 
-### Requirement: Panes created with no client attached fit their slots
+### Requirement: Panes created with no client attached get the no-client size
 
-With no client attached, herdr SHALL size every pane to its layout slot at the
-no-client size, which SHALL be the last attached client's size, or the size a
-handoff carried, or `server.headless_cols/rows` when neither exists.
+While no client is attached, a new pane SHALL be spawned at the no-client size
+(`server.headless_cols/rows`, or a size a live handoff carried), and a split SHALL
+divide the target pane's size by its ratio, resizing the target to its share.
 
-#### Scenario: A split made while detached fits its slots
+#### Scenario: A split made while detached divides the target
 
-- **WHEN** no client is attached and a pane is split down with ratio 0.65
-- **THEN** each pane's PTY matches its layout rect
+- **WHEN** no client is attached and a new 40×120 pane is split down with ratio 0.65
+- **THEN** the panes' PTYs are 26×120 and 14×120
 
-#### Scenario: Detaching keeps the client's size
+#### Scenario: A pane's size no longer depends on the displayed tab
 
-- **WHEN** a 173×59 client detaches
-- **THEN** the server's no-client size is 173×59 and existing panes keep their size
+- **WHEN** the displayed tab's first pane is 39×46 and a workspace is created with no client attached
+- **THEN** the new pane is spawned at the no-client size, not 39×46
