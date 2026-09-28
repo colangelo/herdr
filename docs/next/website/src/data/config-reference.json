@@ -614,6 +614,12 @@
           "description": "Open the session-wide todo board. Unbound by default."
         },
         {
+          "key": "keys.display_panes",
+          "type": "keybinding",
+          "default": "\"prefix+i\"",
+          "description": "Show every pane's number, address, name and size in characters, and the window size, until the next key or for 3 seconds."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",
