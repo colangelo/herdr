@@ -32,6 +32,7 @@ use ratatui::{
 
 use crate::app::list_keys::{list_chord, ListChord, PlainChars};
 use crate::app::text_keys::{apply_text_key, Shape};
+use crate::ui::text::display_width;
 use crate::ui::text_field::TextField;
 
 /// A list's search: the query and whether it has the keyboard.
@@ -179,14 +180,15 @@ pub(crate) fn render_search_row(
             Style::default().fg(p.text),
         )),
     }
-    spans.push(Span::styled(
-        format!(
-            "{:>width$}",
-            row.count,
-            width = area.width.saturating_sub(10) as usize
-        ),
-        Style::default().fg(p.overlay0),
-    ));
+    // The count sits at the row's end, one column in. A query long enough to
+    // reach it wins, and the count gives way rather than being cut in half.
+    let used: usize = spans.iter().map(|span| display_width(&span.content)).sum();
+    let count_width = display_width(&row.count);
+    let room = usize::from(area.width);
+    if used + 1 + count_width < room {
+        spans.push(Span::raw(" ".repeat(room - used - count_width - 1)));
+        spans.push(Span::styled(row.count, Style::default().fg(p.overlay0)));
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
     if search.focused && !has_chip {
         set_search_caret(frame, area, &search.query);

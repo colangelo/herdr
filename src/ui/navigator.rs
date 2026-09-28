@@ -83,7 +83,7 @@ fn render_search(app: &AppState, frame: &mut Frame, area: Rect) {
             } else {
                 "search panes"
             },
-            count: format!("{count} panes"),
+            count: format!("{count} {}", if count == 1 { "pane" } else { "panes" }),
             chip,
         },
         &app.palette,
@@ -757,7 +757,7 @@ mod tests {
             Rect::new(3, 2, 73, 21),
             &[
                 "┌───────────────────────────────────────────────────────────────────────┐",
-                "│ / search panes                                                      1 │",
+                "│ / search panes                                                 1 pane │",
                 "│───────────────────────────────────────────────────────────────────────│",
                 "│ ◆ ▾ · overlay (1)                                                     │",
                 "│ ◆ └── · pane 1                                     shell              │",
