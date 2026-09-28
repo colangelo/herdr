@@ -371,7 +371,23 @@ impl AppState {
         if let Some(navigator) = self.navigator_mut() {
             navigator.selected = selected;
         }
+        self.measure_navigator_width_from(terminal_runtimes);
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
+    }
+
+    /// Measure the open navigator's rows for its width, once: see
+    /// `crate::ui::navigator_content_width`.
+    fn measure_navigator_width_from(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        let width = crate::ui::navigator_content_width(
+            &self.navigator_rows_from(terminal_runtimes),
+            self.navigator_purpose(),
+        );
+        if let Some(navigator) = self.navigator_mut() {
+            navigator.content_width = width;
+        }
     }
 
     /// Open the navigator to choose a link target for the todo being edited.
@@ -391,6 +407,8 @@ impl AppState {
             navigator.purpose = NavigatorPurpose::PaneTodoLink;
             navigator.suspended_pane_todo_edit = Some(edit);
         }
+        // Its rows lead with identifiers, and one of them is the clear entry.
+        self.measure_navigator_width_from(terminal_runtimes);
         // Start below the clear entry so a mis-keyed Enter cannot wipe an
         // existing link, while it stays visible at the top of the list.
         let rows = self.navigator_rows_from(terminal_runtimes);

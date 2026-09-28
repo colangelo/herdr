@@ -51,6 +51,7 @@ use self::mobile::{
     render_mobile_toast_banner,
 };
 use self::navigator::render_navigator_overlay;
+pub(crate) use self::navigator::{navigator_content_width, NAVIGATOR_MIN_WIDTH};
 use self::notification_center::{
     floating_notification_indicator_rect, render_floating_notification_indicator,
     render_notification_center,

@@ -1151,6 +1151,9 @@ pub(crate) struct NavigatorState {
     pub search: crate::ui::overlay::ListSearch,
     pub selected: usize,
     pub scroll: usize,
+    /// The width its rows asked for when it opened, border included; see
+    /// `crate::ui::navigator_content_width`.
+    pub content_width: u16,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
     /// Consulted at activation only, never threaded through rendering of the

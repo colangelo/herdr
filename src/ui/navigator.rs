@@ -359,9 +359,50 @@ fn render_navigator_scrollbar(app: &AppState, line_count: usize, frame: &mut Fra
     );
 }
 
+/// The navigator's narrowest: its list-focus footer, `esc close` included,
+/// plus the border — the widest of its two footers — however short the
+/// session's names are. A navigator measured narrower than its own hints
+/// would cut off the one that says how to leave.
+pub(crate) const NAVIGATOR_MIN_WIDTH: u16 = 73;
+
+/// The metadata column a navigator wide enough for it gives every row.
+const NAVIGATOR_META_COLUMNS: usize = 28;
+
+/// The width the navigator's rows want, border included: the widest row's
+/// gutter, tree prefix, status icon, identifier and label, plus the metadata
+/// column. The same parts [`render_row`] budgets, so a row measured to fit is
+/// drawn whole.
+///
+/// Measured over the rows as they are when the navigator opens — every space
+/// expanded, nothing filtered — and kept, so the box does not change width
+/// while a query narrows the list or a space is folded.
+pub(crate) fn navigator_content_width(rows: &[NavigatorRow], purpose: NavigatorPurpose) -> u16 {
+    let widest = (0..rows.len())
+        .map(|idx| {
+            let row = &rows[idx];
+            let public_id = if purpose == NavigatorPurpose::PaneTodoLink {
+                row.public_pane_id
+                    .as_deref()
+                    .map(|id| display_width_u16(id) as usize + 1)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            // gutter, prefix and its space; icon, its space and one spare
+            3 + display_width_u16(&tree_prefix(rows, idx)) as usize
+                + 1
+                + 3
+                + public_id
+                + display_width_u16(&row.label) as usize
+        })
+        .max()
+        .unwrap_or(0);
+    (widest + NAVIGATOR_META_COLUMNS + 2).min(usize::from(u16::MAX)) as u16
+}
+
 fn metadata_width(width: u16) -> u16 {
     if width >= 90 {
-        28
+        NAVIGATOR_META_COLUMNS as u16
     } else if width >= 68 {
         20
     } else if width >= 52 {
@@ -688,32 +729,54 @@ mod tests {
         assert!(!has_following_sibling_at_depth(&rows, 5, 2));
     }
 
+    /// #105: in a 310x56 window the navigator was 272 columns wide, most of
+    /// it empty. It measures its rows now, and stops at the shared cap.
+    #[test]
+    fn navigator_is_at_most_120_wide_in_a_310x56_window() {
+        let mut app = crate::ui::test_support::app_with_one_pane(&"a-long-space-name ".repeat(12));
+        crate::ui::test_support::layout_sized(&mut app, 310, 56);
+        app.open_navigator();
+
+        let popup = app.navigator_popup_rect();
+
+        assert_eq!(popup.width, crate::ui::overlay::LIST_DIALOG_MAX_WIDTH);
+        assert_eq!(popup.x, (310 - popup.width) / 2, "centred");
+
+        // A short list is narrower still, down to the navigator's floor.
+        let mut short = crate::ui::test_support::app_with_one_pane("ctx");
+        crate::ui::test_support::layout_sized(&mut short, 310, 56);
+        short.open_navigator();
+        let popup = short.navigator_popup_rect();
+        assert_eq!(popup.width, NAVIGATOR_MIN_WIDTH);
+        assert_eq!(popup.x, (310 - NAVIGATOR_MIN_WIDTH) / 2);
+    }
+
     #[test]
     fn snapshot_navigator() {
         crate::ui::test_support::overlay_snapshot_of(|app| app.open_navigator()).assert(
-            Rect::new(5, 2, 70, 21),
+            Rect::new(3, 2, 73, 21),
             &[
-                "┌────────────────────────────────────────────────────────────────────┐",
-                "│ / search panes                                                   1 │",
-                "│────────────────────────────────────────────────────────────────────│",
-                "│ ◆ ▾ · overlay (1)                                                  │",
-                "│ ◆ └── · pane 1                                  shell              │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│                                                                    │",
-                "│ overlay · pane 1 · shell───────────────────────────────────────────│",
-                "│ enter switch  / search  b/w/i/d/a states  j/k/^j/^k/↑↓ move  esc cl│",
-                "└────────────────────────────────────────────────────────────────────┘",
+                "┌───────────────────────────────────────────────────────────────────────┐",
+                "│ / search panes                                                      1 │",
+                "│───────────────────────────────────────────────────────────────────────│",
+                "│ ◆ ▾ · overlay (1)                                                     │",
+                "│ ◆ └── · pane 1                                     shell              │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│                                                                       │",
+                "│ overlay · pane 1 · shell──────────────────────────────────────────────│",
+                "│ enter switch  / search  b/w/i/d/a states  j/k/^j/^k/↑↓ move  esc close│",
+                "└───────────────────────────────────────────────────────────────────────┘",
             ],
         );
     }

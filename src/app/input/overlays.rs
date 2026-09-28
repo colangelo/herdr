@@ -271,18 +271,37 @@ impl AppState {
         self.view.sidebar_rect.union(self.view.terminal_area)
     }
 
+    /// Centred through the kit, as wide as its rows asked for when it opened
+    /// (between its floor and the shared cap) and as tall as it always was:
+    /// the screen less a tenth above and below.
     pub(crate) fn navigator_popup_rect(&self) -> Rect {
         let area = self.onboarding_full_area();
-        let margin_x = (area.width / 16).max(2);
         let margin_y = (area.height / 10).max(1);
-        let width = area.width.saturating_sub(margin_x.saturating_mul(2));
-        let height = area.height.saturating_sub(margin_y.saturating_mul(2));
-        Rect::new(
-            area.x + margin_x,
-            area.y + margin_y,
-            width.max(4),
-            height.max(4),
-        )
+        let height = area
+            .height
+            .saturating_sub(margin_y.saturating_mul(2))
+            .max(4);
+        crate::ui::overlay::AnchoredPanelSpec {
+            anchor: area,
+            screen: area,
+            content_width: self
+                .navigator()
+                .map(|navigator| navigator.content_width)
+                .unwrap_or_default(),
+            width_bounds: (
+                crate::ui::NAVIGATOR_MIN_WIDTH,
+                crate::ui::overlay::LIST_DIALOG_MAX_WIDTH,
+            ),
+            rows: height.saturating_sub(2),
+            max_rows: u16::MAX,
+            footer_rows: 0,
+            detail_rows: 0,
+            header_rows: 0,
+            vertical: crate::ui::overlay::VerticalAnchor::Centered,
+        }
+        .resolve()
+        .map(|geometry| geometry.outer)
+        .unwrap_or_default()
     }
 
     pub(crate) fn navigator_inner_rect(&self) -> Rect {
