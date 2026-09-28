@@ -308,12 +308,14 @@ async fn publish_agent_process_detected_event(
     pane_id: PaneId,
     agent: Agent,
     observed_at: std::time::Instant,
+    replaced_process: bool,
 ) {
     if let Err(e) = state_events
         .send(AppEvent::AgentProcessDetected {
             pane_id,
             agent,
             observed_at,
+            replaced_process,
         })
         .await
     {
@@ -530,6 +532,20 @@ enum ForegroundShellAgentAction {
     ReportProcessExit,
     ReportReplacementProcess,
     ClearAgent,
+}
+
+/// Whether two probes a poll apart saw the same agent in different process
+/// groups: a new process of that agent replaced the old one between them, with
+/// the shell's turn in the foreground too short for a probe to catch.
+fn agent_process_group_replaced(
+    previous: Option<(Agent, u32)>,
+    current: Option<(Agent, u32)>,
+) -> bool {
+    matches!(
+        (previous, current),
+        (Some((previous_agent, previous_group)), Some((agent, group)))
+            if previous_agent == agent && previous_group != group
+    )
 }
 
 fn foreground_shell_agent_action(
@@ -750,6 +766,18 @@ struct ProcessProbeResult {
     foreground_is_pane_shell: bool,
     agent: Option<Agent>,
     process_name: Option<String>,
+}
+
+impl ProcessProbeResult {
+    /// The identified agent and the process group it runs in: the nested job
+    /// behind a PTY wrapper, whose own group never changes, else the pane's.
+    fn agent_process_group(&self) -> Option<(Agent, u32)> {
+        #[cfg(unix)]
+        let group = self.nested_process_group_id.or(self.process_group_id);
+        #[cfg(not(unix))]
+        let group = self.process_group_id;
+        self.agent.zip(group)
+    }
 }
 
 /// The shell a PTY wrapper hosts, and its PTY's foreground group when probed.
@@ -1057,6 +1085,7 @@ fn spawn_basic_detection_task(
         let mut last_visible_signal_refresh = None;
         let mut last_process_check = std::time::Instant::now();
         let mut last_foreground_pgid = None;
+        let mut last_agent_process_group: Option<(Agent, u32)> = None;
         let mut wrapped_shell_watch = WrappedShellWatch::default();
         let mut has_process_probe = false;
         let mut acquisition_started_at = None;
@@ -1089,6 +1118,7 @@ fn spawn_basic_detection_task(
                     last_visible_signal_refresh = None;
                     last_process_check = std::time::Instant::now();
                     last_foreground_pgid = None;
+                    last_agent_process_group = None;
                     wrapped_shell_watch.clear();
                     has_process_probe = false;
                     acquisition_started_at = None;
@@ -1165,12 +1195,20 @@ fn spawn_basic_detection_task(
                     }
                 }
                 let previous_agent = agent_presence.current_agent();
-                let foreground_action = foreground_shell_agent_action(
-                    previous_agent,
-                    new_agent,
-                    foreground_is_pane_shell,
-                    foreground_shell_exit_reported,
-                );
+                let agent_process_group = new_agent.and(probe.agent_process_group());
+                let agent_process_replaced = previous_agent == new_agent
+                    && agent_process_group_replaced(last_agent_process_group, agent_process_group);
+                last_agent_process_group = agent_process_group;
+                let foreground_action = if agent_process_replaced {
+                    ForegroundShellAgentAction::ReportReplacementProcess
+                } else {
+                    foreground_shell_agent_action(
+                        previous_agent,
+                        new_agent,
+                        foreground_is_pane_shell,
+                        foreground_shell_exit_reported,
+                    )
+                };
                 let changed = apply_foreground_shell_agent_action(
                     &mut agent_presence,
                     foreground_action,
@@ -1212,6 +1250,8 @@ fn spawn_basic_detection_task(
                                 pane_id,
                                 agent,
                                 now,
+                                foreground_action
+                                    == ForegroundShellAgentAction::ReportReplacementProcess,
                             )
                             .await;
                         } else {
@@ -2801,6 +2841,7 @@ impl PaneRuntime {
                 #[cfg(windows)]
                 let mut last_observation = (Instant::now(), Some(0));
                 let mut last_foreground_pgid = None;
+                let mut last_agent_process_group: Option<(Agent, u32)> = None;
                 #[cfg(unix)]
                 let mut wrapped_shell_watch = WrappedShellWatch::default();
                 let mut has_process_probe = false;
@@ -2843,6 +2884,7 @@ impl PaneRuntime {
                             state = AgentState::Unknown;
                             last_visible_idle = false;
                             last_foreground_pgid = None;
+                            last_agent_process_group = None;
                             #[cfg(unix)]
                             wrapped_shell_watch.clear();
                             has_process_probe = false;
@@ -2953,6 +2995,7 @@ impl PaneRuntime {
                             );
                             #[cfg(unix)]
                             wrapped_shell_watch.observe(probe.wrapped_shell);
+                            let probed_agent_process_group = probe.agent_process_group();
                             let process_name = probe.process_name;
                             let process_group_id = probe.process_group_id;
                             let tracked_process_group_id = process_group_for_change_tracking(
@@ -2973,12 +3016,23 @@ impl PaneRuntime {
                             }
 
                             let previous_agent = agent_presence.current_agent();
-                            let foreground_action = foreground_shell_agent_action(
-                                previous_agent,
-                                new_agent,
-                                foreground_is_pane_shell,
-                                foreground_shell_exit_reported,
-                            );
+                            let agent_process_group = new_agent.and(probed_agent_process_group);
+                            let agent_process_replaced = previous_agent == new_agent
+                                && agent_process_group_replaced(
+                                    last_agent_process_group,
+                                    agent_process_group,
+                                );
+                            last_agent_process_group = agent_process_group;
+                            let foreground_action = if agent_process_replaced {
+                                ForegroundShellAgentAction::ReportReplacementProcess
+                            } else {
+                                foreground_shell_agent_action(
+                                    previous_agent,
+                                    new_agent,
+                                    foreground_is_pane_shell,
+                                    foreground_shell_exit_reported,
+                                )
+                            };
                             let changed = apply_foreground_shell_agent_action(
                                 &mut agent_presence,
                                 foreground_action,
@@ -3022,6 +3076,7 @@ impl PaneRuntime {
                                             pane_id,
                                             agent,
                                             now,
+                                            foreground_action == ForegroundShellAgentAction::ReportReplacementProcess,
                                         )
                                         .await;
                                     } else {
@@ -4988,6 +5043,51 @@ mod tests {
             foreground_shell_agent_action(Some(Agent::Pi), Some(Agent::Pi), false, true),
             ForegroundShellAgentAction::ReportReplacementProcess
         );
+    }
+
+    // #112: a Claude restarted between two polls never shows the shell, only
+    // the agent's process group changing. That is a replacement process too.
+    #[test]
+    fn a_new_process_group_for_the_same_agent_is_a_replacement() {
+        assert!(agent_process_group_replaced(
+            Some((Agent::Claude, 10)),
+            Some((Agent::Claude, 11))
+        ));
+        assert!(!agent_process_group_replaced(
+            Some((Agent::Claude, 10)),
+            Some((Agent::Claude, 10))
+        ));
+        assert!(!agent_process_group_replaced(
+            Some((Agent::Claude, 10)),
+            Some((Agent::Codex, 11))
+        ));
+        assert!(!agent_process_group_replaced(
+            None,
+            Some((Agent::Claude, 11))
+        ));
+        assert!(!agent_process_group_replaced(
+            Some((Agent::Claude, 10)),
+            None
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_process_group_follows_the_job_the_agent_was_found_in() {
+        let outer = crate::platform::ForegroundJob {
+            process_group_id: 100,
+            processes: vec![foreground_process(100, "atuin")],
+        };
+        let nested = crate::platform::ForegroundJob {
+            process_group_id: 200,
+            processes: vec![foreground_process(200, "claude")],
+        };
+        let wrapped =
+            nested_process_probe_result(&outer, 150, &nested, 1, Agent::Claude, "claude".into());
+        assert_eq!(wrapped.agent_process_group(), Some((Agent::Claude, 200)));
+
+        let direct = process_probe_result(&nested, 1, Agent::Claude, "claude".into());
+        assert_eq!(direct.agent_process_group(), Some((Agent::Claude, 200)));
     }
 
     #[test]

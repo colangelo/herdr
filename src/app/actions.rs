@@ -3246,9 +3246,14 @@ impl AppState {
                 pane_id,
                 agent,
                 observed_at,
+                replaced_process,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
-                    Some(terminal.set_detected_agent_process_at(agent, observed_at))
+                    Some(if replaced_process {
+                        terminal.set_detected_agent_replacement_process_at(agent, observed_at)
+                    } else {
+                        terminal.set_detected_agent_process_at(agent, observed_at)
+                    })
                 })
                 .into_iter()
                 .collect(),
@@ -5977,6 +5982,64 @@ mod tests {
         assert!(!pane.seen);
     }
 
+    // #112, through the app's event order: `herdr pane run <pane> "claude …"`
+    // right after the previous Claude quit. The new SessionStart arrives while
+    // the old session is on record, then detection sees the old Claude's exit,
+    // then the new Claude. The pane ends with the new session.
+    #[test]
+    fn pane_run_claude_restart_keeps_its_agent_session() {
+        let mut state = app_with_workspaces(&["active"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0]
+            .terminal_id(pane_id)
+            .cloned()
+            .expect("pane terminal");
+        let report = |session: &str, seq: u64| AppEvent::AgentSessionReported {
+            pane_id,
+            source: "herdr:claude".into(),
+            agent_label: "claude".into(),
+            seq: Some(seq),
+            session_ref: crate::agent_resume::AgentSessionRef::id(session),
+            session_start_source: Some("startup".into()),
+        };
+        let session = |state: &AppState| {
+            state
+                .terminals
+                .get(&terminal_id)
+                .and_then(|terminal| terminal.persisted_agent_session.as_ref())
+                .map(|session| session.session_ref.value.clone())
+        };
+
+        state.handle_app_event(AppEvent::AgentProcessDetected {
+            pane_id,
+            agent: Agent::Claude,
+            observed_at: Instant::now(),
+            replaced_process: false,
+        });
+        state.handle_app_event(report("old-session", 1));
+        assert_eq!(session(&state).as_deref(), Some("old-session"));
+
+        state.handle_app_event(report("new-session", 2));
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Claude),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            background_work: false,
+            process_exited: true,
+            observed_at: Instant::now(),
+        });
+        state.handle_app_event(AppEvent::AgentProcessDetected {
+            pane_id,
+            agent: Agent::Claude,
+            observed_at: Instant::now(),
+            replaced_process: true,
+        });
+
+        assert_eq!(session(&state).as_deref(), Some("new-session"));
+    }
+
     #[test]
     fn first_idle_after_process_detection_is_not_completion() {
         let mut state = app_with_workspaces(&["active", "background"]);
@@ -5988,6 +6051,7 @@ mod tests {
             pane_id,
             agent: Agent::Pi,
             observed_at: Instant::now(),
+            replaced_process: false,
         });
         let direct_idle = state
             .handle_app_event(AppEvent::StateChanged {
@@ -6008,6 +6072,7 @@ mod tests {
             pane_id,
             agent: Agent::Pi,
             observed_at: Instant::now(),
+            replaced_process: false,
         });
         for agent_state in [AgentState::Working, AgentState::Blocked] {
             state.handle_app_event(AppEvent::StateChanged {
@@ -6046,6 +6111,7 @@ mod tests {
             pane_id,
             agent: Agent::Codex,
             observed_at: Instant::now(),
+            replaced_process: false,
         });
         state.handle_app_event(AppEvent::StateChanged {
             pane_id,

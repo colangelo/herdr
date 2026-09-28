@@ -11732,6 +11732,7 @@ next_tab = ""
                 pane_id,
                 agent: crate::detect::Agent::Pi,
                 observed_at: Instant::now(),
+                replaced_process: false,
             })
         );
 

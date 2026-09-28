@@ -10,6 +10,13 @@ use std::time::{Duration, Instant};
 use crate::detect::{Agent, AgentState};
 use crate::terminal::TerminalId;
 
+/// How far apart a restarted agent's first session report and detection's
+/// sighting of the new process may be and still be paired. Claude sends its
+/// SessionStart once it has started, which can take seconds with plugins and
+/// MCP servers; detection polls every 300 ms. A minute covers both without
+/// letting an unrelated later report pair with an old restart.
+pub(crate) const REPLACED_PROCESS_SESSION_WINDOW: Duration = Duration::from_secs(60);
+
 #[path = "metadata.rs"]
 mod metadata;
 pub use metadata::{AgentMetadata, AgentMetadataReport, EffectivePresentation};
@@ -112,6 +119,19 @@ struct RecentAgentProcessExit {
     observed_at: Instant,
 }
 
+/// A `startup` session report refused because the pane still had another
+/// session of the same agent on record. It is either a nested run of the agent
+/// inside the pane (refused for good) or the first report of a restarted agent
+/// whose old process detection has not yet seen go; which one is known only
+/// when detection does or does not report a replacement process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HeldSessionStartReport {
+    source: String,
+    agent_label: String,
+    session_ref: crate::agent_resume::AgentSessionRef,
+    received_at: Instant,
+}
+
 /// Pure state for a server-owned terminal.
 ///
 /// During the migration this is still one-to-one with a pane-backed PTY, but
@@ -155,6 +175,18 @@ pub struct TerminalState {
     pub(crate) restored_last_input_at_ms: Option<i64>,
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
+    /// An agent process exit observed since detection last saw an agent
+    /// process start. Unlike `recent_agent_process_exit`, later state updates
+    /// do not reset it; the next process sighting does.
+    last_observed_agent_exit: Option<RecentAgentProcessExit>,
+    /// When the session on record was accepted from a session-start report,
+    /// with its value, so a stale time cannot be read against a newer session.
+    persisted_agent_session_recorded: Option<(String, Instant)>,
+    /// See [`HeldSessionStartReport`].
+    held_session_start_report: Option<HeldSessionStartReport>,
+    /// A replacement process seen before its session report arrived: the
+    /// next conflicting `startup` report of that agent is its own.
+    unclaimed_agent_replacement: Option<(Agent, Instant)>,
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
 }
@@ -193,6 +225,10 @@ impl TerminalState {
             restored_last_input_at_ms: None,
             respawn_shell_on_exit: false,
             recent_agent_process_exit: None,
+            last_observed_agent_exit: None,
+            persisted_agent_session_recorded: None,
+            held_session_start_report: None,
+            unclaimed_agent_replacement: None,
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
         }
@@ -203,6 +239,9 @@ impl TerminalState {
         agent: Agent,
         now: Instant,
     ) -> TerminalStateMutation {
+        // An observed exit pairs with the next process detection sees, and
+        // no later one: see `session_recorded_since_exit`.
+        self.last_observed_agent_exit = None;
         let starts_acquisition = !self
             .should_ignore_detected_state_under_full_lifecycle_hook(Some(agent), false)
             && !self.detected_state_observed_before_release_suppression(Some(agent), now);
@@ -219,6 +258,91 @@ impl TerminalState {
             self.agent_process_acquisition_pending = true;
         }
         mutation
+    }
+
+    /// Detection saw a new process of the agent the pane already had: after
+    /// the old one's exit, or as the agent's process group changing between
+    /// polls. The session on record belonged to the old process, so a
+    /// `startup` report refused for it is the new process's own and is
+    /// adopted; with none held yet, the next one is let through.
+    pub fn set_detected_agent_replacement_process_at(
+        &mut self,
+        agent: Agent,
+        now: Instant,
+    ) -> TerminalStateMutation {
+        let previous_session = self.current_session_identity_for_persistence();
+        let replaced_exit = self
+            .last_observed_agent_exit
+            .filter(|exit| exit.agent == agent);
+        let mut mutation = self.set_detected_agent_process_at(agent, now);
+        let held = self.held_session_start_report.take().filter(|held| {
+            crate::detect::parse_agent_label(&held.agent_label) == Some(agent)
+                && now.saturating_duration_since(held.received_at)
+                    <= REPLACED_PROCESS_SESSION_WINDOW
+        });
+        if let Some(held) = held {
+            self.unclaimed_agent_replacement = None;
+            self.record_session_start_session(
+                held.source,
+                held.agent_label,
+                held.session_ref,
+                held.received_at,
+            );
+        } else if !self.session_recorded_since_exit(replaced_exit) {
+            self.unclaimed_agent_replacement = Some((agent, now));
+        }
+        mutation.session_ref_changed |=
+            previous_session != self.current_session_identity_for_persistence();
+        mutation
+    }
+
+    /// Whether the session on record came from a session-start report that
+    /// arrived after the replaced process's observed exit: then it is the new
+    /// process's already, and the replacement has nothing left to claim. With
+    /// the exit missed (`None`), the session on record is the old process's.
+    fn session_recorded_since_exit(&self, exit: Option<RecentAgentProcessExit>) -> bool {
+        let Some(exit) = exit else {
+            return false;
+        };
+        let Some(session) = self.persisted_agent_session.as_ref() else {
+            return false;
+        };
+        self.persisted_agent_session_recorded
+            .as_ref()
+            .is_some_and(|(value, recorded_at)| {
+                *value == session.session_ref.value && *recorded_at > exit.observed_at
+            })
+    }
+
+    /// A replacement process of `agent_label`'s agent seen recently and not
+    /// yet claimed: taking it lets one conflicting `startup` report through.
+    fn claim_agent_replacement(&mut self, agent_label: &str, now: Instant) -> bool {
+        let claimed = self
+            .unclaimed_agent_replacement
+            .is_some_and(|(agent, seen_at)| {
+                crate::detect::parse_agent_label(agent_label) == Some(agent)
+                    && now.saturating_duration_since(seen_at) <= REPLACED_PROCESS_SESSION_WINDOW
+            });
+        if claimed {
+            self.unclaimed_agent_replacement = None;
+        }
+        claimed
+    }
+
+    fn record_session_start_session(
+        &mut self,
+        source: String,
+        agent_label: String,
+        session_ref: crate::agent_resume::AgentSessionRef,
+        recorded_at: Instant,
+    ) {
+        self.reconcile_agent_name_owner(&agent_label, Some(&session_ref));
+        self.persisted_agent_session_recorded = Some((session_ref.value.clone(), recorded_at));
+        self.persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
+            source,
+            agent: agent_label,
+            session_ref,
+        });
     }
 
     pub(crate) fn finish_agent_process_acquisition(&mut self) -> bool {
@@ -428,6 +552,7 @@ impl TerminalState {
                     agent,
                     observed_at: now,
                 });
+                self.last_observed_agent_exit = self.recent_agent_process_exit;
             }
         } else if agent.is_some() {
             self.recent_agent_process_exit = None;
@@ -1617,7 +1742,18 @@ impl TerminalState {
                 session_start_source.as_deref(),
             )
             .is_some()
+            && !self.claim_agent_replacement(&agent_label, Instant::now())
         {
+            // Nested run or restart: see `HeldSessionStartReport`. Only a
+            // `startup` can be a restarted process's first report.
+            if session_start_source.as_deref() == Some("startup") {
+                self.held_session_start_report = Some(HeldSessionStartReport {
+                    source,
+                    agent_label,
+                    session_ref,
+                    received_at: Instant::now(),
+                });
+            }
             return None;
         }
         let replaced_hook_session = self.same_owner_full_lifecycle_hook_authority_session_ref(
@@ -1651,12 +1787,11 @@ impl TerminalState {
             );
             self.hook_authority = None;
         }
-        self.reconcile_agent_name_owner(&agent_label, Some(&session_ref));
-        self.persisted_agent_session = Some(crate::agent_resume::PersistedAgentSession {
-            source,
-            agent: agent_label,
-            session_ref,
-        });
+        // A session taken from a report settles any held one and any
+        // unclaimed replacement: the new process has its session now.
+        self.held_session_start_report = None;
+        self.unclaimed_agent_replacement = None;
+        self.record_session_start_session(source, agent_label, session_ref, Instant::now());
         let current_session = self.current_session_identity_for_persistence();
         Some(TerminalStateMutation {
             effective_state_change: self.recompute_effective_state(
@@ -2118,6 +2253,10 @@ impl TerminalState {
         self.fallback_observed_at = None;
         self.hook_authority = None;
         self.persisted_agent_session = None;
+        self.persisted_agent_session_recorded = None;
+        self.held_session_start_report = None;
+        self.unclaimed_agent_replacement = None;
+        self.last_observed_agent_exit = None;
         self.agent_metadata.clear();
         self.metadata_report_agents.clear();
         self.suppressed_full_lifecycle_hook_reports.clear();
@@ -4636,6 +4775,179 @@ mod tests {
                 "{session_start_source} should store the replacement session"
             );
         }
+    }
+
+    fn claude_session_value(terminal: &TerminalState) -> Option<&str> {
+        terminal
+            .persisted_agent_session
+            .as_ref()
+            .filter(|session| session.source == "herdr:claude" && session.agent == "claude")
+            .map(|session| session.session_ref.value.as_str())
+    }
+
+    fn report_claude_startup(terminal: &mut TerminalState, session: &str, seq: u64) -> bool {
+        terminal
+            .set_agent_session_ref_for_session_start(
+                "herdr:claude".into(),
+                "claude".into(),
+                crate::agent_resume::AgentSessionRef::id(session),
+                Some(seq),
+                Some("startup".into()),
+            )
+            .is_some()
+    }
+
+    /// A pane running a detected Claude whose SessionStart recorded `session`.
+    fn claude_running_session(session: &str) -> TerminalState {
+        let mut terminal = test_terminal();
+        terminal.set_detected_agent_process_at(Agent::Claude, Instant::now());
+        assert!(report_claude_startup(&mut terminal, session, 20));
+        assert_eq!(claude_session_value(&terminal), Some(session));
+        terminal
+    }
+
+    // #112: `herdr pane run <pane> "claude …"` right after the previous Claude
+    // quit. The new Claude's SessionStart lands while the old session is still
+    // on record, is refused as a possible nested Claude, and the old process's
+    // exit is seen only afterwards (the mbm5 report: the pane ends with no
+    // session). Once detection reports the replacement process, the refused
+    // report is the new process's and is adopted.
+    #[test]
+    fn session_report_survives_an_older_process_exit() {
+        let mut terminal = claude_running_session("old-session");
+        let now = Instant::now();
+
+        assert!(!report_claude_startup(&mut terminal, "new-session", 21));
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            now,
+        );
+        terminal.set_detected_agent_replacement_process_at(Agent::Claude, now);
+
+        assert_eq!(claude_session_value(&terminal), Some("new-session"));
+    }
+
+    // #112, the other outcome: detection never sees the shell between the two
+    // Claudes (the gap fell between polls), only the Claude process group
+    // changing. The old session must not outlive its process.
+    #[test]
+    fn claude_restart_with_a_missed_exit_takes_the_new_session() {
+        let mut terminal = claude_running_session("old-session");
+
+        assert!(!report_claude_startup(&mut terminal, "new-session", 21));
+        let mutation =
+            terminal.set_detected_agent_replacement_process_at(Agent::Claude, Instant::now());
+
+        assert!(mutation.session_ref_changed);
+        assert_eq!(claude_session_value(&terminal), Some("new-session"));
+    }
+
+    #[test]
+    fn claude_restart_report_after_the_replacement_takes_the_session() {
+        let mut terminal = claude_running_session("old-session");
+
+        terminal.set_detected_agent_replacement_process_at(Agent::Claude, Instant::now());
+        assert!(report_claude_startup(&mut terminal, "new-session", 21));
+
+        assert_eq!(claude_session_value(&terminal), Some("new-session"));
+    }
+
+    // The guard `claude_startup_session_ref_does_not_replace_existing_session_ref`
+    // exists for: a nested `claude -p` inside the pane reports a startup too.
+    // A replacement lets through one session, the replacing process's own.
+    #[test]
+    fn a_replacement_lets_through_one_startup_session_only() {
+        let mut terminal = claude_running_session("old-session");
+
+        terminal.set_detected_agent_replacement_process_at(Agent::Claude, Instant::now());
+        assert!(report_claude_startup(&mut terminal, "new-session", 21));
+        assert!(!report_claude_startup(&mut terminal, "nested-session", 22));
+
+        assert_eq!(claude_session_value(&terminal), Some("new-session"));
+    }
+
+    // The ordinary restart: detection saw the exit first, so the new report
+    // was taken at once. The replacement sighting that follows has nothing to
+    // claim, and a nested Claude's startup is still refused.
+    #[test]
+    fn a_replacement_after_the_new_session_claims_nothing() {
+        let mut terminal = claude_running_session("old-session");
+        let exit_at = Instant::now();
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            exit_at,
+        );
+        assert!(report_claude_startup(&mut terminal, "new-session", 21));
+        terminal.set_detected_agent_replacement_process_at(Agent::Claude, Instant::now());
+        assert!(!report_claude_startup(&mut terminal, "nested-session", 22));
+
+        assert_eq!(claude_session_value(&terminal), Some("new-session"));
+    }
+
+    // Seen live: one restart whose exit detection saw, then one whose exit it
+    // missed. The first restart's exit must not make the second one's session
+    // look settled already.
+    #[test]
+    fn a_later_restart_with_a_missed_exit_still_takes_its_session() {
+        let mut terminal = claude_running_session("first-session");
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            Instant::now(),
+        );
+        assert!(report_claude_startup(&mut terminal, "second-session", 21));
+        terminal.set_detected_agent_replacement_process_at(Agent::Claude, Instant::now());
+
+        terminal.set_detected_agent_replacement_process_at(Agent::Claude, Instant::now());
+        assert!(report_claude_startup(&mut terminal, "third-session", 22));
+
+        assert_eq!(claude_session_value(&terminal), Some("third-session"));
+    }
+
+    #[test]
+    fn a_stale_refused_startup_report_is_not_adopted() {
+        let mut terminal = claude_running_session("old-session");
+
+        assert!(!report_claude_startup(&mut terminal, "nested-session", 21));
+        terminal.set_detected_agent_replacement_process_at(
+            Agent::Claude,
+            Instant::now() + REPLACED_PROCESS_SESSION_WINDOW + Duration::from_secs(1),
+        );
+
+        assert_eq!(claude_session_value(&terminal), Some("old-session"));
+    }
+
+    #[test]
+    fn session_is_cleared_by_its_own_process_exit() {
+        let mut terminal = claude_running_session("old-session");
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            Instant::now(),
+        );
+
+        assert_eq!(claude_session_value(&terminal), None);
     }
 
     #[test]

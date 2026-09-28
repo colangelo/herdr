@@ -61,6 +61,10 @@ pub enum AppEvent {
         pane_id: PaneId,
         agent: Agent,
         observed_at: Instant,
+        /// A new process of the agent the pane already had, not the first
+        /// sighting of one: a restart, seen as an exit followed by the new
+        /// process or as the agent's process group changing between polls.
+        replaced_process: bool,
     },
     /// Fallback detector state changed in a pane.
     StateChanged {
