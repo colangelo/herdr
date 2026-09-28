@@ -228,6 +228,19 @@ pub(crate) fn handle_navigator_key(
     }
 
     match key.code {
+        // A set filter is cleared before anything closes, as in every
+        // searchable list: the query, or the state chip standing in for it.
+        KeyCode::Esc
+            if state
+                .navigator_mut()
+                .is_some_and(|navigator| navigator.search.clear_on_escape()) =>
+        {
+            state.clamp_navigator_selection_from(terminal_runtimes);
+        }
+        KeyCode::Esc if state.navigator_state_filter().is_some() => {
+            state.set_navigator_state_filter(None);
+            state.clamp_navigator_selection_from(terminal_runtimes);
+        }
         KeyCode::Esc => {
             // Dismissing a link selection goes back to the modal that opened
             // it, leaving the staged link exactly as it was.
@@ -2931,6 +2944,15 @@ mod tests {
         );
         assert!(state.navigator_query().is_empty());
 
+        // A set filter is cleared before the navigator closes.
+        handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        assert_eq!(state.mode, Mode::Navigator);
+        assert_eq!(state.navigator_state_filter(), None);
+
         handle_navigator_key(
             &mut state,
             &terminal_runtimes,
@@ -2940,8 +2962,10 @@ mod tests {
         assert_eq!(state.mode, Mode::Terminal);
     }
 
+    /// Esc leaves the search and keeps the query; from the list, the next
+    /// Esc clears the query, and only the one after closes.
     #[test]
-    fn navigator_search_escape_blurs_then_next_escape_closes() {
+    fn navigator_search_escape_blurs_then_clears_then_closes() {
         let mut state = state_with_workspaces(&["alpha", "beta"]);
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         state.open_overlay(crate::app::state::Overlay::Navigator(
@@ -2995,6 +3019,16 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Navigator);
         assert!(!state.navigator_search_focused());
+        assert_eq!(state.navigator_query(), "al");
+
+        handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+
+        assert_eq!(state.mode, Mode::Navigator, "the query is cleared first");
+        assert!(state.navigator_query().is_empty());
 
         handle_navigator_key(
             &mut state,
