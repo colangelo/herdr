@@ -10,11 +10,13 @@
 //! does not, and the kit is data and geometry rather than a widget tree.
 
 mod button_row;
+mod detail;
 mod geometry;
 mod list_cursor;
 mod search;
 
 pub(crate) use button_row::{ButtonRow, ButtonRowHit, ButtonSpec};
+pub(crate) use detail::{detail_box_rows, render_detail_box, DETAIL_MAX_TEXT_ROWS};
 pub(crate) use geometry::{
     AnchoredPanelSpec, PanelGeometry, VerticalAnchor, LIST_DIALOG_MAX_WIDTH,
 };

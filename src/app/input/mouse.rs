@@ -1815,14 +1815,14 @@ impl AppState {
             header_rows: 0,
             vertical: crate::ui::overlay::VerticalAnchor::InsideTop,
         };
-        // A row shows one line, so a todo carrying several says so with a `⏎`
-        // and keeps the rest to itself. The detail block is where the rest
-        // goes: only for a selection that has more than its first line, so a
-        // panel of one-line todos is exactly what it was.
-        let detail_rows = todos
-            .get(panel.list.selected)
-            .map(|todo| crate::ui::pane_todo_detail_rows(&todo.text, spec.resolved_width()))
-            .unwrap_or(0);
+        // A row shows one line, cut to fit, so a todo with more says so with a
+        // `⏎` or loses its end. The detail box is where the rest goes, sized
+        // for the largest need among the panel's todos so the panel keeps its
+        // height as the selection moves. A panel whose rows hide nothing has
+        // no box at all.
+        let list_width = spec.resolved_width().saturating_sub(2);
+        let detail_rows =
+            crate::ui::pane_todo_detail_rows(self, todos.iter().copied(), list_width, list_width);
         crate::ui::overlay::AnchoredPanelSpec {
             detail_rows,
             ..spec

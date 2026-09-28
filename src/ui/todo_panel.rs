@@ -137,9 +137,6 @@ pub(crate) fn pane_todo_link_chip_text(public_id: Option<&str>, label: &str) -> 
 /// What a todo shows on its single panel row. A todo may hold more than one
 /// line; the panel lists one row each, so the rest is signalled rather than
 /// shown.
-/// Text rows the detail block will draw at most.
-pub(crate) const PANE_TODO_DETAIL_MAX_TEXT_ROWS: u16 = 6;
-
 pub(crate) fn pane_todo_row_text(text: &str, budget: usize) -> String {
     let Some((first, _)) = text.split_once('\n') else {
         return truncate_end(text, budget);
@@ -149,72 +146,57 @@ pub(crate) fn pane_todo_row_text(text: &str, budget: usize) -> String {
     format!("{first}{marker}")
 }
 
-/// Draws the selected todo's full text under the list: a rule, then the text
-/// wrapped to the panel. Rows stay one line each and keep their one-to-one
-/// mapping to items — this is where the lines a row cannot show go, so a
-/// multi-point todo is readable without leaving the panel.
-fn render_pane_todo_detail(
-    frame: &mut Frame,
-    area: Rect,
-    text: &str,
-    p: &crate::app::state::Palette,
-) {
-    if area.height == 0 || area.width == 0 {
-        return;
-    }
-    frame.render_widget(
-        Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(p.surface_dim)),
-        Rect::new(area.x, area.y, area.width, 1),
-    );
-    let text_area = Rect::new(
-        area.x + 1,
-        area.y + 1,
-        area.width.saturating_sub(1),
-        area.height.saturating_sub(1),
-    );
-    if text_area.height == 0 || text_area.width == 0 {
-        return;
-    }
-    // `WrappedRow` offsets are into their own logical line, not the whole
-    // text, so the line has to be picked before the slice.
-    let lines: Vec<&str> = text.split('\n').collect();
-    let rows = crate::ui::text_wrap::wrap_layout(text, text_area.width as usize);
-    for (row, wrapped) in rows.iter().take(text_area.height as usize).enumerate() {
-        let Some(line) = lines.get(wrapped.line) else {
-            continue;
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                line[wrapped.start..wrapped.end].to_string(),
-                Style::default().fg(p.subtext0),
-            ))),
-            Rect::new(text_area.x, text_area.y + row as u16, text_area.width, 1),
-        );
-    }
+/// Columns a todo's text gets on a row `row_rect` wide: what is left after its
+/// state glyph, its link chip, its `#id` and the space before it. One
+/// definition for [`render_pane_todo_row`], which cuts the text to it, and
+/// for [`pane_todo_row_hides_text`], which asks whether it did.
+pub(crate) fn pane_todo_row_text_budget(app: &AppState, row_rect: Rect, todo: &PaneTodo) -> usize {
+    let id_width = display_width(&pane_todo_row_id_text(todo.id));
+    let chip_width = todo
+        .link
+        .as_ref()
+        .and_then(|link| {
+            pane_todo_link_chip(
+                pane_todo_row_chip_area(row_rect, todo.id),
+                app.pane_todo_link_public_id(todo).as_deref(),
+                &link.label,
+            )
+        })
+        .map(|(rect, _)| usize::from(rect.width))
+        .unwrap_or(0);
+    usize::from(row_rect.width).saturating_sub(3 + chip_width + id_width + 1)
 }
 
-/// Rows the detail block needs for `text` in a panel of `panel_width`: a rule
-/// row plus the wrapped text, or none at all when the todo is a single line
-/// and the row already showed all of it.
-///
-/// Capped so one long note cannot crowd out the list it belongs to; the text
-/// that does not fit is still there in `herdr todo list` and in the editor.
-pub(crate) fn pane_todo_detail_rows(text: &str, panel_width: u16) -> u16 {
-    if !text.contains('\n') {
-        return 0;
-    }
-    let width = detail_text_width(panel_width);
-    if width == 0 {
-        return 0;
-    }
-    let wrapped = crate::ui::text_wrap::wrap_layout(text, width).len() as u16;
-    1 + wrapped.min(PANE_TODO_DETAIL_MAX_TEXT_ROWS)
+/// Whether a todo's row hides some of its text: a second line, or a first
+/// line wider than the row gives it. What decides the detail box — the text,
+/// never which space or pane the panel belongs to.
+pub(crate) fn pane_todo_row_hides_text(app: &AppState, row_rect: Rect, todo: &PaneTodo) -> bool {
+    todo.text.contains('\n')
+        || display_width(&todo.text) > pane_todo_row_text_budget(app, row_rect, todo)
 }
 
-/// Text columns inside the detail block: the panel minus its borders and the
-/// one-column gutter the rows are drawn with.
-fn detail_text_width(panel_width: u16) -> usize {
-    usize::from(panel_width.saturating_sub(3))
+/// Rows of detail box the todos on a list need so that any of them can be
+/// selected without the panel changing height: the largest need among them,
+/// or none when no row hides text. `row_width` is how wide a todo's row is,
+/// `list_width` how wide the box is.
+pub(crate) fn pane_todo_detail_rows<'a>(
+    app: &AppState,
+    todos: impl IntoIterator<Item = &'a PaneTodo>,
+    row_width: u16,
+    list_width: u16,
+) -> u16 {
+    let most = 2 + crate::ui::overlay::DETAIL_MAX_TEXT_ROWS;
+    let row = Rect::new(0, 0, row_width, 1);
+    let mut rows = 0;
+    for todo in todos {
+        if pane_todo_row_hides_text(app, row, todo) {
+            rows = rows.max(crate::ui::overlay::detail_box_rows(&todo.text, list_width));
+            if rows >= most {
+                break;
+            }
+        }
+    }
+    rows
 }
 
 /// Three-cell state block, mirroring the notification center's dot column.
@@ -253,7 +235,6 @@ pub(crate) fn render_pane_todo_row(
             &link.label,
         )
     });
-    let chip_width = chip.as_ref().map(|(rect, _)| rect.width).unwrap_or(0) as usize;
 
     let (glyph_style, text_style, row_style) = if is_selected {
         // The band alone marks selection; the glyph keeps signalling priority
@@ -276,7 +257,7 @@ pub(crate) fn render_pane_todo_row(
         )
     };
 
-    let text_budget = (row_rect.width as usize).saturating_sub(3 + chip_width + id_width + 1);
+    let text_budget = pane_todo_row_text_budget(app, row_rect, todo);
     let text = pane_todo_row_text(&todo.text, text_budget);
     let pad = text_budget.saturating_sub(display_width(&text));
     let line = Line::from(vec![
@@ -361,9 +342,12 @@ pub(super) fn render_pane_todo_panel(app: &AppState, frame: &mut Frame) {
     }
 
     if let Some(detail) = app.pane_todo_panel_detail_rect() {
-        if let Some(todo) = todos.get(panel.list.selected) {
-            render_pane_todo_detail(frame, detail, &todo.text, p);
-        }
+        let row = Rect::new(detail.x, detail.y, detail.width, 1);
+        let text = todos
+            .get(panel.list.selected)
+            .filter(|todo| pane_todo_row_hides_text(app, row, todo))
+            .map(|todo| todo.text.as_str());
+        crate::ui::overlay::render_detail_box(frame, detail, text, p);
     }
 
     if let Some(buttons) = app.pane_todo_panel_buttons() {
@@ -483,9 +467,15 @@ mod tests {
             test_support::SNAPSHOT_WIDTH,
             test_support::SNAPSHOT_HEIGHT,
         );
-        // Joined and whitespace-normalised: the point is that the text is
-        // readable, not where the wrap happens to fall.
-        let rendered = test_support::rect_rows(&buffer, detail)
+        // Inside the box's border, joined and whitespace-normalised: the point
+        // is that the text is readable, not where the wrap happens to fall.
+        let inside = Rect::new(
+            detail.x + 1,
+            detail.y + 1,
+            detail.width - 2,
+            detail.height - 2,
+        );
+        let rendered = test_support::rect_rows(&buffer, inside)
             .join(" ")
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -510,18 +500,167 @@ mod tests {
             detail.y >= list.y + list.height,
             "the detail sits under the list, not inside it"
         );
+    }
 
-        // Move to the single-line todo: nothing is being withheld, so the
-        // block goes away entirely and the panel is what it always was.
-        app.pane_todos_move_selection(1);
+    /// The detail box's text, joined and whitespace-normalised: the point is
+    /// what is readable, not where the wrap happens to fall.
+    fn detail_text(app: &AppState) -> Option<String> {
+        let detail = app.pane_todo_panel_detail_rect()?;
+        let buffer = test_support::draw_sized(
+            app,
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        let inside = Rect::new(
+            detail.x + 1,
+            detail.y + 1,
+            detail.width - 2,
+            detail.height - 2,
+        );
+        Some(
+            test_support::rect_rows(&buffer, inside)
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+
+    fn add_todos(
+        app: &mut AppState,
+        pane_id: crate::layout::PaneId,
+        todos: &[(&str, TodoPriority)],
+    ) {
+        let terminal_id = app
+            .workspaces
+            .iter()
+            .find_map(|ws| ws.pane_state(pane_id))
+            .expect("the pane exists")
+            .attached_terminal_id
+            .clone();
+        let terminal = app
+            .terminals
+            .get_mut(&terminal_id)
+            .expect("test terminal should exist");
+        for (text, priority) in todos {
+            terminal
+                .add_todo(text, *priority, None, 100)
+                .expect("todo should be added");
+        }
+    }
+
+    /// #106: a single line cut to fit its row hides text just as a second
+    /// line does, so it opens the detail too.
+    #[test]
+    fn detail_shows_for_a_cut_one_line_todo() {
+        let long = "one line far wider than any panel row could hold, so the row cuts its end off";
+        let (mut app, pane_id) = app_with_todos(
+            &[(long, false, TodoPriority::High)],
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        app.open_pane_todos(pane_id);
         test_support::layout_sized(
             &mut app,
             test_support::SNAPSHOT_WIDTH,
             test_support::SNAPSHOT_HEIGHT,
         );
-        assert!(
-            app.pane_todo_panel_detail_rect().is_none(),
-            "a single-line selection has nothing to add"
+
+        let text = detail_text(&app).expect("a cut line opens the detail");
+
+        assert!(text.contains("the row cuts its end off"), "{text}");
+    }
+
+    /// #106: the detail used to show only while the *selected* todo had a
+    /// second line, and the selection opens on the first todo in display
+    /// order — so a space whose top todo was one line showed none. The same
+    /// todos now show the same box in any space.
+    #[test]
+    fn detail_is_the_same_in_any_space() {
+        let todos = [
+            ("short and urgent", TodoPriority::High),
+            ("the plan\nstep one\nstep two", TodoPriority::Normal),
+        ];
+        let mut app = test_support::app_with_one_pane("herdr");
+        app.workspaces
+            .push(crate::workspace::Workspace::test_new("master"));
+        app.ensure_test_terminals();
+        let herdr_pane = app.workspaces[0].tabs[0].root_pane;
+        let master_pane = app.workspaces[1].tabs[0].root_pane;
+        add_todos(&mut app, herdr_pane, &todos);
+        add_todos(&mut app, master_pane, &todos);
+
+        let mut seen = Vec::new();
+        for (ws_idx, pane_id) in [(0, herdr_pane), (1, master_pane)] {
+            app.close_pane_todos();
+            app.active = Some(ws_idx);
+            app.mode = crate::app::state::Mode::Terminal;
+            test_support::layout(&mut app);
+            app.open_pane_todos(pane_id);
+            test_support::layout(&mut app);
+            let detail = app
+                .pane_todo_panel_detail_rect()
+                .expect("a todo in the panel hides text, so the box is there");
+            seen.push((detail.height, detail_text(&app)));
+        }
+
+        assert_eq!(seen[0], seen[1], "the same box in both spaces");
+    }
+
+    #[test]
+    fn panel_height_is_steady_as_the_selection_moves() {
+        let (mut app, pane_id) = app_with_todos(
+            &[
+                ("the plan\nstep one\nstep two", false, TodoPriority::High),
+                ("one line", false, TodoPriority::Normal),
+            ],
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        app.open_pane_todos(pane_id);
+        test_support::layout(&mut app);
+        let on_multi = app.pane_todo_panel_rect().expect("panel");
+        assert!(detail_text(&app).is_some_and(|text| text.contains("step two")));
+
+        app.pane_todos_move_selection(1);
+        test_support::layout(&mut app);
+
+        assert_eq!(
+            app.pane_todo_panel_rect().expect("panel"),
+            on_multi,
+            "the panel does not jump"
+        );
+        let text = detail_text(&app).expect("the box stays");
+        assert!(!text.contains("one line"), "no text of the todo: {text}");
+        assert!(text.contains("full text shown above"), "{text}");
+    }
+
+    /// The detail in its own inner box, between the list and the footer.
+    #[test]
+    fn snapshot_detail_box() {
+        snapshot(
+            &[
+                ("the plan\nstep one\nstep two", false, TodoPriority::High),
+                ("one line", false, TodoPriority::Normal),
+            ],
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        )
+        .assert(
+            Rect::new(50, 2, 30, 11),
+            &[
+                "┌────────────────────────────┐",
+                "│ ▲ the plan ⏎             #1│",
+                "│ ● one line               #2│",
+                "│┌──────────────────────────┐│",
+                "││ the plan                 ││",
+                "││ step one                 ││",
+                "││ step two                 ││",
+                "│└──────────────────────────┘│",
+                "│                            │",
+                "│     a add    esc close     │",
+                "└────────────────────────────┘",
+            ],
         );
     }
 
