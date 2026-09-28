@@ -52,7 +52,9 @@ Reload applies most UI settings without restarting panes. Startup-only settings 
 
 ## Headless terminal size
 
-When no client is attached, the server uses a 120×40 virtual terminal for layout and newly created panes. Change that fallback for headless orchestration with:
+When no client is attached, the server lays out panes at the size of the last client that was attached, so agents keep the width you use. It remembers that size in the session file, so panes restored after a server restart come back at it too. A client smaller than 80×24, such as a quick look from a phone, is used while attached but not remembered.
+
+Before any client has attached, and with remembering turned off, the server uses a 120×40 virtual terminal. Change that fallback for headless orchestration with:
 
 ```toml
 [server]
@@ -60,7 +62,16 @@ headless_cols = 160
 headless_rows = 50
 ```
 
-An attached client remains authoritative for the shared runtime size. After it detaches, existing pane PTYs retain their last attached size while new headless layout uses the configured fallback.
+An attached client remains authoritative for the shared runtime size. After it detaches, existing pane PTYs retain their last attached size. A size carried over a live handoff comes first, then the remembered client size, then the fallback above.
+
+If you set a headless size on purpose and want it used every time no client is attached, turn remembering off:
+
+```toml
+[server]
+remember_client_size = false
+```
+
+`reload-config` applies it without a restart.
 
 ## Terminal defaults
 
