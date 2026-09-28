@@ -3197,17 +3197,17 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         // Eight shared ticks per pulse frame, against one snake step per tick.
         app.spinner_frame = 0;
-        assert_eq!(icons(&app), ("◇".into(), "⠋".into()));
+        assert_eq!(icons(&app), ("■".into(), "⠋".into()));
         app.spinner_frame = 7;
-        assert_eq!(icons(&app), ("◇".into(), "⠧".into()));
+        assert_eq!(icons(&app), ("■".into(), "⠧".into()));
         app.spinner_frame = 8;
-        assert_eq!(icons(&app), ("◈".into(), "⠇".into()));
+        assert_eq!(icons(&app), ("◆".into(), "⠇".into()));
         app.spinner_frame = 16;
-        assert_eq!(icons(&app), ("◇".into(), "⠦".into()));
+        assert_eq!(icons(&app), ("■".into(), "⠦".into()));
 
         // With the spinner off the pulse still marks the row apart.
         app.status_spinner = crate::config::StatusSpinnerConfig::Off;
-        assert_eq!(icons(&app), ("◇".into(), "◐".into()));
+        assert_eq!(icons(&app), ("■".into(), "◐".into()));
 
         // Overridable like every other state glyph.
         app.status_spinner = crate::config::StatusSpinnerConfig::On;

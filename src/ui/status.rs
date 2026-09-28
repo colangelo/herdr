@@ -357,15 +357,16 @@ mod tests {
         assert_eq!(icon(AgentState::Idle, false, Some(3)).0, "□");
         assert_eq!(icon(AgentState::Blocked, true, Some(3)).0, "×");
 
-        // Background work pulses at an eighth of the spinner's rate: eight
-        // frames on one glyph, eight on the other, in the working colour.
+        // Background work turns at an eighth of the spinner's rate: eight
+        // frames on the square, eight on the square turned 45°, in the
+        // working colour.
         for frame in 0..8 {
-            assert_eq!(background(Some(frame)).0, "◇", "frame {frame}");
+            assert_eq!(background(Some(frame)).0, "■", "frame {frame}");
         }
         for frame in 8..16 {
-            assert_eq!(background(Some(frame)).0, "◈", "frame {frame}");
+            assert_eq!(background(Some(frame)).0, "◆", "frame {frame}");
         }
-        assert_eq!(background(Some(16)).0, "◇");
+        assert_eq!(background(Some(16)).0, "■");
         assert_eq!(
             background(Some(3)).1.fg,
             Some(palette.teal),
@@ -374,7 +375,7 @@ mod tests {
         assert_eq!(display_width_u16(background(Some(3)).0), 1);
         // Spinner off: the pulse holds its first frame, still distinct from
         // an agent mid-turn.
-        assert_eq!(background(None).0, "◇");
+        assert_eq!(background(None).0, "■");
     }
 
     #[test]

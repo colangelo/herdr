@@ -129,8 +129,8 @@ impl StateIconSymbols<'static> {
                 done: "●",
                 blocked: "●",
                 unknown: "·",
-                background: "◇",
-                background_alt: "◈",
+                background: "■",
+                background_alt: "◆",
             },
             // A finished, not-yet-seen agent is an unchecked box the user still
             // has to look at; once seen it is checked off. Keeps the checkmark
@@ -141,17 +141,17 @@ impl StateIconSymbols<'static> {
                 done: "□",
                 blocked: "×",
                 unknown: "·",
-                background: "◇",
-                background_alt: "◈",
+                background: "■",
+                background_alt: "◆",
             },
         }
     }
 }
 
 impl<'a> StateIconSymbols<'a> {
-    /// The background-work pulse frame for a shared spinner frame: one swap
-    /// every [`Self::BACKGROUND_PULSE_TICKS`] frames, so it beats far slower
-    /// than the working spinner it sits beside.
+    /// The background-work frame for a shared spinner frame (a square, then
+    /// the square turned 45°): one swap every [`Self::BACKGROUND_PULSE_TICKS`]
+    /// frames, so it turns far slower than the working spinner beside it.
     pub const BACKGROUND_PULSE_TICKS: u8 = 8;
 
     pub fn background_frame(&self, frame: Option<u8>) -> &'a str {
