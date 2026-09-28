@@ -3,14 +3,14 @@
 ### Requirement: A key shows every pane's address and size
 
 The `keys.display_panes` action (default `prefix+i`) SHALL show, over each pane
-of the current tab, an index, the pane's public address and its terminal size
-in characters, and SHALL show the window size and the pane area in the mode
+of the current tab, an index, the pane's public address, its name and its
+terminal size in characters, and SHALL show the window size and the pane area in the mode
 bar. It SHALL be listed in the keybinding help panel.
 
 #### Scenario: Two panes are labelled
 
 - **WHEN** a tab holds two panes and the user presses `prefix+i`
-- **THEN** each pane shows `N  <address>  <cols>x<rows>` with N = 1 and 2, and
+- **THEN** each pane shows `N  <address> · <name>  <cols>x<rows>` with N = 1 and 2, and
   the mode bar shows the window and pane-area sizes
 
 #### Scenario: The action is discoverable

@@ -15,8 +15,11 @@ overlay removes the deadline with it, so nothing can go stale. 3 seconds: long
 enough to read two or three labels; any key closes it sooner.
 
 **What is shown.** Per pane in `view.pane_infos` (so zoom shows only the zoomed
-pane, and the current tab only): `N  <public id>  <cols>x<rows>`, where
-`cols`x`rows` is the pane's `inner_rect`, the size its program sees
+pane, and the current tab only): `N  <public id> · <name>  <cols>x<rows>`.
+The name is `AppState::pane_display_label`, the one the navigator and the todo
+board already use, so a pane is called the same thing everywhere; it is cut
+first when the label does not fit. `cols`x`rows` is
+`cols`x`rows` is the the pane's `inner_rect`, the size its program sees
 (`tput cols`/`lines`). The outer rect from `herdr pane layout` can be larger by
 the border and scrollbar gutter; the program's size is what matters for copied
 text and menus. The label is a bordered panel (`render_panel_shell`) centred in

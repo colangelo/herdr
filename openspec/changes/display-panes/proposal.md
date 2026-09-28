@@ -5,15 +5,16 @@ the terminal, it helps to know each pane's address and its size in characters.
 Today that means running `herdr pane layout` and reading JSON. tmux answers the
 same question with one key (`prefix q`, display-panes): every pane shows its
 number and size until the next key. Asked for by ac on 2026-09-28 (JOB 7 via
-herdr-relay).
+herdr-relay); ac added on the same day that the label must carry the pane's
+name as well as its size, and the full window size must show somewhere.
 
 ## What Changes
 
 - A new keybinding action `keys.display_panes`, default `prefix+i`
   ("identify"). `prefix+q` is tmux's key but is herdr's default `detach`.
 - While it is shown, every pane in the current tab carries a label over its
-  centre: an index `1`–`9`, its public address and its terminal size, e.g.
-  `2  w5:p16  138x27`. The mode bar shows the whole window size and the pane
+  centre: an index `1`–`9`, its public address, its name and its terminal
+  size in characters, e.g. `2  w5:p16 · claude  138x27`. The mode bar shows the whole window size and the pane
   area, e.g. `window 310x56 · panes 281x55`.
 - It closes after 3 seconds or on any key. A digit that names a shown pane
   focuses that pane first. A mouse press also closes it.
