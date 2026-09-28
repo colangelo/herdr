@@ -27,6 +27,43 @@ pub(super) fn render_display_panes(app: &AppState, frame: &mut Frame, mode_bar_a
         render_label(app, frame, label);
     }
     render_summary_bar(app, frame, mode_bar_area, &labels);
+    render_sidebar_section_sizes(app, frame);
+}
+
+/// The chip style of the labels mode: the theme's red, reversed, as the
+/// close-workspace confirmation draws its action.
+fn mode_chip_style(app: &AppState) -> Style {
+    Style::default()
+        .fg(panel_contrast_fg(&app.palette))
+        .bg(app.palette.red)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Each sidebar section's size (`26x14`), right-aligned on its bottom row.
+/// A collapsed sidebar, or a section with no room, shows none.
+fn render_sidebar_section_sizes(app: &AppState, frame: &mut Frame) {
+    let sidebar = app.view.sidebar_rect;
+    if app.sidebar_collapsed || sidebar.width <= 1 || sidebar.height == 0 {
+        return;
+    }
+    let (spaces, agents) = super::expanded_sidebar_sections(sidebar, app.sidebar_section_split);
+    for section in [spaces, agents] {
+        if section.width == 0 || section.height == 0 {
+            continue;
+        }
+        let text = format!(" {}x{} ", section.width, section.height);
+        let width = display_width_u16(&text);
+        if width > section.width {
+            continue;
+        }
+        let area = Rect::new(
+            section.x + section.width - width,
+            section.y + section.height - 1,
+            width,
+            1,
+        );
+        frame.render_widget(Paragraph::new(text).style(mode_chip_style(app)), area);
+    }
 }
 
 /// `2  w5:p16 · claude  138x27`, cut to `max_width`: the name goes first, then
@@ -67,7 +104,7 @@ fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel) {
     let text = label_text(label, usize::from(max_text));
     let text_width = display_width_u16(&text);
 
-    let border = if label.focused { p.accent } else { p.overlay0 };
+    let border = app.pane_border_color(label.focused);
     let text_style = Style::default()
         .fg(p.text)
         .bg(p.panel_bg)
@@ -97,13 +134,10 @@ fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel) {
 /// share.
 fn render_summary_bar(app: &AppState, frame: &mut Frame, area: Rect, labels: &[DisplayPaneLabel]) {
     let p = &app.palette;
-    let key = Style::default().fg(p.accent).add_modifier(Modifier::BOLD);
+    let key = Style::default().fg(p.red).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
     let value = Style::default().fg(p.text);
-    let mode_style = Style::default()
-        .fg(panel_contrast_fg(p))
-        .bg(p.accent)
-        .add_modifier(Modifier::BOLD);
+    let mode_style = mode_chip_style(app);
     let window = frame.area();
     let panes = app.view.terminal_area;
 
@@ -259,7 +293,7 @@ mod tests {
             "{row:?}"
         );
 
-        let col = |text: &str| row.find(text).expect("on the bar") as u16;
+        let col = |text: &str| row[..row.find(text).expect("on the bar")].chars().count() as u16;
         let chip = buffer[(col("VERSION"), HEIGHT - 1)].style();
         let panes = buffer[(col("PANES"), HEIGHT - 1)].style();
         assert_eq!(chip, panes, "the VERSION chip is styled like PANES");
@@ -285,25 +319,125 @@ mod tests {
         assert!(!row.contains("VERSION"), "{row:?}");
     }
 
+    /// #118: while the labels are up the whole mode is red, like the
+    /// close-workspace confirmation: the bar's chips and keys, the focused
+    /// pane's border, and a muted red on the other borders. Closing the labels
+    /// puts every colour back.
+    #[test]
+    fn the_labels_mode_is_red_and_closing_it_restores_the_colours() {
+        let mut app = two_pane_app();
+        let normal = (app.pane_border_color(true), app.pane_border_color(false));
+        app.open_display_panes(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+        let red = app.palette.red;
+        let muted = app.palette.muted_red();
+        assert_ne!(muted, red, "the inactive red is a different, muted red");
+
+        assert_eq!(app.pane_border_color(true), red);
+        assert_eq!(app.pane_border_color(false), muted);
+
+        let (row, buffer) = mode_bar_row(&app, WIDTH, HEIGHT);
+        let col = |text: &str| row[..row.find(text).expect("on the bar")].chars().count() as u16;
+        let at = |text: &str| buffer[(col(text), HEIGHT - 1)].style();
+        assert_eq!(at("PANES").bg, Some(red));
+        assert_eq!(at("VERSION").bg, Some(red));
+        assert_eq!(at("any key").fg, Some(red));
+        assert_eq!(at("1-2").fg, Some(red));
+
+        // The drawn borders follow: across the panes' area there are red
+        // (focused) and muted red (other) border cells, and none left in the
+        // normal focused colour.
+        let area = app.view.terminal_area;
+        let fgs: Vec<_> = (area.y..area.y + area.height)
+            .flat_map(|y| (area.x..area.x + area.width).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                matches!(
+                    buffer[(*x, *y)].symbol(),
+                    "│" | "─" | "┌" | "┐" | "└" | "┘" | "├" | "┤" | "┬" | "┴" | "┼"
+                )
+            })
+            .filter_map(|(x, y)| buffer[(x, y)].style().fg)
+            .collect();
+        assert!(fgs.contains(&red), "a red border cell");
+        assert!(fgs.contains(&muted), "a muted red border cell");
+        assert!(
+            !fgs.contains(&normal.0),
+            "no border left in the normal colour"
+        );
+
+        app.close_overlay(crate::app::state::OverlayKind::DisplayPanes);
+        assert_eq!(
+            (app.pane_border_color(true), app.pane_border_color(false)),
+            normal
+        );
+    }
+
+    /// #118: each sidebar section shows its own size on its bottom row while
+    /// the labels are up.
+    #[test]
+    fn each_sidebar_section_shows_its_size_while_the_labels_are_up() {
+        let mut app = two_pane_app();
+        app.open_display_panes(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+        let buffer = draw_sized(&app, WIDTH, HEIGHT);
+        let (spaces, agents) =
+            crate::ui::expanded_sidebar_sections(app.view.sidebar_rect, app.sidebar_section_split);
+
+        for section in [spaces, agents] {
+            assert!(section.width > 0 && section.height > 0);
+            let bottom = Rect::new(section.x, section.y + section.height - 1, section.width, 1);
+            let text = crate::ui::test_support::row_text(&buffer, bottom);
+            let size = format!("{}x{}", section.width, section.height);
+            assert!(text.contains(&size), "{size} on {text:?}");
+            let col = bottom.x + text.find(&size).expect("size") as u16;
+            assert_eq!(buffer[(col, bottom.y)].style().bg, Some(app.palette.red));
+        }
+    }
+
+    #[test]
+    fn a_collapsed_sidebar_shows_no_section_sizes() {
+        let mut app = two_pane_app();
+        app.sidebar_collapsed = true;
+        layout_sized(&mut app, WIDTH, HEIGHT);
+        app.open_display_panes(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+        let rows = screen(&app);
+        let sidebar = app.view.sidebar_rect;
+        // A size is digits, `x`, digits.
+        let has_size = |text: &str| {
+            let chars: Vec<char> = text.chars().collect();
+            chars
+                .windows(3)
+                .any(|w| w[0].is_ascii_digit() && w[1] == 'x' && w[2].is_ascii_digit())
+        };
+        for row in &rows {
+            let left: String = row.chars().take(usize::from(sidebar.width)).collect();
+            assert!(
+                !has_size(&left),
+                "no size in the collapsed sidebar: {left:?}"
+            );
+        }
+    }
+
     #[test]
     fn snapshot_display_panes() {
         overlay_snapshot_of(|app| app.open_display_panes(Instant::now())).assert(
-            Rect::new(27, 11, 52, 14),
+            Rect::new(19, 11, 60, 14),
             &[
-                "            ┌──────────────────────────┐",
-                "            │ 1  w2:p1 · pane 1  54x24 │",
-                "            └──────────────────────────┘",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "PANES   window 80x25 · panes 54x24  1 focus  any key",
+                "      │             ┌──────────────────────────┐",
+                "25x13 │             │ 1  w2:p1 · pane 1  54x24 │",
+                "──────│             └──────────────────────────┘",
+                "rouped│",
+                "      │",
+                "      │",
+                "      │",
+                "      │",
+                "      │",
+                "      │",
+                "      │",
+                "      │",
+                "      │",
+                "25x12 │ PANES   window 80x25 · panes 54x24  1 focus  any key",
             ],
         );
     }

@@ -218,6 +218,23 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// A less saturated red: the theme's red pulled halfway toward its own
+    /// grey, a rose on dark themes. The one place the display-panes mode's
+    /// inactive borders get their colour, so a custom theme's red carries
+    /// through. A red the terminal names rather than gives as RGB cannot be
+    /// mixed, so it falls back to the dimmer theme grey.
+    pub fn muted_red(&self) -> Color {
+        match self.red {
+            Color::Rgb(r, g, b) => {
+                let grey =
+                    (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)).round();
+                let mix = |channel: u8| ((f32::from(channel) + grey) / 2.0).round() as u8;
+                Color::Rgb(mix(r), mix(g), mix(b))
+            }
+            _ => self.overlay1,
+        }
+    }
+
     /// Catppuccin Mocha — the default.
     pub fn catppuccin() -> Self {
         Self {
@@ -3453,6 +3470,15 @@ impl AppState {
     /// Border line color for a pane; falls back to the theme accent (focused)
     /// or the theme's muted border color (unfocused) when unset.
     pub fn pane_border_color(&self, focused: bool) -> Color {
+        // While `prefix+i`'s labels are up the whole mode is red, like the
+        // close-workspace confirmation, over any configured border colour.
+        if self.display_panes().is_some() {
+            return if focused {
+                self.palette.red
+            } else {
+                self.palette.muted_red()
+            };
+        }
         if focused {
             self.pane_border_active_color.unwrap_or(self.palette.accent)
         } else {
