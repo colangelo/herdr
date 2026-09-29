@@ -1703,6 +1703,49 @@ mod tests {
     }
 
     #[test]
+    fn claude_pane_restores_with_its_reported_mode_model_and_effort() {
+        let session = super::super::snapshot::PaneAgentSessionSnapshot {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            kind: crate::agent_resume::AgentSessionRefKind::Id,
+            value: "4f1c2d3e-aaaa-bbbb-cccc-0123456789ab".into(),
+        };
+        let resume = super::super::snapshot::PaneAgentResumeSnapshot {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            argv: [
+                "claude",
+                "--resume",
+                "4f1c2d3e-aaaa-bbbb-cccc-0123456789ab",
+                "--model",
+                "claude-sonnet-5-5",
+                "--effort",
+                "low",
+                "--allow-dangerously-skip-permissions",
+                "--permission-mode",
+                "auto",
+            ]
+            .map(String::from)
+            .into(),
+        };
+        let mut resumed = HashSet::new();
+        let mut agent_restore = AgentRestoreState {
+            enabled: true,
+            resumed_sessions: &mut resumed,
+        };
+        let startup = pane_restore_startup(
+            Some(&session),
+            Some(&resume),
+            std::path::Path::new("/project"),
+            None,
+            &mut agent_restore,
+        );
+        let plan = startup.restore_plan.expect("reported resume plan");
+        assert_eq!(plan.agent, "claude");
+        assert_eq!(plan.argv, resume.argv);
+    }
+
+    #[test]
     fn pane_restore_startup_prefers_reported_resume_argv() {
         let session = super::super::snapshot::PaneAgentSessionSnapshot {
             source: "herdr:pi".into(),

@@ -984,6 +984,31 @@ mod tests {
     }
 
     #[test]
+    fn claude_reported_resume_is_typed_with_its_mode_model_and_effort() {
+        let argv: Vec<String> = [
+            "claude",
+            "--resume",
+            "4f1c2d3e-aaaa-bbbb-cccc-0123456789ab",
+            "--model",
+            "claude-opus-5-5[1m]",
+            "--effort",
+            "xhigh",
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode",
+            "auto",
+        ]
+        .map(String::from)
+        .into();
+        assert_eq!(
+            shell_command_from_argv(&argv).as_deref(),
+            Some(
+                "claude --resume 4f1c2d3e-aaaa-bbbb-cccc-0123456789ab --model 'claude-opus-5-5[1m]' \
+                 --effort xhigh --allow-dangerously-skip-permissions --permission-mode auto"
+            )
+        );
+    }
+
+    #[test]
     fn shell_command_from_argv_quotes_resume_arguments() {
         let argv = vec![
             "claude".to_string(),

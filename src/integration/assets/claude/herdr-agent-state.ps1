@@ -23,6 +23,62 @@ if ($payload.hook_event_name -eq "SubagentStop") { exit 0 }
 $sessionId = $payload.session_id
 if ([string]::IsNullOrWhiteSpace($sessionId)) { exit 0 }
 
+# The command that resumes this session as it is now: its permission mode,
+# model and effort (fork issue 123). Values come from the hook input when it
+# has them, then from the end of the transcript. Unlike the POSIX hook this one
+# does not read Claude's launch flags, so bypass is kept only when the session
+# was seen in it.
+$resumeModes = @("acceptEdits", "auto", "bypassPermissions", "default", "manual", "dontAsk", "plan")
+$resumeEfforts = @("low", "medium", "high", "xhigh", "max")
+$plainValue = '^[A-Za-z0-9._:/\[\]-]{1,200}$'
+function Get-PlainValue($value) {
+    if ($value -is [string] -and $value -cmatch $plainValue) { return $value }
+    return $null
+}
+$transcriptMode = $null
+$transcriptModel = $null
+$transcriptEffort = $null
+$sawBypass = $false
+if ($payload.transcript_path -is [string] -and (Test-Path -LiteralPath $payload.transcript_path)) {
+    try {
+        $stream = [System.IO.File]::Open($payload.transcript_path, 'Open', 'Read', 'ReadWrite')
+        try {
+            $start = [Math]::Max(0, $stream.Length - 524288)
+            $null = $stream.Seek($start, 'Begin')
+            $reader = New-Object System.IO.StreamReader($stream)
+            $lines = $reader.ReadToEnd() -split "`n"
+        } finally {
+            $stream.Dispose()
+        }
+        if ($start -gt 0) { $lines = $lines | Select-Object -Skip 1 }
+        foreach ($raw in $lines) {
+            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+            try { $entry = $raw | ConvertFrom-Json } catch { continue }
+            if ($entry.isSidechain) { continue }
+            if ($entry.type -eq "user" -and $resumeModes -ccontains $entry.permissionMode) {
+                $transcriptMode = $entry.permissionMode
+                if ($transcriptMode -eq "bypassPermissions") { $sawBypass = $true }
+            } elseif ($entry.type -eq "assistant") {
+                $model = Get-PlainValue $entry.message.model
+                if ($model) { $transcriptModel = $model }
+                if ($resumeEfforts -ccontains $entry.effort) { $transcriptEffort = $entry.effort }
+            }
+        }
+    } catch {
+    }
+}
+$mode = @($payload.permission_mode, $transcriptMode) | Where-Object { $resumeModes -ccontains $_ } | Select-Object -First 1
+$model = Get-PlainValue $payload.model
+if (-not $model) { $model = $transcriptModel }
+$resumeArgv = @()
+if (Get-PlainValue $sessionId) {
+    $resumeArgv = @("claude", "--resume", "$sessionId")
+    if ($model) { $resumeArgv += @("--model", $model) }
+    if ($transcriptEffort) { $resumeArgv += @("--effort", $transcriptEffort) }
+    if ($mode -eq "bypassPermissions" -or $sawBypass) { $resumeArgv += "--allow-dangerously-skip-permissions" }
+    if ($mode) { $resumeArgv += @("--permission-mode", $mode) }
+}
+
 $seq = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $herdr = if ([string]::IsNullOrWhiteSpace($env:HERDR_BIN_PATH)) { "herdr" } else { $env:HERDR_BIN_PATH }
 try {
@@ -44,6 +100,10 @@ try {
     }
     if ($payload.hook_event_name -eq "SessionStart" -and $payload.source -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.source)) {
         $args += @("--session-start-source", "$($payload.source)")
+    }
+    if ($resumeArgv.Count -gt 0) {
+        $args += "--"
+        $args += $resumeArgv
     }
     & $herdr @args 2>$null | Out-Null
 } catch {

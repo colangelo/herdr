@@ -297,5 +297,7 @@ const GROK_INTEGRATION_VERSION: u32 = 1;
 
 pub(crate) const INSTALL_WARNING_PREFIX: &str = "warning:";
 
+#[cfg(all(test, unix))]
+mod claude_hook_tests;
 #[cfg(test)]
 mod tests;
