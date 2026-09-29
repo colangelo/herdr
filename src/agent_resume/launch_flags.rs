@@ -17,6 +17,9 @@ use std::path::{Component, Path, PathBuf};
 pub struct AgentLaunchArgv {
     pub argv: Vec<String>,
     pub cwd: Option<PathBuf>,
+    /// When the process started, in unix ms: transcript records older than
+    /// this belong to an earlier run of the session.
+    pub started_at_ms: Option<i64>,
 }
 
 /// The carried launch flags of the agent that runs in a pane now.
@@ -24,6 +27,8 @@ pub struct AgentLaunchArgv {
 pub struct AgentLaunchFlags {
     pub agent: String,
     pub flags: Vec<String>,
+    /// When the agent process started, in unix ms (see `AgentLaunchArgv`).
+    pub started_at_ms: Option<i64>,
 }
 
 impl AgentLaunchFlags {
@@ -31,6 +36,7 @@ impl AgentLaunchFlags {
         Self {
             agent: agent.to_string(),
             flags: carried_launch_flags(agent, &launch.argv, launch.cwd.as_deref()),
+            started_at_ms: launch.started_at_ms,
         }
     }
 }
@@ -89,6 +95,7 @@ const CLAUDE: &[CarriedFlag] = &[
     // The hook reports these as the session changes them; the launch values
     // only fill in when it has not.
     flag(&["--model"], Arity::One, false, "model"),
+    flag(&["--effort"], Arity::One, false, "effort"),
     flag(&["--permission-mode"], Arity::One, false, "permission"),
     flag(
         &["--dangerously-skip-permissions"],
@@ -341,6 +348,25 @@ mod tests {
                 "--setting-sources",
                 "user,project",
             ])
+        );
+    }
+
+    #[test]
+    fn a_restored_claude_keeps_its_effort_for_the_next_restart() {
+        // Restore started it as `claude --resume <id> --model m --effort low`;
+        // until it takes a turn, those flags are all a later restore has.
+        let argv = words(&[
+            "claude",
+            "--resume",
+            "s1",
+            "--model",
+            "claude-sonnet-5-5",
+            "--effort",
+            "low",
+        ]);
+        assert_eq!(
+            carried_launch_flags("claude", &argv, None),
+            words(&["--model", "claude-sonnet-5-5", "--effort", "low"])
         );
     }
 

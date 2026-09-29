@@ -107,6 +107,7 @@ fn launch(argv: &[&str]) -> crate::agent_resume::AgentLaunchArgv {
     crate::agent_resume::AgentLaunchArgv {
         argv: argv.iter().map(|word| word.to_string()).collect(),
         cwd: None,
+        started_at_ms: None,
     }
 }
 

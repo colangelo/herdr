@@ -184,6 +184,8 @@ pub struct PaneAgentResumeSnapshot {
 pub struct PaneAgentLaunchSnapshot {
     pub agent: String,
     pub flags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,6 +482,7 @@ fn capture_tab(
             .map(|record| PaneAgentLaunchSnapshot {
                 agent: record.agent.clone(),
                 flags: record.flags.clone(),
+                started_at_ms: record.started_at_ms,
             });
         panes.insert(
             id.raw(),
@@ -1432,6 +1435,7 @@ mod tests {
                     .map(String::from)
                     .to_vec(),
                 cwd: None,
+                started_at_ms: None,
             }),
         );
 
@@ -1443,6 +1447,7 @@ mod tests {
             Some(PaneAgentLaunchSnapshot {
                 agent: "claude".into(),
                 flags: vec!["--settings".into(), "/u/gpt.json".into()],
+                started_at_ms: None,
             })
         );
         let json = serde_json::to_value(pane).unwrap();

@@ -695,6 +695,7 @@ fn restore_tab(
             .map(|launch| crate::agent_resume::AgentLaunchFlags {
                 agent: launch.agent.clone(),
                 flags: launch.flags.clone(),
+                started_at_ms: launch.started_at_ms,
             });
         let initial_restore_agent = startup
             .restore_plan
@@ -981,6 +982,7 @@ fn pane_restore_startup<'a>(
     let launch = launch.map(|launch| crate::agent_resume::AgentLaunchFlags {
         agent: launch.agent.clone(),
         flags: launch.flags.clone(),
+        started_at_ms: launch.started_at_ms,
     });
     let restore_plan = if !agent_restore.enabled {
         None
@@ -989,7 +991,7 @@ fn pane_restore_startup<'a>(
     } else {
         session.and_then(|session| {
             restore_plan_for_snapshot(session, true)
-                .map(|plan| with_session_transcript(plan, session, cwd))
+                .map(|plan| with_session_transcript(plan, session, launch.as_ref()))
         })
     }
     .map(|plan| plan.with_launch_flags(launch.as_ref()));
@@ -1032,12 +1034,17 @@ fn pane_restore_startup<'a>(
 fn with_session_transcript(
     plan: crate::agent_resume::AgentResumePlan,
     session: &PaneAgentSessionSnapshot,
-    cwd: &std::path::Path,
+    launch: Option<&crate::agent_resume::AgentLaunchFlags>,
 ) -> crate::agent_resume::AgentResumePlan {
     if plan.agent != "claude" {
         return plan;
     }
-    let transcript = crate::agent_resume::claude_transcript_resume(&session.value, cwd);
+    // Only what the process that ran at shutdown wrote: an older record is
+    // an earlier run's, maybe in another mode.
+    let since = launch
+        .filter(|launch| launch.agent == "claude")
+        .and_then(|launch| launch.started_at_ms);
+    let transcript = crate::agent_resume::claude_transcript_resume(&session.value, since);
     plan.with_claude_transcript(transcript)
 }
 
@@ -1807,6 +1814,7 @@ mod tests {
                 |(agent, flags)| super::super::snapshot::PaneAgentLaunchSnapshot {
                     agent: agent.to_string(),
                     flags: flags.iter().map(|flag| flag.to_string()).collect(),
+                    started_at_ms: None,
                 },
             );
         let mut resumed = HashSet::new();

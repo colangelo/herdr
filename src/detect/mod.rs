@@ -318,6 +318,7 @@ pub fn agent_launch(pane_pid: u32, agent: Agent) -> Option<crate::agent_resume::
     Some(crate::agent_resume::AgentLaunchArgv {
         argv: process.argv?,
         cwd: crate::platform::process_cwd(process.pid),
+        started_at_ms: crate::platform::process_started_at_ms(process.pid),
     })
 }
 

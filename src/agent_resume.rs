@@ -384,6 +384,7 @@ mod tests {
             flags: ["--model", "opus", "--settings", "/u/g.json"]
                 .map(String::from)
                 .to_vec(),
+            started_at_ms: None,
         };
 
         let plan = plan
