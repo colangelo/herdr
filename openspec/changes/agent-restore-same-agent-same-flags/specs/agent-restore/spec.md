@@ -38,9 +38,10 @@ running agent's own session report.
   and codex now runs there
 - **THEN** a restore starts codex with codex's session, never claude
 
-#### Scenario: Codex started from inside Claude
+#### Scenario: Codex run by Claude's own tools
 
-- **WHEN** codex runs as a child of a claude that is still alive in the pane
+- **WHEN** claude runs codex through its tools, so claude keeps the terminal's
+  foreground
 - **THEN** claude's saved session is kept
 
 ### Requirement: The restore command can be read before a restart

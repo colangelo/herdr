@@ -7,7 +7,7 @@
 | codex, hand-started | Codex hook; else `resume <id>` in its argv | launch record | `codex resume <id> -m … -s … -c k=v …` |
 | codex on herdr's daemon (#85) | naming thread discovery (unchanged) | launch record | `codex resume <id> [flags] --remote unix://… -C <cwd>` (as today + flags) |
 | pane ran claude, then codex | codex (claude's dropped on the agent change) | codex's launch record | codex's command |
-| codex started inside claude | claude (claude still alive in the job) | claude's | claude's command |
+| codex run by claude's tools | claude (codex never holds the foreground) | claude's | claude's command |
 
 ## Decisions
 
@@ -32,11 +32,15 @@ so a hook value (the model the session switched to) wins over the launch one.
 
 ### Agent identity guards (three layers)
 
-1. On agent change: drop the saved session, reported resume and launch record
-   of the old agent, unless that agent's process is still in the pane's job.
+1. On agent change: drop the saved session and launch record of the old agent
+   (the reported resume already was). Detection names the foreground agent,
+   so a tool-run codex under claude is not a change; a claude suspended with
+   ctrl+z while codex runs in the foreground is, and restores as codex.
 2. At snapshot: skip a session whose agent differs from a known detected agent.
-3. On report: a SessionStart report for agent B replaces a saved session of
-   agent A != B; refusals are logged at `info` with the reason.
+3. On report: a SessionStart report for agent B refused because detection
+   still says A, or because A's session is on record, is held for 60 s and
+   taken when detection sees B. A report not applied is logged at `info`.
+4. A Codex launched with `--no-daemon` is restored without `--remote`.
 
 ### Dry run as a field, not a command
 

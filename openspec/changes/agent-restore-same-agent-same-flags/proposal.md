@@ -63,13 +63,15 @@ at shutdown": the same agent, the same session, the same launch flags and mode.
 - **A pane never restores as a different agent than the one running at
   shutdown.**
   - When detection shows a different agent than a saved session's, the saved
-    session, reported resume and launch flags are dropped, unless the old agent
-    is still alive in the pane's job (codex started from inside claude keeps
-    claude's).
+    session and launch flags are dropped (the reported resume already was).
+    Detection names the pane's foreground agent, so a codex that claude runs
+    through its own tools does not count as a change.
   - The snapshot leaves out a session whose agent is not the detected one.
   - A SessionStart report from the agent that now runs in the pane replaces a
-    session saved for another agent, even before the process probe confirms it.
-    A refused report is logged with its reason.
+    session saved for another agent, even before the process probe confirms it:
+    a report that names an agent detection has not caught up with is held (60
+    s) and taken when detection sees that agent. A report not applied is
+    logged.
 - **Codex without a report still restores.** A codex started as
   `codex resume <id>` gives its id from its argv (already parsed for naming).
 - **Dry run.** `pane list` / `pane get` show `restore_argv` in the agent
