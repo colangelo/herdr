@@ -580,6 +580,8 @@ Worktree commands also emit lifecycle events. `worktree.create` emits `workspace
 
 `workspace.close` rejects closing a primary workspace while linked-worktree workspaces are open unless its params include `"close_group": true`, returning `workspace_group_close_required` when explicit group intent is missing. An explicit group close emits one `workspace.closed` event for each workspace it closes.
 
+`pane.close`, `tab.close` and `workspace.close` never open a confirmation dialog on a client. A close that would drop open todos returns `confirmation_required`, names the todos in its message, and changes nothing. With `"force": true` the close goes ahead and the result is `{"type": "closed", "closed_todos": [{"pane_id": ..., "todos": [...]}]}`, listing the open todos of every pane it closed (an empty list when there were none). For `pane.close` and `tab.close`, `force` also answers the worktree group confirmation; `workspace.close` still needs `close_group` for a group.
+
 ## Agent view queries
 
 `agent.view.set` installs one transient declarative projection for the built-in

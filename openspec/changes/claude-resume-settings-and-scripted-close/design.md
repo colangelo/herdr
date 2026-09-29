@@ -106,8 +106,12 @@ are pure checks that never touch `mode` or the confirm tokens:
 - With `force`, the close runs and the success result is
   `closed_todos: [{pane_id, todos}]` for the panes that had open todos.
 
-The TUI keeps its modal and token flow; its workspace and tab closes pass
-`force` so they behave as they do today (they never asked about todos).
+The TUI keeps its modal and token flow; its workspace and tab closes skip the
+todo check (they never asked about todos) because they are TUI requests, and
+pass no `force`, so their answers are unchanged.
+
+A modal whose target is gone is also dropped in `compute_view`, because a
+pane can vanish under its modal without any close request (its process exits).
 
 `ConfirmClose` with no live target leaves the mode: the token-consuming paths
 reset the mode when nothing is left, and closing a pane clears a pending
