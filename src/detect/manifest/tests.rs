@@ -812,6 +812,74 @@ fn claude_blocker_screen_outranks_stale_osc_progress() {
     assert!(result.visible_blocker);
 }
 
+// Fork issue 137: a named Claude Code session draws its name in a labelled
+// rule under the dialog footer (`──── gestore-lab ─`). That trailing rule
+// must not become the region boundary, or the region is empty and an open
+// AskUserQuestion dialog reads idle. Layout from the live capture of wR:pB,
+// 2026-09-30, text replaced.
+const ASK_USER_QUESTION_DIALOG: &str = "\
+────────────────────────────────────────────────
+ ☐ Open items
+
+│ Which one first?
+
+❯ 1. Answer now (Recommended)
+     One round of questions.
+  2. Only the urgent ones
+     Only the blocking one.
+  3. Postpone
+  4. Type something.
+────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+";
+
+#[test]
+fn claude_question_dialog_in_a_named_session_is_blocked() {
+    let named =
+        format!("{ASK_USER_QUESTION_DIALOG}──────────────────────────────── gestore-lab ─\n");
+    for (label, screen) in [
+        ("named", named.as_str()),
+        ("unnamed", ASK_USER_QUESTION_DIALOG),
+    ] {
+        let result = osc_explain(Agent::Claude, screen, "✳ gestore-lab", "");
+        assert_eq!(result.state, AgentState::Blocked, "{label} session");
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("live_blocked_form"),
+            "{label} session"
+        );
+        assert!(result.visible_blocker, "{label} session");
+    }
+}
+
+#[test]
+fn a_trailing_labelled_rule_is_not_a_region_boundary() {
+    let named = "old\n────────\nfooter\n──────── gestore-lab ─\n";
+    assert_eq!(
+        after_last_horizontal_rule(named),
+        "footer\n──────── gestore-lab ─\n"
+    );
+    // A labelled rule with text under it is still a boundary, like a plain
+    // one, and a plain trailing rule still ends the region as before.
+    let labelled_then_text = "old\n──────── gestore-lab ─\n  ? for shortcuts\n";
+    assert_eq!(
+        after_last_horizontal_rule(labelled_then_text),
+        "  ? for shortcuts\n"
+    );
+    assert_eq!(after_last_horizontal_rule("text\n────────\n"), "");
+}
+
+#[test]
+fn an_idle_prompt_box_in_a_named_session_stays_idle() {
+    let screen =
+        "⏺ Done.\n\n────────────────────────────────\n❯ \n──────────────────────── gestore-lab ─\n";
+    let result = osc_explain(Agent::Claude, screen, "✳ gestore-lab", "");
+    assert_eq!(result.state, AgentState::Idle);
+    assert!(!result.visible_blocker);
+}
+
 #[test]
 fn claude_osc_progress_4_0_is_idle() {
     let result = osc_explain(Agent::Claude, "", "", "4;0;");

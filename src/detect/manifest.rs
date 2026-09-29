@@ -1488,17 +1488,38 @@ fn above_prompt_box(content: &str) -> &str {
     &content[..end.min(content.len())]
 }
 
+/// Everything after the last horizontal rule. A labelled rule
+/// (`──── gestore-lab ─`) with nothing but blank lines after it is skipped:
+/// a named Claude Code session draws its name in such a rule under a
+/// dialog's footer, and taking it as the boundary would leave the region
+/// empty and the dialog unseen (fork issue 137). Every other rule, labelled
+/// ones followed by text included, is a boundary as before.
 fn after_last_horizontal_rule(content: &str) -> &str {
     let mut last_rule_end = 0usize;
+    // The boundary before a labelled rule, in case nothing follows it.
+    let mut before_trailing_label: Option<usize> = None;
     let mut offset = 0usize;
     for line in content.lines() {
         let next_offset = offset + line.len() + 1;
         if is_horizontal_rule(line) {
+            before_trailing_label = is_labelled_rule(line).then_some(last_rule_end);
             last_rule_end = next_offset.min(content.len());
+        } else if !line.trim().is_empty() {
+            before_trailing_label = None;
         }
         offset = next_offset;
     }
-    &content[last_rule_end..]
+    &content[before_trailing_label.unwrap_or(last_rule_end)..]
+}
+
+/// A horizontal rule carrying text after its run of `─`.
+fn is_labelled_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    let rule_end = trimmed
+        .char_indices()
+        .find(|&(_, ch)| ch != '─')
+        .map_or(trimmed.len(), |(index, _)| index);
+    !trimmed[rule_end..].trim().is_empty()
 }
 
 fn last_non_empty_line(content: &str) -> &str {
