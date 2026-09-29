@@ -940,6 +940,21 @@ If no native session reference is stored, the field is omitted.
 
 `AgentInfo.name` is the agent's explicit name, or, when it has none, its `terminal_title_stripped` when that title is name-like and unique; then `name_source` is `"title"` (it is absent for an explicit name). Agent targets resolve these title names after explicit names. See [Custom agent labels](/docs/agents/#custom-agent-labels) for the rule.
 
+While `agent_status` is `blocked`, `PaneInfo` and `AgentInfo` also expose why and since when:
+
+- `blocked_reason`: `question` (the agent asked a question and waits for the answer), `permission` (it waits for approval to run a tool or command), `form` (a form or selection needs input), or `other`. The reason comes from the detection rule that matched the screen; a blocked state reported by a hook, or matched by a rule that names no reason, is `other`.
+- `blocked_since`: when the pane entered the current blocked spell, in unix milliseconds. It does not move while the pane stays blocked, even if the reason changes.
+
+Both fields are omitted whenever the pane is not blocked. They are runtime facts: after a cold restart or a live handoff, `blocked_since` restarts from the moment the new server sees the pane blocked.
+
+```json
+{
+  "agent_status": "blocked",
+  "blocked_reason": "question",
+  "blocked_since": 1790000000000
+}
+```
+
 `PaneInfo` and `AgentInfo` expose optional `terminal_title` and `terminal_title_stripped` fields. `terminal_title` is the latest OSC 0/2 title after safety normalization. `terminal_title_stripped` removes one recognized leading activity or spinner glyph and following whitespace. These server-owned values are ephemeral across a cold restart and are independent of the metadata `title` and semantic agent state.
 
 Use `pane.report_metadata` when a user hook wants to customize presentation without taking over lifecycle state from a Herdr integration.
