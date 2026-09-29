@@ -193,8 +193,16 @@ pub fn notification_toast_for_pane_state_update(
     )
 }
 
-fn toast_agent_label(agent_label: &str) -> &str {
-    agent_label
+/// What a notification calls the agent (fork issue 131): its name, explicit
+/// or its title fallback, else its kind ("claude").
+pub(crate) fn notification_agent_name(
+    state: &AppState,
+    terminal_id: &crate::terminal::TerminalId,
+    agent_label: &str,
+) -> String {
+    state
+        .agent_name(terminal_id)
+        .map_or_else(|| agent_label.to_string(), |(name, _)| name)
 }
 
 fn toast_event_text(kind: ToastKind) -> &'static str {
@@ -3799,11 +3807,13 @@ impl AppState {
         kind: ToastKind,
         expected_state: AgentState,
     ) -> Option<AgentNotificationDelivery> {
-        let terminal_state = self
+        let terminal_id = self
             .workspaces
             .get(ws_idx)?
-            .pane_state(pane_id)
-            .and_then(|pane| self.terminals.get(&pane.attached_terminal_id))?;
+            .pane_state(pane_id)?
+            .attached_terminal_id
+            .clone();
+        let terminal_state = self.terminals.get(&terminal_id)?;
         if terminal_state.state != expected_state {
             return None;
         }
@@ -3819,6 +3829,7 @@ impl AppState {
             active_tab_suppresses_notifications(is_active_tab, self.outer_terminal_focus);
         let sound = sound_for_toast_kind(kind, suppress_active_tab_notifications)
             .filter(|_| self.sound.allows(known_agent));
+        let agent_name = notification_agent_name(self, &terminal_id, &agent_label);
         let build_toast = || {
             // The stored-cwd name: delivery is decided in `AppState`, without
             // the runtime registry. The server's forwarded notification
@@ -3829,11 +3840,7 @@ impl AppState {
                 notification_context(&self.workspaces[ws_idx], &workspace_label, ws_idx, pane_id);
             ToastNotification {
                 kind,
-                title: format!(
-                    "{} {}",
-                    toast_agent_label(&agent_label),
-                    toast_event_text(kind)
-                ),
+                title: format!("{agent_name} {}", toast_event_text(kind)),
                 context,
                 position: None,
                 target: Some(ToastTarget {
@@ -7020,6 +7027,56 @@ mod tests {
         assert_eq!(state.terminals.get(&terminal_id).unwrap().cwd, cwd);
         assert!(state.session_dirty);
         let _ = std::fs::remove_dir_all(cwd);
+    }
+
+    // Fork issue 131: a notification names the agent, explicit name first,
+    // then its title fallback (fork issue 130), then its kind.
+    fn background_finish_title(name: Option<&str>, title: Option<&str>) -> String {
+        let mut state = app_with_workspaces(&["active", "background"]);
+        state.active = Some(0);
+        state.toast_config.delivery = crate::config::ToastDelivery::Herdr;
+        let bg_pane_id = *state.workspaces[1].panes.keys().next().unwrap();
+        let bg_terminal_id = state.workspaces[1].panes[&bg_pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&bg_terminal_id).unwrap();
+        terminal.state = AgentState::Working;
+        terminal.agent_name = name.map(str::to_string);
+        terminal.terminal_title = title.map(str::to_string);
+
+        state.handle_app_event(AppEvent::StateChanged {
+            pane_id: bg_pane_id,
+            agent: Some(Agent::Claude),
+            state: AgentState::Idle,
+            visible_blocker: false,
+            visible_working: false,
+            background_work: false,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+        });
+        let toast = state.toast.as_ref().expect("finished toast");
+        assert_eq!(
+            toast.context, "background · 2",
+            "the context line is unchanged"
+        );
+        toast.title.clone()
+    }
+
+    #[test]
+    fn a_finished_toast_names_the_agent() {
+        assert_eq!(
+            background_finish_title(Some("direction-builder"), Some("\u{2733} other")),
+            "direction-builder finished"
+        );
+        assert_eq!(
+            background_finish_title(None, Some("\u{2733} jev-astra")),
+            "jev-astra finished"
+        );
+        assert_eq!(
+            background_finish_title(None, Some("\u{2733} Claude Code")),
+            "claude finished"
+        );
+        assert_eq!(background_finish_title(None, None), "claude finished");
     }
 
     #[test]
