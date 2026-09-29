@@ -1537,6 +1537,16 @@
           "description": "How long an update-installed toast stays visible, in seconds. 0 keeps it visible until clicked or replaced."
         },
         {
+          "key": "ui.toast.herdr.pane_feedback",
+          "type": "enum",
+          "default": "\"corner\"",
+          "description": "Where notes about a pane action (a refused pane move, a failed clear scrollback or todo save) show: \"corner\" uses the position above, \"pane\" centers them in the pane acted on and falls back to the corner when that pane is not in view or is too small.",
+          "values": [
+            "corner",
+            "pane"
+          ]
+        },
+        {
           "key": "ui.toast.clipboard.enabled",
           "type": "boolean",
           "default": "true",
@@ -1546,14 +1556,15 @@
           "key": "ui.toast.clipboard.position",
           "type": "enum",
           "default": "\"bottom-center\"",
-          "description": "Copied-to-clipboard popup position.",
+          "description": "Copied-to-clipboard popup position. \"pane\" centers it in the pane the text came from (a mouse or copy-mode copy, or an app's OSC 52 write) and falls back to bottom-center when that pane is not in view or is too small.",
           "values": [
             "top-left",
             "top-center",
             "top-right",
             "bottom-left",
             "bottom-center",
-            "bottom-right"
+            "bottom-right",
+            "pane"
           ]
         }
       ]

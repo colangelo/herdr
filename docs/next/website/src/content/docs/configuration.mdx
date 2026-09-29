@@ -493,6 +493,8 @@ position = "bottom-right"
 
 Choose `herdr` for an in-app toast, `terminal` for an outer-terminal notification that also works over SSH, `system` for the local OS notification service, or `off` to disable popups. Herdr suppresses popups for the active tab. Search `ui.toast` in the [Config reference](/docs/config-reference/) for positions, delay behavior, and clipboard feedback settings.
 
+Feedback about one pane can be drawn in that pane instead of a fixed spot. `ui.toast.clipboard.position = "pane"` centers the copied-to-clipboard box in the pane the text came from, whether herdr copied it (a mouse selection, a double-click, copy mode) or an app wrote the clipboard with OSC 52. `ui.toast.herdr.pane_feedback = "pane"` does the same for the notes a pane action leaves, such as a refused pane move or a failed clear scrollback, centered in the pane that was focused. Both fall back to their usual spot when the pane is not in view or is too small for the box. Agent notifications keep `ui.toast.herdr.position`, since they are about panes elsewhere.
+
 On macOS, `system` tries `terminal-notifier` first and falls back to `/usr/bin/osascript` when it is unavailable or fails. The fallback appears as Script Editor in Notification Center and cannot activate the hosting terminal. Install `terminal-notifier` with `brew install terminal-notifier`. For a supported, detected terminal, it can activate the terminal app when you click the notification. Alternatively, choose `terminal` to let a supported outer terminal own the notification.
 
 ## Sound
