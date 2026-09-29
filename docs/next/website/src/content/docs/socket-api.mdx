@@ -388,6 +388,8 @@ empty:
 
 The response is `type: "ok"`. Unknown pane ids fail with `pane_not_found`.
 
+A pane's `agent_session` carries `restore_argv` when a restore would start an agent there: the exact command, resume command plus the launch flags Herdr kept (Herdr adds `--remote` for Codex panes on its app server). It is absent when the pane would come back as a plain shell, for example when the session on record belongs to an agent that no longer runs there.
+
 `pane.respawn` replaces the target pane's process without removing the pane.
 The pane keeps its pane id, terminal id, position, size, label, and todos; a
 pane launched with a command re-runs that command, and a plain shell pane gets
