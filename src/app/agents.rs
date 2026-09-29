@@ -21,6 +21,8 @@ fn valid_agent_name(name: &str) -> bool {
 
 impl App {
     pub(super) fn collect_agent_infos(&self) -> Vec<crate::api::schema::AgentInfo> {
+        let title_names = self.state.agent_title_names();
+        let title_names = &title_names;
         self.state
             .workspaces
             .iter()
@@ -30,7 +32,9 @@ impl App {
                     tab.layout
                         .pane_ids()
                         .into_iter()
-                        .filter_map(move |pane_id| self.agent_info(ws_idx, pane_id))
+                        .filter_map(move |pane_id| {
+                            self.agent_info_with_title_names(ws_idx, pane_id, title_names)
+                        })
                 })
             })
             .collect()
@@ -424,6 +428,16 @@ impl App {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
     ) -> Option<crate::api::schema::AgentInfo> {
+        self.agent_info_with_title_names(ws_idx, pane_id, &self.state.agent_title_names())
+    }
+
+    /// `agent_info` with the title fallback names worked out once for a list.
+    fn agent_info_with_title_names(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        title_names: &std::collections::HashMap<crate::terminal::TerminalId, String>,
+    ) -> Option<crate::api::schema::AgentInfo> {
         let ws = self.state.workspaces.get(ws_idx)?;
         let pane_state = ws.pane_state(pane_id)?;
         let terminal = self.state.terminals.get(&pane_state.attached_terminal_id)?;
@@ -433,7 +447,12 @@ impl App {
         let pane = self.pane_info(ws_idx, pane_id)?;
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
-            name: terminal.agent_name.clone(),
+            name: terminal
+                .agent_name
+                .clone()
+                .or_else(|| title_names.get(&terminal.id).cloned()),
+            name_source: (terminal.agent_name.is_none() && title_names.contains_key(&terminal.id))
+                .then_some(crate::api::schema::AgentNameSource::Title),
             agent: pane.agent,
             title: pane.title,
             terminal_title: pane.terminal_title,
@@ -464,8 +483,12 @@ impl App {
     ) -> Vec<crate::api::schema::AgentInfo> {
         self.collect_agent_infos()
             .into_iter()
+            // Only explicit names conflict: taking a name another agent has
+            // as its title fallback just drops that fallback.
             .filter(|agent| {
-                agent.name.as_deref() == Some(name) && agent.terminal_id != except_terminal_id
+                agent.name.as_deref() == Some(name)
+                    && agent.name_source.is_none()
+                    && agent.terminal_id != except_terminal_id
             })
             .collect()
     }

@@ -14,7 +14,7 @@ pub use state::{
     AgentMetadataReport, EffectivePresentation, EffectiveStateChange, TerminalState,
     TerminalStateMutation,
 };
-pub(crate) use title::stripped_terminal_title;
+pub(crate) use title::{stripped_terminal_title, title_is_agent_name};
 
 /// When input from a user or caller last reached a pane, in unix ms: the newer
 /// of the time carried over a restore and the live runtime's.

@@ -65,6 +65,9 @@ impl App {
         if let Some(resolved) = self.single_terminal_match(target, agent_matches)? {
             return Ok(resolved);
         }
+        if let Some(resolved) = self.title_name_match(target) {
+            return Ok(resolved);
+        }
 
         Err(TerminalTargetError::NotFound {
             target: target.to_string(),
@@ -97,10 +100,26 @@ impl App {
         if let Some(resolved) = self.single_terminal_match(target, name_matches)? {
             return Ok(resolved);
         }
+        if let Some(resolved) = self.title_name_match(target) {
+            return Ok(resolved);
+        }
 
         Err(TerminalTargetError::NotFound {
             target: target.to_string(),
         })
+    }
+
+    /// The agent whose title fallback name is `target` (fork issue 130),
+    /// tried after explicit names. Fallbacks are unique by construction.
+    fn title_name_match(&self, target: &str) -> Option<TerminalTarget> {
+        let terminal_id = self
+            .state
+            .agent_title_names()
+            .into_iter()
+            .find_map(|(terminal_id, name)| (name == target).then_some(terminal_id))?;
+        self.terminal_targets()
+            .into_iter()
+            .find(|candidate| candidate.terminal_id == terminal_id.as_str())
     }
 
     fn target_is_agent(&self, target: &TerminalTarget) -> bool {

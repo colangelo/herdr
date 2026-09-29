@@ -180,11 +180,25 @@ pub struct AgentPromptParams {
     pub wait: Option<AgentPromptWaitOptions>,
 }
 
+/// Where an agent's reported `name` comes from when it is not an explicit
+/// herdr name (fork issue 130).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentNameSource {
+    /// The agent's terminal title (its stripped form).
+    Title,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentInfo {
     pub terminal_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Set when `name` is not an explicit herdr name but stands in for one:
+    /// `title` when it comes from the agent's terminal title. Absent for an
+    /// explicit name (fork issue 130).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_source: Option<AgentNameSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

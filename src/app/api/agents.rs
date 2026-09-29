@@ -664,6 +664,59 @@ mod tests {
         assert_eq!(agent.agent_status, AgentStatus::Idle);
     }
 
+    // Fork issue 130: an unnamed agent answers to its name-like title.
+    #[test]
+    fn an_unnamed_agent_is_listed_and_targeted_by_its_title_name() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        terminal.set_terminal_title(Some("\u{2733} jev-astra".into()));
+
+        let listed: SuccessResponse =
+            serde_json::from_str(&app.handle_agent_list("req".into())).unwrap();
+        let ResponseResult::AgentList { agents } = listed.result else {
+            panic!("expected agent list");
+        };
+        assert_eq!(agents[0].name.as_deref(), Some("jev-astra"));
+        assert_eq!(
+            agents[0].name_source,
+            Some(crate::api::schema::AgentNameSource::Title)
+        );
+        let json = serde_json::to_value(&agents[0]).unwrap();
+        assert_eq!(json["name_source"], "title");
+
+        let got: SuccessResponse = serde_json::from_str(&app.handle_agent_get(
+            "req".into(),
+            AgentTarget {
+                target: "jev-astra".into(),
+            },
+        ))
+        .unwrap();
+        let ResponseResult::AgentInfo { agent } = got.result else {
+            panic!("the title name resolves as a target");
+        };
+        assert_eq!(agent.terminal_id, terminal_id.to_string());
+
+        // An explicit name takes over and carries no source marker.
+        let renamed: SuccessResponse = serde_json::from_str(&app.handle_agent_rename(
+            "req".into(),
+            AgentRenameParams {
+                target: "jev-astra".into(),
+                name: Some("reviewer".into()),
+            },
+        ))
+        .unwrap();
+        let ResponseResult::AgentInfo { agent } = renamed.result else {
+            panic!("expected agent info");
+        };
+        assert_eq!(agent.name.as_deref(), Some("reviewer"));
+        assert_eq!(agent.name_source, None);
+    }
+
     #[test]
     fn agent_rename_does_not_replace_the_pane_label() {
         let mut app = app_with_agent();

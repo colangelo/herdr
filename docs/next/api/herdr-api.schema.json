@@ -6783,6 +6783,17 @@
                 "null"
               ]
             },
+            "name_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentNameSource"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Set when `name` is not an explicit herdr name but stands in for one:\n`title` when it comes from the agent's terminal title. Absent for an\nexplicit name (fork issue 130)."
+            },
             "pane_id": {
               "type": "string"
             },
@@ -6915,6 +6926,16 @@
             "local_override_shadowing_remote"
           ],
           "type": "object"
+        },
+        "AgentNameSource": {
+          "description": "Where an agent's reported `name` comes from when it is not an explicit\nherdr name (fork issue 130).",
+          "oneOf": [
+            {
+              "const": "title",
+              "description": "The agent's terminal title (its stripped form).",
+              "type": "string"
+            }
+          ]
         },
         "AgentSessionInfo": {
           "properties": {
