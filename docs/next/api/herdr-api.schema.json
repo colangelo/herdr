@@ -47,6 +47,16 @@
             "kind": {
               "$ref": "#/schemas/event/$defs/AgentSessionRefKind"
             },
+            "restore_argv": {
+              "description": "The command a restore would run in this pane now (herdr adds\n`--remote` for panes on its Codex app server). Absent when the pane\nwould not restore an agent, for example because the session on record\nbelongs to an agent that no longer runs there.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
             "source": {
               "type": "string"
             },
@@ -6913,6 +6923,16 @@
             },
             "kind": {
               "$ref": "#/schemas/success_response/$defs/AgentSessionRefKind"
+            },
+            "restore_argv": {
+              "description": "The command a restore would run in this pane now (herdr adds\n`--remote` for panes on its Codex app server). Absent when the pane\nwould not restore an agent, for example because the session on record\nbelongs to an agent that no longer runs there.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "source": {
               "type": "string"

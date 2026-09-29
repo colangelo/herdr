@@ -306,16 +306,21 @@ async fn publish_state_changed_event(
 async fn publish_agent_process_detected_event(
     state_events: mpsc::Sender<AppEvent>,
     pane_id: PaneId,
+    pane_pid: u32,
     agent: Agent,
     observed_at: std::time::Instant,
     replaced_process: bool,
 ) {
+    let launch = (pane_pid > 0)
+        .then(|| crate::detect::agent_launch(pane_pid, agent))
+        .flatten();
     if let Err(e) = state_events
         .send(AppEvent::AgentProcessDetected {
             pane_id,
             agent,
             observed_at,
             replaced_process,
+            launch,
         })
         .await
     {
@@ -1298,6 +1303,7 @@ fn spawn_basic_detection_task(
                             publish_agent_process_detected_event(
                                 state_events.clone(),
                                 pane_id,
+                                pid,
                                 agent,
                                 now,
                                 foreground_action
@@ -3147,6 +3153,7 @@ impl PaneRuntime {
                                         publish_agent_process_detected_event(
                                             state_events.clone(),
                                             pane_id,
+                                            pid,
                                             agent,
                                             now,
                                             foreground_action == ForegroundShellAgentAction::ReportReplacementProcess,

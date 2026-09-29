@@ -375,6 +375,7 @@ mod tests {
             agent: Agent::Pi,
             observed_at: observed_at + std::time::Duration::from_secs(1),
             replaced_process: false,
+            launch: None,
         });
 
         let terminal = &app.state.terminals[&terminal_id];

@@ -680,6 +680,7 @@ fn restore_tab(
                 saved_agent_resume,
                 &cwd,
                 saved_history,
+                saved_pane.and_then(|p| p.agent_launch.as_ref()),
                 &mut agent_restore,
             )
         };
@@ -688,6 +689,13 @@ fn restore_tab(
             .map(reported_resume_from_snapshot);
         let restored_agent_session =
             restored_terminal_agent_session(saved_agent_session, startup.duplicate_agent_session);
+        let restored_agent_launch = saved_pane
+            .and_then(|p| p.agent_launch.as_ref())
+            .filter(|_| !startup.duplicate_agent_session)
+            .map(|launch| crate::agent_resume::AgentLaunchFlags {
+                agent: launch.agent.clone(),
+                flags: launch.flags.clone(),
+            });
         let initial_restore_agent = startup
             .restore_plan
             .as_ref()
@@ -735,6 +743,9 @@ fn restore_tab(
             }
             if let Some(resume) = restored_agent_resume {
                 terminal.restore_reported_resume(resume);
+            }
+            if let Some(record) = restored_agent_launch.clone() {
+                terminal.restore_agent_launch(record);
             }
             match (saved_agent_name, saved_managed_agent) {
                 (Some(agent_name), Some(agent)) => {
@@ -837,6 +848,9 @@ fn restore_tab(
                 }
                 if let Some(resume) = restored_agent_resume {
                     terminal.restore_reported_resume(resume);
+                }
+                if let Some(record) = restored_agent_launch.clone() {
+                    terminal.restore_agent_launch(record);
                 }
                 match (saved_agent_name, saved_managed_agent) {
                     (Some(agent_name), Some(agent)) if was_imported => {
@@ -948,19 +962,25 @@ fn pane_restore_startup<'a>(
     reported_resume: Option<&PaneAgentResumeSnapshot>,
     cwd: &std::path::Path,
     history: Option<&'a PaneHistorySnapshot>,
+    launch: Option<&super::snapshot::PaneAgentLaunchSnapshot>,
     agent_restore: &mut AgentRestoreState<'_>,
 ) -> PaneRestoreStartup<'a> {
     // Native agent resume owns the conversation history. If a pane has a
     // resumable agent session and resume is enabled, do not replay saved pane
     // presentation history into that terminal, even when this pane is a
     // duplicate suppressed by session de-duplication.
+    let launch = launch.map(|launch| crate::agent_resume::AgentLaunchFlags {
+        agent: launch.agent.clone(),
+        flags: launch.flags.clone(),
+    });
     let restore_plan = if !agent_restore.enabled {
         None
     } else if let Some(resume) = reported_resume {
         Some(reported_resume_from_snapshot(resume).plan(cwd))
     } else {
         session.and_then(|session| restore_plan_for_snapshot(session, true))
-    };
+    }
+    .map(|plan| plan.with_launch_flags(launch.as_ref()));
     let has_native_agent_restore = restore_plan.is_some();
     // Reserve before spawning so later panes in the same restore pass cannot
     // launch the same native agent session. The caller rolls this reservation
@@ -1290,6 +1310,7 @@ mod tests {
         };
         let owner_pane = super::super::snapshot::PaneSnapshot {
             agent_resume: None,
+            agent_launch: None,
             cwd: cwd.clone(),
             label: None,
             agent_name: None,
@@ -1328,6 +1349,7 @@ mod tests {
         };
         let target_pane = super::super::snapshot::PaneSnapshot {
             agent_resume: None,
+            agent_launch: None,
             cwd: cwd.clone(),
             label: None,
             agent_name: None,
@@ -1654,6 +1676,7 @@ mod tests {
             None,
             std::path::Path::new("/a"),
             Some(&history),
+            None,
             &mut agent_restore,
         );
 
@@ -1685,6 +1708,7 @@ mod tests {
             None,
             std::path::Path::new("/a"),
             Some(&history),
+            None,
             &mut agent_restore,
         );
         let duplicate = pane_restore_startup(
@@ -1692,6 +1716,7 @@ mod tests {
             None,
             std::path::Path::new("/a"),
             Some(&history),
+            None,
             &mut agent_restore,
         );
 
@@ -1738,11 +1763,126 @@ mod tests {
             Some(&resume),
             std::path::Path::new("/project"),
             None,
+            None,
             &mut agent_restore,
         );
         let plan = startup.restore_plan.expect("reported resume plan");
         assert_eq!(plan.agent, "claude");
         assert_eq!(plan.argv, resume.argv);
+    }
+
+    fn restore_argv(
+        session: Option<&super::super::snapshot::PaneAgentSessionSnapshot>,
+        resume: Option<&PaneAgentResumeSnapshot>,
+        launch: &[(&str, &[&str])],
+    ) -> Vec<String> {
+        let launch =
+            launch.first().map(
+                |(agent, flags)| super::super::snapshot::PaneAgentLaunchSnapshot {
+                    agent: agent.to_string(),
+                    flags: flags.iter().map(|flag| flag.to_string()).collect(),
+                },
+            );
+        let mut resumed = HashSet::new();
+        let mut agent_restore = AgentRestoreState {
+            enabled: true,
+            resumed_sessions: &mut resumed,
+        };
+        pane_restore_startup(
+            session,
+            resume,
+            std::path::Path::new("/a"),
+            None,
+            launch.as_ref(),
+            &mut agent_restore,
+        )
+        .restore_plan
+        .expect("the pane restores an agent")
+        .argv
+    }
+
+    #[test]
+    fn a_gpt_claude_pane_restores_with_its_settings_file() {
+        let resume = PaneAgentResumeSnapshot {
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            argv: ["claude", "--resume", "s1", "--model", "gpt-6-astra"]
+                .map(String::from)
+                .to_vec(),
+        };
+        assert_eq!(
+            restore_argv(
+                None,
+                Some(&resume),
+                &[(
+                    "claude",
+                    &[
+                        "--settings",
+                        "/u/gpt.settings.json",
+                        "--model",
+                        "gpt-6-astra"
+                    ]
+                )],
+            ),
+            [
+                "claude",
+                "--resume",
+                "s1",
+                "--model",
+                "gpt-6-astra",
+                "--settings",
+                "/u/gpt.settings.json"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hand_started_codex_pane_restores_with_its_flags() {
+        let session = super::super::snapshot::PaneAgentSessionSnapshot {
+            source: "herdr:codex".into(),
+            agent: "codex".into(),
+            kind: crate::agent_resume::AgentSessionRefKind::Id,
+            value: "t1".into(),
+        };
+        assert_eq!(
+            restore_argv(
+                Some(&session),
+                None,
+                &[(
+                    "codex",
+                    &["-m", "gpt-6-astra", "-s", "read-only", "-c", "a=1"]
+                )],
+            ),
+            [
+                "codex",
+                "resume",
+                "t1",
+                "-m",
+                "gpt-6-astra",
+                "-s",
+                "read-only",
+                "-c",
+                "a=1"
+            ]
+        );
+    }
+
+    #[test]
+    fn launch_flags_of_another_agent_are_not_added() {
+        let session = super::super::snapshot::PaneAgentSessionSnapshot {
+            source: "herdr:codex".into(),
+            agent: "codex".into(),
+            kind: crate::agent_resume::AgentSessionRefKind::Id,
+            value: "t1".into(),
+        };
+        assert_eq!(
+            restore_argv(
+                Some(&session),
+                None,
+                &[("claude", &["--settings", "/u/x.json"])]
+            ),
+            ["codex", "resume", "t1"]
+        );
     }
 
     #[test]
@@ -1780,6 +1920,7 @@ mod tests {
             Some(&resume),
             project_a,
             Some(&history),
+            None,
             &mut agent_restore,
         );
         let plan = startup.restore_plan.expect("reported resume plan");
@@ -1792,13 +1933,32 @@ mod tests {
             agent: "prime-agent".into(),
             argv: vec!["prime-agent".into(), "--continue".into()],
         };
-        let first = pane_restore_startup(None, Some(&custom), project_a, None, &mut agent_restore);
+        let first = pane_restore_startup(
+            None,
+            Some(&custom),
+            project_a,
+            None,
+            None,
+            &mut agent_restore,
+        );
         assert_eq!(first.restore_plan.unwrap().argv, custom.argv);
-        let other_project =
-            pane_restore_startup(None, Some(&custom), project_b, None, &mut agent_restore);
+        let other_project = pane_restore_startup(
+            None,
+            Some(&custom),
+            project_b,
+            None,
+            None,
+            &mut agent_restore,
+        );
         assert!(other_project.restore_plan.is_some());
-        let duplicate =
-            pane_restore_startup(None, Some(&custom), project_a, None, &mut agent_restore);
+        let duplicate = pane_restore_startup(
+            None,
+            Some(&custom),
+            project_a,
+            None,
+            None,
+            &mut agent_restore,
+        );
         assert!(duplicate.restore_plan.is_none());
         assert!(duplicate.duplicate_agent_session);
 
@@ -1812,6 +1972,7 @@ mod tests {
             Some(&custom),
             project_a,
             Some(&history),
+            None,
             &mut disabled,
         );
         assert!(startup.restore_plan.is_none());
@@ -1841,6 +2002,7 @@ mod tests {
             None,
             std::path::Path::new("/a"),
             Some(&history),
+            None,
             &mut agent_restore,
         );
 
@@ -1912,6 +2074,7 @@ mod tests {
                                 value: "opencode-session".into(),
                             }),
                             agent_resume: None,
+                            agent_launch: None,
                             launch_argv: None,
                             todos: Vec::new(),
                             next_todo_id: 1,
@@ -1999,6 +2162,7 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 agent_resume: None,
+                                agent_launch: None,
                                 launch_argv: None,
                                 todos: Vec::new(),
                                 next_todo_id: 1,
@@ -2015,6 +2179,7 @@ mod tests {
                                 managed_agent_kind: None,
                                 agent_session: None,
                                 agent_resume: None,
+                                agent_launch: None,
                                 launch_argv: None,
                                 todos: Vec::new(),
                                 next_todo_id: 1,
@@ -2088,6 +2253,7 @@ mod tests {
                             10,
                             super::super::snapshot::PaneSnapshot {
                                 agent_resume: None,
+                                agent_launch: None,
                                 cwd: cwd.clone(),
                                 label: None,
                                 agent_name: None,
@@ -2104,6 +2270,7 @@ mod tests {
                             20,
                             super::super::snapshot::PaneSnapshot {
                                 agent_resume: None,
+                                agent_launch: None,
                                 cwd: cwd.clone(),
                                 label: None,
                                 agent_name: None,
@@ -2170,6 +2337,7 @@ mod tests {
                     managed_agent_kind: None,
                     agent_session: None,
                     agent_resume: None,
+                    agent_launch: None,
                     launch_argv: None,
                     todos: Vec::new(),
                     next_todo_id: 1,
@@ -2190,6 +2358,7 @@ mod tests {
                 value: "codex-session".into(),
             }),
             agent_resume: None,
+            agent_launch: None,
             launch_argv: None,
             todos: Vec::new(),
             next_todo_id: 1,
@@ -2347,6 +2516,7 @@ mod tests {
                                 value: "codex-session".into(),
                             }),
                             agent_resume: None,
+                            agent_launch: None,
                             launch_argv: None,
                             todos: Vec::new(),
                             next_todo_id: 1,
@@ -2634,6 +2804,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 agent_resume: None,
+                agent_launch: None,
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,

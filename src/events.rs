@@ -65,6 +65,9 @@ pub enum AppEvent {
         /// sighting of one: a restart, seen as an exit followed by the new
         /// process or as the agent's process group changing between polls.
         replaced_process: bool,
+        /// The agent process's command line, read once here so a restore can
+        /// give it back its launch flags. `None` when the OS would not say.
+        launch: Option<crate::agent_resume::AgentLaunchArgv>,
     },
     /// Fallback detector state changed in a pane.
     StateChanged {

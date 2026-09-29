@@ -121,6 +121,9 @@ pub struct PaneSnapshot {
     pub agent_session: Option<PaneAgentSessionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_resume: Option<PaneAgentResumeSnapshot>,
+    /// Launch-only flags of the pane's agent, added to its resume command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_launch: Option<PaneAgentLaunchSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
     /// Pane todos, in stored (insertion) order. Omitted for panes with no
@@ -175,6 +178,12 @@ pub struct PaneAgentResumeSnapshot {
     pub source: String,
     pub agent: String,
     pub argv: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneAgentLaunchSnapshot {
+    pub agent: String,
+    pub flags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,27 +453,14 @@ fn capture_tab(
             })
             .unwrap_or_default();
         let launch_argv = terminal.and_then(|terminal| terminal.launch_argv.clone());
-        let agent_session = terminal.and_then(|terminal| {
-            if let Some(authority) = terminal.hook_authority.as_ref() {
-                if let Some(session_ref) = authority.session_ref.as_ref() {
-                    return Some(PaneAgentSessionSnapshot {
-                        source: authority.source.clone(),
-                        agent: authority.agent_label.clone(),
-                        kind: session_ref.kind,
-                        value: session_ref.value.clone(),
-                    });
-                }
-            }
-            terminal
-                .persisted_agent_session
-                .as_ref()
-                .map(|session| PaneAgentSessionSnapshot {
-                    source: session.source.clone(),
-                    agent: session.agent.clone(),
-                    kind: session.session_ref.kind,
-                    value: session.session_ref.value.clone(),
-                })
-        });
+        let agent_session = terminal
+            .and_then(|terminal| terminal.session_for_snapshot())
+            .map(|(source, agent, kind, value)| PaneAgentSessionSnapshot {
+                source,
+                agent,
+                kind,
+                value,
+            });
         let todos = terminal.map(capture_pane_todos).unwrap_or_default();
         let next_todo_id = terminal
             .map(|terminal| terminal.next_todo_id)
@@ -473,11 +469,17 @@ fn capture_tab(
             crate::terminal::pane_last_input_at_ms(terminal, terminal_runtimes.get(&terminal.id))
         });
         let agent_resume = terminal
-            .and_then(|terminal| terminal.reported_resume())
+            .and_then(|terminal| terminal.reported_resume_for_snapshot())
             .map(|resume| PaneAgentResumeSnapshot {
                 source: resume.source.clone(),
                 agent: resume.agent.clone(),
                 argv: resume.argv.clone(),
+            });
+        let agent_launch = terminal
+            .and_then(|terminal| terminal.agent_launch_for_snapshot())
+            .map(|record| PaneAgentLaunchSnapshot {
+                agent: record.agent.clone(),
+                flags: record.flags.clone(),
             });
         panes.insert(
             id.raw(),
@@ -488,6 +490,7 @@ fn capture_tab(
                 managed_agent_kind,
                 agent_session,
                 agent_resume,
+                agent_launch,
                 launch_argv,
                 todos,
                 next_todo_id,
@@ -809,6 +812,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 agent_resume: None,
+                agent_launch: None,
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
@@ -825,6 +829,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 agent_resume: None,
+                agent_launch: None,
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
@@ -1410,6 +1415,51 @@ mod tests {
     }
 
     #[test]
+    fn capture_contract_includes_agent_launch_flags() {
+        let mut state = state_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        state.ensure_test_terminals();
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let terminal = state.terminals.get_mut(&terminal_id).unwrap();
+        terminal
+            .set_detected_agent_process_at(crate::detect::Agent::Claude, std::time::Instant::now());
+        terminal.record_agent_launch(
+            crate::detect::Agent::Claude,
+            Some(&crate::agent_resume::AgentLaunchArgv {
+                argv: ["claude", "--settings", "/u/gpt.json", "hello"]
+                    .map(String::from)
+                    .to_vec(),
+                cwd: None,
+            }),
+        );
+
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+
+        assert_eq!(
+            pane.agent_launch,
+            Some(PaneAgentLaunchSnapshot {
+                agent: "claude".into(),
+                flags: vec!["--settings".into(), "/u/gpt.json".into()],
+            })
+        );
+        let json = serde_json::to_value(pane).unwrap();
+        assert_eq!(
+            json["agent_launch"],
+            serde_json::json!({"agent": "claude", "flags": ["--settings", "/u/gpt.json"]})
+        );
+        let mut older = json;
+        older.as_object_mut().unwrap().remove("agent_launch");
+        let loaded: PaneSnapshot = serde_json::from_value(older).unwrap();
+        assert_eq!(
+            loaded.agent_launch, None,
+            "files written before the field still load"
+        );
+    }
+
+    #[test]
     fn capture_contract_preserves_restored_agent_session() {
         let mut state = state_with_workspaces(&["one"]);
         let root = state.workspaces[0].tabs[0].root_pane;
@@ -1466,6 +1516,7 @@ mod tests {
     fn pane_snapshot_round_trips_todos() {
         let snapshot = PaneSnapshot {
             agent_resume: None,
+            agent_launch: None,
             cwd: std::path::PathBuf::from("/tmp"),
             label: None,
             agent_name: None,
@@ -1506,6 +1557,7 @@ mod tests {
     fn pane_snapshot_without_todos_omits_the_field() {
         let snapshot = PaneSnapshot {
             agent_resume: None,
+            agent_launch: None,
             cwd: std::path::PathBuf::from("/tmp"),
             label: None,
             agent_name: None,
@@ -1599,6 +1651,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 agent_resume: None,
+                agent_launch: None,
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,
@@ -1617,6 +1670,7 @@ mod tests {
                 managed_agent_kind: None,
                 agent_session: None,
                 agent_resume: None,
+                agent_launch: None,
                 launch_argv: None,
                 todos: Vec::new(),
                 next_todo_id: 1,

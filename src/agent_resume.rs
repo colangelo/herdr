@@ -2,6 +2,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+mod launch_flags;
+
+pub use launch_flags::{compose_resume_argv, AgentLaunchArgv, AgentLaunchFlags};
+
 const MAX_SESSION_ID_LEN: usize = 512;
 const MAX_SESSION_PATH_LEN: usize = 4096;
 const MAX_RESUME_ARGS: usize = 64;
@@ -50,6 +54,22 @@ impl ReportedAgentResume {
                 self.argv.join("\u{0}")
             ),
         }
+    }
+}
+
+impl AgentResumePlan {
+    /// The plan with the launch flags its agent was started with added
+    /// (`compose_resume_argv`). A record of another agent, or a result restore
+    /// could not type safely, leaves the plan as it was.
+    pub fn with_launch_flags(mut self, launch: Option<&AgentLaunchFlags>) -> Self {
+        let Some(launch) = launch.filter(|launch| launch.agent == self.agent) else {
+            return self;
+        };
+        let argv = compose_resume_argv(&self.agent, &self.argv, &launch.flags);
+        if validate_resume_argv(&argv).is_ok() {
+            self.argv = argv;
+        }
+        self
     }
 }
 

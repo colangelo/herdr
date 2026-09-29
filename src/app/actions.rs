@@ -3293,13 +3293,16 @@ impl AppState {
                 agent,
                 observed_at,
                 replaced_process,
+                launch,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
-                    Some(if replaced_process {
+                    let mutation = if replaced_process {
                         terminal.set_detected_agent_replacement_process_at(agent, observed_at)
                     } else {
                         terminal.set_detected_agent_process_at(agent, observed_at)
-                    })
+                    };
+                    terminal.record_agent_launch(agent, launch.as_ref());
+                    Some(mutation)
                 })
                 .into_iter()
                 .collect(),
@@ -6090,6 +6093,7 @@ mod tests {
             agent: Agent::Claude,
             observed_at: Instant::now(),
             replaced_process: false,
+            launch: None,
         });
         state.handle_app_event(report("old-session", 1));
         assert_eq!(session(&state).as_deref(), Some("old-session"));
@@ -6110,6 +6114,7 @@ mod tests {
             agent: Agent::Claude,
             observed_at: Instant::now(),
             replaced_process: true,
+            launch: None,
         });
 
         assert_eq!(session(&state).as_deref(), Some("new-session"));
@@ -6127,6 +6132,7 @@ mod tests {
             agent: Agent::Pi,
             observed_at: Instant::now(),
             replaced_process: false,
+            launch: None,
         });
         let direct_idle = state
             .handle_app_event(AppEvent::StateChanged {
@@ -6148,6 +6154,7 @@ mod tests {
             agent: Agent::Pi,
             observed_at: Instant::now(),
             replaced_process: false,
+            launch: None,
         });
         for agent_state in [AgentState::Working, AgentState::Blocked] {
             state.handle_app_event(AppEvent::StateChanged {
@@ -6187,6 +6194,7 @@ mod tests {
             agent: Agent::Codex,
             observed_at: Instant::now(),
             replaced_process: false,
+            launch: None,
         });
         state.handle_app_event(AppEvent::StateChanged {
             pane_id,
@@ -6502,6 +6510,7 @@ mod tests {
         let (pane_id, terminal_id) = first_pane_terminal(&state);
         state.handle_app_event(AppEvent::AgentProcessDetected {
             replaced_process: false,
+            launch: None,
             pane_id,
             agent: Agent::Pi,
             observed_at: std::time::Instant::now(),
@@ -6584,6 +6593,7 @@ mod tests {
         let (pane_id, terminal_id) = first_pane_terminal(&state);
         state.handle_app_event(AppEvent::AgentProcessDetected {
             replaced_process: false,
+            launch: None,
             pane_id,
             agent: Agent::Pi,
             observed_at: std::time::Instant::now(),

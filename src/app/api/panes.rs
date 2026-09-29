@@ -1281,6 +1281,17 @@ impl App {
         });
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
+        if !applied {
+            // The API still answers ok (the report was well formed), so this is
+            // the only trace of a report herdr refused or held (fork issue 127).
+            tracing::info!(
+                pane = pane_id.raw(),
+                source = %params.source,
+                agent = %agent_label,
+                newer = report_is_newer,
+                "agent session report not applied"
+            );
+        }
         self.report_agent_resume(
             id,
             ws_idx,
@@ -1353,6 +1364,17 @@ impl App {
         }
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
+        if !applied {
+            // The API still answers ok (the report was well formed), so this is
+            // the only trace of a report herdr refused or held (fork issue 127).
+            tracing::info!(
+                pane = pane_id.raw(),
+                source = %params.source,
+                agent = %agent_label,
+                newer = report_is_newer,
+                "agent session report not applied"
+            );
+        }
         self.report_agent_resume(
             id,
             ws_idx,

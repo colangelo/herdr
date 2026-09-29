@@ -299,6 +299,28 @@ pub fn agent_processes_in_job(
         .filter(move |process| identify_agent(&normalized_process_name(process)) == Some(agent))
 }
 
+/// The exact command line and working directory `agent` was started with in
+/// the pane whose shell is `pane_pid`: from its foreground job, or one PTY down
+/// behind a recognised wrapper. Read once when the agent appears, never per
+/// frame (fork issues 123, 127).
+pub fn agent_launch(pane_pid: u32, agent: Agent) -> Option<crate::agent_resume::AgentLaunchArgv> {
+    let job = foreground_job(pane_pid)?;
+    let find = |job: &crate::platform::ForegroundJob| {
+        agent_processes_in_job(job, agent)
+            .find(|process| process.argv.is_some())
+            .cloned()
+    };
+    let process = find(&job).or_else(|| {
+        let (_, nested) =
+            wrapped_shell_job(&job, crate::platform::nested_foreground_job_with_owner)?;
+        find(&nested)
+    })?;
+    Some(crate::agent_resume::AgentLaunchArgv {
+        argv: process.argv?,
+        cwd: crate::platform::process_cwd(process.pid),
+    })
+}
+
 pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Agent, String)> {
     if let Some(process) = job
         .processes

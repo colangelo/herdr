@@ -50,6 +50,9 @@ impl CodexAppServer {
         let Some(socket) = &self.socket else {
             return Vec::new();
         };
+        if existing.iter().any(|arg| arg == "--no-daemon") {
+            return Vec::new();
+        }
         let mut args = Vec::new();
         if !existing
             .iter()
@@ -863,6 +866,16 @@ mod tests {
             settings(true, false).launch_args(Path::new("/repo"), &[]),
             ["--remote", "unix:///run/codex.sock", "-C", "/repo"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_codex_started_off_the_daemon_is_restored_off_it() {
+        // A hand-started `codex --no-daemon` keeps that choice when restore
+        // gives it back its launch flags (fork issue 127).
+        assert!(settings(true, false)
+            .launch_args(Path::new("/repo"), &["--no-daemon".into()])
+            .is_empty());
     }
 
     #[cfg(unix)]

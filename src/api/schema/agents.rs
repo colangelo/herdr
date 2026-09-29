@@ -228,4 +228,10 @@ pub struct AgentSessionInfo {
     pub agent: String,
     pub kind: crate::agent_resume::AgentSessionRefKind,
     pub value: String,
+    /// The command a restore would run in this pane now (herdr adds
+    /// `--remote` for panes on its Codex app server). Absent when the pane
+    /// would not restore an agent, for example because the session on record
+    /// belongs to an agent that no longer runs there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_argv: Option<Vec<String>>,
 }
