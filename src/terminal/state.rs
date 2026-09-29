@@ -1644,6 +1644,8 @@ impl TerminalState {
     /// Codex's own hook never reaches herdr from a daemon-hosted thread, so
     /// this is the only way such a pane learns its session. It yields to a
     /// session a hook reported, and to a pane that no longer runs Codex.
+    /// Naming runs on unix only.
+    #[cfg(unix)]
     pub fn record_resolved_codex_thread(
         &mut self,
         thread_id: String,
@@ -2785,6 +2787,7 @@ mod tests {
         TerminalState::new(TerminalId::alloc(), "/tmp".into())
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_resolved_codex_thread_becomes_the_pane_session() {
         let mut terminal = test_terminal();
@@ -2809,6 +2812,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_resolved_codex_thread_counts_during_a_managed_launch() {
         let mut terminal = test_terminal();
@@ -2825,6 +2829,7 @@ mod tests {
             .is_some());
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_resolved_codex_thread_is_dropped_when_the_pane_left_codex() {
         let mut terminal = test_terminal();

@@ -1562,7 +1562,8 @@ impl TerminalCompressionWake {
 /// Drives libghostty-vt's caller-owned compression after terminal activity settles.
 struct TerminalCompressionTask {
     wake: TerminalCompressionWake,
-    #[cfg(test)]
+    // Read only by the compression test, which runs on Linux and macOS.
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
     completed_passes: Arc<AtomicU64>,
     handle: tokio::task::AbortHandle,
 }
@@ -1599,7 +1600,7 @@ impl TerminalCompressionTask {
         .abort_handle();
         Self {
             wake,
-            #[cfg(test)]
+            #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
             completed_passes,
             handle,
         }
@@ -1617,7 +1618,7 @@ impl TerminalCompressionTask {
         self.handle.abort();
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
     fn completed_passes(&self) -> u64 {
         self.completed_passes.load(Ordering::Acquire)
     }

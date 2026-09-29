@@ -97,7 +97,9 @@ pub enum AppEvent {
         seq: Option<u64>,
         session_ref: Option<crate::agent_resume::AgentSessionRef>,
     },
-    /// A Codex naming job resolved the daemon thread a pane runs.
+    /// A Codex naming job resolved the daemon thread a pane runs (naming
+    /// runs on unix only).
+    #[cfg(unix)]
     CodexThreadResolved { pane_id: PaneId, thread_id: String },
     /// Agent session identity was reported without state authority.
     AgentSessionReported {

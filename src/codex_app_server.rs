@@ -10,14 +10,21 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+// Thread naming talks to the daemon's unix socket, so the naming helpers
+// below exist on unix only.
+
 /// How long a naming job keeps looking for its thread.
+#[cfg(unix)]
 const NAME_JOB_DEADLINE: Duration = Duration::from_secs(20);
+#[cfg(unix)]
 const NAME_JOB_POLL: Duration = Duration::from_millis(250);
 /// A thread counts as the new pane's if it was created no earlier than this
 /// before the launch.
+#[cfg(unix)]
 const CREATED_SLACK_MS: i64 = 1_000;
 /// How long after a hand-launched Codex process starts its thread can appear.
 /// Codex creates it at startup; the bound keeps a later launch's thread out.
+#[cfg(unix)]
 const HAND_LAUNCH_WINDOW_MS: i64 = 30_000;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -133,6 +140,7 @@ pub(crate) enum NameJob {
 }
 
 /// The fields of `thread/read` that naming needs.
+#[cfg(unix)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ThreadSummary {
     pub id: String,
@@ -143,6 +151,7 @@ pub(crate) struct ThreadSummary {
     pub created_at: Option<i64>,
 }
 
+#[cfg(unix)]
 impl ThreadSummary {
     fn from_read(value: &serde_json::Value) -> Option<Self> {
         let thread = value.get("thread")?;
@@ -184,12 +193,14 @@ impl ThreadSummary {
     }
 }
 
+#[cfg(unix)]
 fn same_dir(left: &Path, right: &Path) -> bool {
     let canonical =
         |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     left == right || canonical(left) == canonical(right)
 }
 
+#[cfg(unix)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Pick {
     None,
@@ -199,6 +210,7 @@ pub(crate) enum Pick {
 
 /// The thread a newly launched pane created: the only unnamed, nameable one
 /// in its cwd created since the launch. Several means a guess, so none.
+#[cfg(unix)]
 pub(crate) fn pick_new_thread(threads: &[ThreadSummary], cwd: &Path, launched_at_ms: i64) -> Pick {
     pick_unnamed_thread(threads, cwd, |created| {
         created >= launched_at_ms - CREATED_SLACK_MS
@@ -208,6 +220,7 @@ pub(crate) fn pick_new_thread(threads: &[ThreadSummary], cwd: &Path, launched_at
 /// The thread a Codex process herdr did not launch created: the only unnamed,
 /// nameable one in its cwd created within `HAND_LAUNCH_WINDOW_MS` of the
 /// process starting. Several means a guess, so none.
+#[cfg(unix)]
 pub(crate) fn pick_process_thread(
     threads: &[ThreadSummary],
     cwd: &Path,
@@ -226,6 +239,7 @@ pub(crate) fn resumed_thread_id(argv: &[String]) -> Option<String> {
         .map(|pair| pair[1].clone())
 }
 
+#[cfg(unix)]
 fn pick_unnamed_thread(
     threads: &[ThreadSummary],
     cwd: &Path,
@@ -284,7 +298,8 @@ pub(crate) fn spawn_name_job(socket: PathBuf, job: NameJob, reply: Option<Thread
             }
             #[cfg(not(unix))]
             {
-                let _ = (&socket, &job, &reply);
+                let _ = (&socket, &job);
+                drop(reply.map(|reply| (reply.events, reply.pane_id)));
             }
         });
     if let Err(err) = spawned {
@@ -919,6 +934,7 @@ mod tests {
     }
 
     /// A non-UUID id, so creation time comes from `createdAt` (seconds).
+    #[cfg(unix)]
     fn thread(id: &str, cwd: &str, created_at: i64) -> ThreadSummary {
         ThreadSummary {
             id: id.into(),
@@ -928,6 +944,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn pick_new_thread_takes_the_single_candidate() {
         let threads = [
@@ -953,6 +970,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn pick_process_thread_keeps_to_the_window_after_the_process_started() {
         let threads = [
@@ -966,6 +984,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn pick_process_thread_refuses_to_guess() {
         let threads = [thread("a", "/repo", 101), thread("b", "/repo", 110)];
@@ -1000,6 +1019,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn pick_new_thread_refuses_to_guess() {
         let threads = [thread("a", "/repo", 100), thread("b", "/repo", 101)];
@@ -1013,6 +1033,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn uuid_v7_time_wins_over_a_refreshed_created_at() {
         // Measured on the daemon: an old thread with no turns had its
@@ -1048,6 +1069,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn thread_summary_reads_the_daemon_shape() {
         let read = serde_json::json!({"thread": {

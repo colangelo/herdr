@@ -1465,7 +1465,8 @@ impl AppState {
     }
 
     /// The pane finished and nobody has looked at it yet ("done"); carried
-    /// by a live handoff (fork issue 128).
+    /// by a live handoff (fork issue 128), which is unix-only.
+    #[cfg(unix)]
     pub(crate) fn pane_is_unseen(&self, pane_id: PaneId) -> bool {
         self.workspaces
             .iter()
@@ -3384,6 +3385,7 @@ impl AppState {
                     .collect()
                 }
             }
+            #[cfg(unix)]
             AppEvent::CodexThreadResolved { pane_id, thread_id } => self
                 .update_terminal_state(pane_id, |terminal| {
                     terminal.record_resolved_codex_thread(thread_id)
@@ -6081,6 +6083,7 @@ mod tests {
         assert!(!pane.seen);
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_unseen_pane_is_reported_for_the_handoff() {
         let mut state = app_with_workspaces(&["a", "b"]);
