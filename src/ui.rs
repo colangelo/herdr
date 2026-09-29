@@ -136,7 +136,9 @@ pub(crate) use self::{
         mobile_switcher_workspace_doc_range, MobileSwitcherTarget,
     },
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
-    tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
+    tab_surface::{
+        synchronized_output_holds_frame, tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView,
+    },
     tabs::{
         compute_tab_bar_view, notification_indicator_width, tab_bar_content_area,
         todo_indicator_width,

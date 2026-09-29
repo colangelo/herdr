@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -177,6 +178,20 @@ pub(crate) struct GhosttyPaneTerminal {
     pending_pty_responses: Arc<Mutex<Vec<Bytes>>>,
 }
 
+/// How long an open synchronized update (DEC mode 2026) may hold a client's
+/// frame before herdr draws the pane as it is (fork issue 126).
+pub(crate) const SYNC_HOLD_MAX: Duration = Duration::from_millis(200);
+
+/// Counts synchronized-update begins and ends across every pane. Each pane
+/// keeps the count of its own last one, so a frame that read the count before
+/// it was built can tell a pane that began or ended a block while it was built.
+static SYNC_TRANSITIONS: AtomicU64 = AtomicU64::new(0);
+
+/// The synchronized-update count now; read it before building a frame.
+pub(crate) fn sync_transition_seq() -> u64 {
+    SYNC_TRANSITIONS.load(Ordering::Acquire)
+}
+
 pub(crate) struct GhosttyPaneCore {
     pub terminal: crate::ghostty::Terminal,
     #[cfg(windows)]
@@ -197,6 +212,10 @@ pub(crate) struct GhosttyPaneCore {
     decscusr_tracker: DecscusrTracker,
     cursor_settle_state: CursorPositionSettleState,
     windows_powershell_prompt_cwd_reporting: bool,
+    /// When the open synchronized update began; `None` outside one.
+    sync_began_at: Option<Instant>,
+    /// [`SYNC_TRANSITIONS`] at this pane's last begin or end.
+    sync_transition_seq: u64,
 }
 
 pub(crate) struct PaneTerminal {
@@ -454,6 +473,10 @@ impl PaneTerminal {
 
     pub fn synchronized_output_active(&self) -> bool {
         self.ghostty.synchronized_output_active()
+    }
+
+    pub fn synchronized_frame_held(&self, since: u64, now: Instant) -> bool {
+        self.ghostty.synchronized_frame_held(since, now)
     }
 
     pub fn visible_text(&self) -> String {
@@ -1090,6 +1113,8 @@ impl GhosttyPaneTerminal {
                 decscusr_tracker: DecscusrTracker::default(),
                 cursor_settle_state: CursorPositionSettleState::default(),
                 windows_powershell_prompt_cwd_reporting: false,
+                sync_began_at: None,
+                sync_transition_seq: 0,
             }),
             key_encoder: Mutex::new(key_encoder),
             pending_pty_responses,
@@ -1352,6 +1377,8 @@ impl GhosttyPaneTerminal {
             .terminal
             .mode_get(crate::ghostty::MODE_SYNCHRONIZED_OUTPUT)
             .unwrap_or(false);
+        let synchronized_output_began =
+            observe_synchronized_output(&mut core, synchronized_output, filtered_bytes.as_ref());
         if CURSOR_POSITION_SETTLE_ENABLED {
             let cursor_started = crate::render_prof::timer();
             let cursor_after_write = current_cursor_state(&mut core);
@@ -1369,6 +1396,7 @@ impl GhosttyPaneTerminal {
         let request_render = !synchronized_output;
         let render_delay = render_delay_after_pty_write(
             synchronized_output,
+            synchronized_output_began,
             has_kitty_graphics_sequence,
             cursor_position_settle_pending(&core),
             CURSOR_POSITION_SETTLE_ENABLED,
@@ -1891,6 +1919,19 @@ impl GhosttyPaneTerminal {
         effective_cursor_state(&mut core, current)
     }
 
+    /// Whether a frame whose build started at transition count `since` must
+    /// not show this pane: its synchronized update is open and younger than
+    /// [`SYNC_HOLD_MAX`], or it began or ended one after `since` (fork issue
+    /// 126). One lock, no allocation.
+    pub fn synchronized_frame_held(&self, since: u64, now: Instant) -> bool {
+        self.core.lock().is_ok_and(|core| {
+            core.sync_transition_seq > since
+                || core
+                    .sync_began_at
+                    .is_some_and(|began| now < began + SYNC_HOLD_MAX)
+        })
+    }
+
     pub fn synchronized_output_active(&self) -> bool {
         self.core
             .lock()
@@ -2336,14 +2377,43 @@ fn effective_cursor_state(
         .reported_cursor(current, Instant::now())
 }
 
+/// Tracks this pane's synchronized updates after a write: when the open one
+/// began, and the transition count at each begin or end. A begin and its end
+/// inside one write are atomic under the core lock and change nothing; an end
+/// followed by a new begin in one write starts the hold clock again. Returns
+/// whether a block began, so the write can ask for a render at
+/// [`SYNC_HOLD_MAX`]: a stuck block stops holding with no input.
+fn observe_synchronized_output(core: &mut GhosttyPaneCore, active: bool, bytes: &[u8]) -> bool {
+    let began = match (core.sync_began_at.is_some(), active) {
+        (false, true) => true,
+        (true, true) => contains_synchronized_output_begin(bytes),
+        (true, false) => {
+            core.sync_began_at = None;
+            core.sync_transition_seq = SYNC_TRANSITIONS.fetch_add(1, Ordering::AcqRel) + 1;
+            return false;
+        }
+        (false, false) => false,
+    };
+    if began {
+        core.sync_began_at = Some(Instant::now());
+        core.sync_transition_seq = SYNC_TRANSITIONS.fetch_add(1, Ordering::AcqRel) + 1;
+    }
+    began
+}
+
+fn contains_synchronized_output_begin(bytes: &[u8]) -> bool {
+    bytes.windows(8).any(|window| window == b"\x1b[?2026h")
+}
+
 fn render_delay_after_pty_write(
     synchronized_output: bool,
+    synchronized_output_began: bool,
     has_kitty_graphics_sequence: bool,
     cursor_position_settle_pending: bool,
     cursor_position_settle_enabled: bool,
 ) -> Option<Duration> {
     if synchronized_output {
-        None
+        synchronized_output_began.then_some(SYNC_HOLD_MAX)
     } else if has_kitty_graphics_sequence {
         Some(KITTY_GRAPHICS_REDRAW_SETTLE)
     } else if cursor_position_settle_enabled && cursor_position_settle_pending {
@@ -4220,18 +4290,25 @@ mod tests {
     #[test]
     fn cursor_settle_policy_controls_render_delay() {
         assert_eq!(
-            render_delay_after_pty_write(false, false, true, true),
+            render_delay_after_pty_write(false, false, false, true, true),
             Some(CURSOR_POSITION_SETTLE)
         );
         assert_eq!(
-            render_delay_after_pty_write(false, false, true, false),
+            render_delay_after_pty_write(false, false, false, true, false),
             None
         );
         assert_eq!(
-            render_delay_after_pty_write(false, true, true, false),
+            render_delay_after_pty_write(false, false, true, true, false),
             Some(KITTY_GRAPHICS_REDRAW_SETTLE)
         );
-        assert_eq!(render_delay_after_pty_write(true, false, true, true), None);
+        assert_eq!(
+            render_delay_after_pty_write(true, false, false, true, true),
+            None
+        );
+        assert_eq!(
+            render_delay_after_pty_write(true, true, false, true, true),
+            Some(SYNC_HOLD_MAX)
+        );
     }
 
     #[test]
@@ -5633,6 +5710,56 @@ mod tests {
 
         let end = pane_terminal.process_pty_bytes(pane_id, 0, b"\x1b[?2026l", &tx);
         assert!(end.request_render);
+    }
+
+    // Fork issue 126: the hold state a frame reads.
+    #[test]
+    fn synchronized_output_holds_frames_until_it_ends_or_times_out() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        let pane_terminal = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
+        let pane_id = PaneId::from_raw(1);
+        let since = sync_transition_seq();
+        assert!(!pane_terminal.synchronized_frame_held(since, Instant::now()));
+
+        let begin = pane_terminal.process_pty_bytes(pane_id, 0, b"\x1b[?2026h", &tx);
+        assert_eq!(begin.render_delay, Some(SYNC_HOLD_MAX), "timeout render");
+        let now = Instant::now();
+        let after_begin = sync_transition_seq();
+        assert!(after_begin > since);
+        assert!(pane_terminal.synchronized_frame_held(since, now));
+        assert!(
+            pane_terminal.synchronized_frame_held(after_begin, now),
+            "mid-block holds whatever the count"
+        );
+        assert!(
+            !pane_terminal.synchronized_frame_held(after_begin, now + SYNC_HOLD_MAX),
+            "a stuck block stops holding"
+        );
+
+        let body = pane_terminal.process_pty_bytes(pane_id, 0, b"hello", &tx);
+        assert_eq!(body.render_delay, None, "one timeout render per block");
+        let mid = sync_transition_seq();
+
+        pane_terminal.process_pty_bytes(pane_id, 0, b"\x1b[?2026l", &tx);
+        let now = Instant::now();
+        assert!(
+            pane_terminal.synchronized_frame_held(mid, now),
+            "an end during the build voids the frame"
+        );
+        let after_end = sync_transition_seq();
+        assert!(!pane_terminal.synchronized_frame_held(after_end, now));
+
+        pane_terminal.process_pty_bytes(pane_id, 0, b"plain output", &tx);
+        assert!(
+            !pane_terminal.synchronized_frame_held(after_end, Instant::now()),
+            "plain output is no transition"
+        );
+        pane_terminal.process_pty_bytes(pane_id, 0, b"\x1b[?2026hwhole\x1b[?2026l", &tx);
+        assert!(
+            !pane_terminal.synchronized_frame_held(after_end, Instant::now()),
+            "a block inside one write is atomic"
+        );
     }
 
     #[test]

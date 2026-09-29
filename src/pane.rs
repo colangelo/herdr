@@ -44,11 +44,13 @@ use self::agent_detection::{
 use self::agent_detection::{should_hold_seeded_detection, BasicDetectionSeedInit};
 #[cfg(any(unix, test))]
 pub use self::terminal::InputState;
-use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
+#[cfg(test)]
+pub(crate) use self::terminal::SYNC_HOLD_MAX;
 pub(crate) use self::terminal::{
-    TerminalCompressionStep, TerminalDirtyPatch, TerminalDirtyPatchOutcome, TerminalReadSnapshot,
-    TerminalTextMatch, TerminalTextPoint, TerminalWordMotion,
+    sync_transition_seq, TerminalCompressionStep, TerminalDirtyPatch, TerminalDirtyPatchOutcome,
+    TerminalReadSnapshot, TerminalTextMatch, TerminalTextPoint, TerminalWordMotion,
 };
+use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
 pub use self::{
     state::PaneState,
     terminal::{ScrollMetrics, TerminalCursorState},
@@ -3614,6 +3616,12 @@ impl PaneRuntime {
 
     pub fn synchronized_output_active(&self) -> bool {
         self.terminal.synchronized_output_active()
+    }
+
+    /// Whether a frame built from `since` must not show this pane (fork issue
+    /// 126); see `SYNC_HOLD_MAX` in `src/pane/terminal.rs`.
+    pub fn synchronized_frame_held(&self, since: u64, now: std::time::Instant) -> bool {
+        self.terminal.synchronized_frame_held(since, now)
     }
 
     pub fn visible_text(&self) -> String {

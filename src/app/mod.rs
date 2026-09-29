@@ -1316,6 +1316,19 @@ impl App {
                         sent_window_title = Some(title);
                     }
                 }
+                if crate::ui::synchronized_output_holds_frame(
+                    &self.state,
+                    &self.terminal_runtimes,
+                    crate::pane::sync_transition_seq(),
+                    now,
+                ) {
+                    // Fork issue 126: keep the last complete frame while a shown
+                    // pane is mid synchronized update; its end or its timeout
+                    // asks for the next render.
+                    crate::render_prof::event("render.synchronized_output_held");
+                    needs_render = false;
+                    continue;
+                }
                 let _sync_output = SyncOutputGuard::begin()?;
                 let kitty_graphics_enabled = self.state.kitty_graphics_enabled;
                 if self.full_redraw_pending {

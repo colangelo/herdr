@@ -561,10 +561,20 @@ mod render_scale_benchmark {
             black_box(render_virtual(&mut app, AREA, true));
         }
 
+        // A full server frame also checks its shown panes for an open
+        // synchronized update (fork issue 126), so the profile pays it too.
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
         let mut samples = Vec::with_capacity(SAMPLE_COUNT);
         for _ in 0..SAMPLE_COUNT {
             let started = Instant::now();
+            let since = crate::pane::sync_transition_seq();
             black_box(render_virtual(&mut app, AREA, true));
+            black_box(crate::ui::synchronized_output_holds_frame(
+                &app,
+                &terminal_runtimes,
+                since,
+                Instant::now(),
+            ));
             samples.push(started.elapsed().as_micros());
         }
         samples.sort_unstable();

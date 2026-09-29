@@ -4313,6 +4313,7 @@ impl HeadlessServer {
 
     fn render_retained_pty_update_and_stream(&mut self) -> bool {
         crate::render_prof::event("retained.attempt");
+        let sync_since = crate::pane::sync_transition_seq();
         let retained_started = crate::render_prof::timer();
         macro_rules! retained_fallback {
             ($reason:literal) => {{
@@ -4414,6 +4415,16 @@ impl HeadlessServer {
                     touched = true;
                 }
             }
+        }
+
+        if crate::ui::synchronized_output_holds_frame(
+            &self.app.state,
+            &self.app.terminal_runtimes,
+            sync_since,
+            Instant::now(),
+        ) {
+            // Fork issue 126: the full render holds the frame.
+            retained_fallback!("synchronized_output");
         }
 
         let previous_cursor = frame.cursor.clone();
@@ -4525,6 +4536,27 @@ impl HeadlessServer {
         }
     }
 
+    /// Whether the frame just built for `client_id` shows a pane mid
+    /// synchronized update, or one that began or ended one since `since`.
+    fn synchronized_output_holds_client_frame(&self, client_id: u64, since: u64) -> bool {
+        let now = Instant::now();
+        match self.clients.get(&client_id).map(|client| &client.mode) {
+            Some(ClientConnectionMode::App) => crate::ui::synchronized_output_holds_frame(
+                &self.app.state,
+                &self.app.terminal_runtimes,
+                since,
+                now,
+            ),
+            Some(
+                ClientConnectionMode::TerminalAttach { terminal_id }
+                | ClientConnectionMode::TerminalObserve { terminal_id },
+            ) => self
+                .runtime_for_terminal_id_string(terminal_id)
+                .is_some_and(|runtime| runtime.synchronized_frame_held(since, now)),
+            None => false,
+        }
+    }
+
     fn render_and_stream(&mut self) {
         let full_started = crate::render_prof::timer();
         let render_targets = render_targets(&self.clients, self.foreground_client_id);
@@ -4556,6 +4588,7 @@ impl HeadlessServer {
         for (client_id, (cols, rows), cell_size, is_foreground, mode) in render_targets {
             let area = Rect::new(0, 0, cols, rows);
             let is_app_client = matches!(mode, ClientConnectionMode::App);
+            let sync_since = crate::pane::sync_transition_seq();
             let mut frame = match mode {
                 ClientConnectionMode::App => {
                     let render_started = crate::render_prof::timer();
@@ -4644,6 +4677,17 @@ impl HeadlessServer {
                     frame
                 }
             };
+
+            if self.synchronized_output_holds_client_frame(client_id, sync_since) {
+                // Fork issue 126: the client keeps its last complete frame and
+                // owes a full one; the block's end or its timeout renders again.
+                if let Some(client) = self.clients.get_mut(&client_id) {
+                    client.defer_full_render();
+                }
+                deferred_frame = true;
+                crate::render_prof::event("full_render.synchronized_output_held");
+                continue;
+            }
 
             let Some(client) = self.clients.get_mut(&client_id) else {
                 continue;
@@ -10240,6 +10284,126 @@ next_tab = ""
         );
         assert!(patched.cells.iter().any(|cell| cell.symbol == "Z"));
         assert_eq!((patched.width, patched.height), (80, 24));
+    }
+
+    // Fork issue 126: a client never sees a pane mid synchronized update.
+    fn retained_test_runtime(
+        server: &HeadlessServer,
+        pane_id: crate::layout::PaneId,
+    ) -> &crate::terminal::TerminalRuntime {
+        server
+            .app
+            .state
+            .runtime_for_pane_in_workspace(&server.app.terminal_runtimes, 0, pane_id)
+            .expect("runtime")
+    }
+
+    #[tokio::test]
+    async fn full_render_holds_a_mid_block_frame_and_sends_it_when_the_block_ends() {
+        let (mut server, client_rx, pane_id) = retained_test_server(b"aaaa");
+        server.render_and_stream();
+        client_rx
+            .recv_timeout(Duration::from_millis(100))
+            .expect("initial frame");
+
+        retained_test_runtime(&server, pane_id).test_process_pty_bytes(b"\x1b[?2026h\rZZ");
+        server.render_and_stream();
+        assert!(
+            client_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "no frame while the pane is mid-block"
+        );
+        assert_eq!(
+            server.clients.get(&1).unwrap().deferred_render(),
+            DeferredRender::Full,
+            "the client owes a full frame"
+        );
+        assert!(
+            !server.render_retained_pty_update_and_stream(),
+            "no patch over a held frame"
+        );
+
+        retained_test_runtime(&server, pane_id).test_process_pty_bytes(b"ZZ\x1b[?2026l");
+        server.render_and_stream();
+        let complete = read_server_frame(
+            client_rx
+                .recv_timeout(Duration::from_millis(100))
+                .expect("frame once the block ends"),
+        );
+        assert!(frame_text(&complete).contains("ZZZZ"));
+        assert_eq!(
+            server.clients.get(&1).unwrap().deferred_render(),
+            DeferredRender::None
+        );
+    }
+
+    #[tokio::test]
+    async fn retained_pty_update_falls_back_for_a_mid_block_pane() {
+        let (mut server, client_rx, pane_id) = retained_test_server(b"aaaa");
+        server.render_and_stream();
+        client_rx
+            .recv_timeout(Duration::from_millis(100))
+            .expect("initial frame");
+
+        retained_test_runtime(&server, pane_id).test_process_pty_bytes(b"\x1b[?2026h\rZ");
+
+        assert!(!server.render_retained_pty_update_and_stream());
+        assert!(client_rx.recv_timeout(Duration::from_millis(50)).is_err());
+    }
+
+    #[tokio::test]
+    async fn synchronized_output_hold_covers_shown_panes_only_and_times_out() {
+        let (mut server, _client_rx, pane_id) = retained_test_server(b"aaaa");
+        let mut hidden = crate::workspace::Workspace::test_new("hidden");
+        let hidden_pane = hidden.focused_pane_id().expect("focused pane");
+        hidden.insert_test_runtime(
+            hidden_pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 24, b"bbbb"),
+        );
+        server.app.state.workspaces.push(hidden);
+        server.render_and_stream();
+        let held = |server: &HeadlessServer, since, now| {
+            crate::ui::synchronized_output_holds_frame(
+                &server.app.state,
+                &server.app.terminal_runtimes,
+                since,
+                now,
+            )
+        };
+
+        let since = crate::pane::sync_transition_seq();
+        server.app.state.workspaces[1].test_runtimes[&hidden_pane]
+            .test_process_pty_bytes(b"\x1b[?2026h");
+        assert!(
+            !held(&server, crate::pane::sync_transition_seq(), Instant::now()),
+            "a hidden workspace's block never holds the screen"
+        );
+        assert!(!held(&server, since, Instant::now()));
+
+        retained_test_runtime(&server, pane_id).test_process_pty_bytes(b"\x1b[?2026h");
+        let now = Instant::now();
+        let after_begin = crate::pane::sync_transition_seq();
+        assert!(held(&server, after_begin, now));
+        assert!(
+            !held(&server, after_begin, now + crate::pane::SYNC_HOLD_MAX),
+            "a stuck block stops holding"
+        );
+
+        let (_, popup_terminal) = server.app.install_test_popup_runtime(
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(40, 12, b"popup"),
+        );
+        retained_test_runtime(&server, pane_id).test_process_pty_bytes(b"\x1b[?2026l");
+        let after_end = crate::pane::sync_transition_seq();
+        assert!(!held(&server, after_end, Instant::now()));
+        server
+            .app
+            .terminal_runtimes
+            .get(&popup_terminal)
+            .unwrap()
+            .test_process_pty_bytes(b"\x1b[?2026h");
+        assert!(
+            held(&server, crate::pane::sync_transition_seq(), Instant::now()),
+            "the popup counts"
+        );
     }
 
     #[tokio::test]
