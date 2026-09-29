@@ -346,23 +346,44 @@ fn pane_respawn_replaces_the_process_and_keeps_the_pane_id() {
     });
     assert!(process_exists(pid), "child process was not running");
 
-    // A live child prompts first, and the pending confirmation is the answer:
-    // the repeat consumes it and proceeds. Same token pattern as pane close.
-    let asked = run_cli(&socket_path, &["pane", "respawn", &pane_id]);
-    assert_eq!(asked.status.code(), Some(1));
-    let asked_json: serde_json::Value = serde_json::from_slice(&asked.stderr).unwrap();
+    // A scripted respawn of a busy pane is refused and names what runs; a
+    // repeat is refused the same way. Only --force replaces the process, and
+    // its answer names the process it stopped.
+    for attempt in ["first", "repeat"] {
+        let asked = run_cli(&socket_path, &["pane", "respawn", &pane_id]);
+        assert_eq!(asked.status.code(), Some(1), "{attempt} attempt");
+        let asked_json: serde_json::Value = serde_json::from_slice(&asked.stderr).unwrap();
+        assert_eq!(
+            asked_json["error"]["code"], "confirmation_required",
+            "{attempt} attempt: {asked_json}"
+        );
+        assert!(
+            asked_json["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("--force")),
+            "{attempt} attempt names the way out: {asked_json}"
+        );
+        assert!(
+            process_exists(pid),
+            "nothing is replaced without --force ({attempt} attempt)"
+        );
+    }
+
+    let respawned = run_cli(&socket_path, &["pane", "respawn", &pane_id, "--force"]);
+    assert!(
+        respawned.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&respawned.stderr)
+    );
+    let respawned_json: serde_json::Value = serde_json::from_slice(&respawned.stdout).unwrap();
     assert_eq!(
-        asked_json["error"]["code"], "confirmation_required",
-        "response: {asked_json}"
+        respawned_json["result"]["type"], "respawned",
+        "response: {respawned_json}"
     );
     assert!(
-        process_exists(pid),
-        "nothing is replaced before the confirmation"
+        respawned_json["result"]["stopped_process"]["pid"].is_u64(),
+        "the answer names the stopped process: {respawned_json}"
     );
-
-    let respawned = run_cli(&socket_path, &["pane", "respawn", &pane_id]);
-    let respawned_json: serde_json::Value = serde_json::from_slice(&respawned.stdout).unwrap();
-    assert_eq!(respawned_json["result"]["type"], "ok");
     assert!(
         wait_for_pid_exit(pid, Duration::from_secs(5)),
         "process {pid} survived the respawn"
