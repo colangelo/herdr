@@ -2387,6 +2387,52 @@ impl AppState {
             .position(|workspace| workspace.id == workspace_id)
     }
 
+    /// A close confirmation names a pane or workspace. Once that target is gone
+    /// the modal has nothing left to ask, so it leaves instead of falling back
+    /// to the generic "Close workspace?" (fork issue 120).
+    pub(crate) fn drop_stale_close_confirmation(&mut self) {
+        // Cheap on every view: nothing to check unless the modal is up.
+        if self.mode != Mode::ConfirmClose {
+            return;
+        }
+        let pane_exists = |state: &Self, pane_id: PaneId| {
+            state
+                .workspaces
+                .iter()
+                .any(|ws| ws.find_tab_index_for_pane(pane_id).is_some())
+        };
+        if self
+            .confirm_close_pane
+            .is_some_and(|pane_id| !pane_exists(self, pane_id))
+        {
+            self.confirm_close_pane = None;
+        }
+        if self
+            .confirm_respawn_pane
+            .is_some_and(|pane_id| !pane_exists(self, pane_id))
+        {
+            self.confirm_respawn_pane = None;
+        }
+        if self
+            .confirm_close_workspace_id
+            .as_ref()
+            .is_some_and(|id| !self.workspaces.iter().any(|ws| &ws.id == id))
+        {
+            self.confirm_close_workspace_id = None;
+        }
+        if self.mode == Mode::ConfirmClose
+            && self.confirm_close_pane.is_none()
+            && self.confirm_respawn_pane.is_none()
+            && self.confirm_close_workspace_id.is_none()
+        {
+            self.mode = if self.active.is_some() {
+                Mode::Terminal
+            } else {
+                Mode::Navigate
+            };
+        }
+    }
+
     /// Whether closing this pane would discard unfinished work.
     pub(crate) fn pane_has_outstanding_todos(&self, pane_id: PaneId) -> bool {
         self.pane_terminal(pane_id)

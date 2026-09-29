@@ -327,6 +327,9 @@ fn compute_view_internal(
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) {
+    // A pane can vanish under its close modal (its process exits); never draw
+    // a confirmation that has nothing left to ask about.
+    app.drop_stale_close_confirmation();
     if is_mobile_width(area, app.mobile_width_threshold) {
         compute_mobile_view(app, terminal_runtimes, area, resize_panes, cell_size);
         return;

@@ -5339,17 +5339,202 @@ mod tests {
         );
     }
 
-    fn close_pane_via_api(app: &mut App, pane_id: crate::layout::PaneId) -> serde_json::Value {
+    /// A close the TUI sends (a keybinding or the pane's close button).
+    fn close_pane_via_tui(app: &mut App, pane_id: crate::layout::PaneId) -> serde_json::Value {
+        let public_pane_id = app
+            .public_pane_id(0, pane_id)
+            .expect("pane should have a public id");
+        let raw = app.runtime_pane_close("tui.pane.close", public_pane_id);
+        serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    /// A close sent over the socket by a script or another client.
+    fn close_pane_via_api(
+        app: &mut App,
+        pane_id: crate::layout::PaneId,
+        force: bool,
+    ) -> serde_json::Value {
         let public_pane_id = app
             .public_pane_id(0, pane_id)
             .expect("pane should have a public id");
         let raw = app.handle_api_request(crate::api::schema::Request {
             id: "test".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneCloseParams {
                 pane_id: public_pane_id,
+                force,
             }),
         });
         serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    fn one_unfinished_todo() -> App {
+        let mut app = app_with_pane_todos(&[(
+            "unfinished",
+            false,
+            crate::terminal::todo::TodoPriority::Normal,
+        )]);
+        app.state.close_pane_todos();
+        app.state.mode = Mode::Terminal;
+        app
+    }
+
+    #[test]
+    fn an_api_close_of_a_pane_with_todos_leaves_the_screen_alone() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        for _ in 0..2 {
+            let response = close_pane_via_api(&mut app, pane_id, false);
+            assert_eq!(response["error"]["code"], "confirmation_required");
+            let message = response["error"]["message"].as_str().unwrap();
+            assert!(message.contains("unfinished"), "{message}");
+            assert!(message.contains("--force"), "{message}");
+            assert_eq!(app.state.mode, Mode::Terminal, "no modal on any client");
+            assert_eq!(app.state.confirm_close_pane, None);
+            assert_eq!(app.state.confirm_close_workspace_id, None);
+        }
+        assert!(app.find_pane(pane_id).is_some(), "nothing is closed");
+    }
+
+    #[test]
+    fn a_forced_api_close_reports_the_todos_it_dropped() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
+
+        let response = close_pane_via_api(&mut app, pane_id, true);
+
+        assert_eq!(response["result"]["type"], "closed", "{response}");
+        let closed = &response["result"]["closed_todos"][0];
+        assert_eq!(closed["pane_id"], public_pane_id);
+        assert_eq!(closed["todos"][0]["text"], "unfinished");
+        assert!(app.state.workspaces.is_empty());
+        assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn an_api_close_does_not_answer_a_confirmation_on_screen() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        close_pane_via_tui(&mut app, pane_id);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+
+        let response = close_pane_via_api(&mut app, pane_id, false);
+
+        assert_eq!(response["error"]["code"], "confirmation_required");
+        assert_eq!(
+            app.state.mode,
+            Mode::ConfirmClose,
+            "the modal is still the user's"
+        );
+        assert_eq!(app.state.confirm_close_pane, Some(pane_id));
+    }
+
+    #[test]
+    fn a_forced_api_close_takes_down_the_modal_that_named_the_pane() {
+        let mut app = app_with_test_workspaces(&["todos"]);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .add_todo(
+                "unfinished",
+                crate::terminal::todo::TodoPriority::Normal,
+                None,
+                100,
+            )
+            .unwrap();
+        // A second pane, so the workspace outlives the close.
+        app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.mode = Mode::Terminal;
+        close_pane_via_tui(&mut app, pane_id);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+
+        let response = close_pane_via_api(&mut app, pane_id, true);
+
+        assert_eq!(response["result"]["type"], "closed", "{response}");
+        assert_eq!(app.state.confirm_close_pane, None);
+        assert_ne!(
+            app.state.mode,
+            Mode::ConfirmClose,
+            "no orphan \"Close workspace?\" is left behind"
+        );
+    }
+
+    fn api(app: &mut App, method: crate::api::schema::Method) -> serde_json::Value {
+        let raw = app.handle_api_request(crate::api::schema::Request {
+            id: "test".into(),
+            method,
+        });
+        serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    #[test]
+    fn api_tab_and_workspace_closes_refuse_open_todos_unless_forced() {
+        let mut app = one_unfinished_todo();
+        let workspace_id = app.public_workspace_id(0);
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+        let tab_close = |force| {
+            crate::api::schema::Method::TabClose(crate::api::schema::TabCloseParams {
+                tab_id: tab_id.clone(),
+                force,
+            })
+        };
+        let workspace_close = |force| {
+            crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
+                workspace_id: workspace_id.clone(),
+                close_group: false,
+                force,
+            })
+        };
+
+        for method in [tab_close(false), workspace_close(false)] {
+            let response = api(&mut app, method);
+            assert_eq!(response["error"]["code"], "confirmation_required");
+            assert!(response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("unfinished"));
+            assert_eq!(app.state.mode, Mode::Terminal);
+            assert_eq!(app.state.workspaces.len(), 1);
+        }
+
+        let response = api(&mut app, workspace_close(true));
+        assert_eq!(response["result"]["type"], "closed", "{response}");
+        assert_eq!(
+            response["result"]["closed_todos"][0]["todos"][0]["text"],
+            "unfinished"
+        );
+        assert!(app.state.workspaces.is_empty());
+    }
+
+    #[test]
+    fn a_tui_tab_close_still_closes_a_tab_with_todos() {
+        let mut app = one_unfinished_todo();
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+
+        let response: serde_json::Value =
+            serde_json::from_str(&app.runtime_tab_close("tui.tab.close", tab_id)).unwrap();
+
+        assert!(response["result"].is_object(), "{response}");
+        assert!(app.state.workspaces.is_empty());
+    }
+
+    #[test]
+    fn a_close_confirmation_with_no_target_leaves_the_mode() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.state.active = Some(0);
+        app.state.mode = Mode::ConfirmClose;
+
+        app.state.drop_stale_close_confirmation();
+
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     /// Spec: "a pane with at least one not-done todo is closed -> a
@@ -5364,7 +5549,7 @@ mod tests {
         app.state.close_pane_todos();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
 
-        let response = close_pane_via_api(&mut app, pane_id);
+        let response = close_pane_via_tui(&mut app, pane_id);
 
         assert_eq!(response["error"]["code"], "confirmation_required");
         assert_eq!(app.state.mode, Mode::ConfirmClose);
@@ -5384,7 +5569,7 @@ mod tests {
         )]);
         app.state.close_pane_todos();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
-        close_pane_via_api(&mut app, pane_id);
+        close_pane_via_tui(&mut app, pane_id);
 
         app.confirm_close_accept_via_api();
 
@@ -5522,7 +5707,7 @@ mod tests {
         )]);
         app.state.close_pane_todos();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
-        close_pane_via_api(&mut app, pane_id);
+        close_pane_via_tui(&mut app, pane_id);
 
         confirm_close_cancel(&mut app.state);
 
@@ -5542,7 +5727,7 @@ mod tests {
         app.state.close_pane_todos();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
 
-        let response = close_pane_via_api(&mut app, pane_id);
+        let response = close_pane_via_api(&mut app, pane_id, false);
 
         assert!(response["result"].is_object(), "no prompt: {response:?}");
         assert!(app.state.confirm_close_pane.is_none());

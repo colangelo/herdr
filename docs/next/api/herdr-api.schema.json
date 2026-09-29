@@ -2580,6 +2580,21 @@
           ],
           "type": "object"
         },
+        "PaneCloseParams": {
+          "description": "`pane.close`. Without `force`, a close that would drop open todos or a\nworktree group is refused with `confirmation_required`; with it, the pane\ncloses and the result lists the todos it dropped.",
+          "properties": {
+            "force": {
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "PaneCurrentParams": {
           "properties": {
             "caller_pane_id": {
@@ -4270,6 +4285,21 @@
             }
           ]
         },
+        "TabCloseParams": {
+          "description": "`tab.close`, with the same `force` as `pane.close`.",
+          "properties": {
+            "force": {
+              "type": "boolean"
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tab_id"
+          ],
+          "type": "object"
+        },
         "TabCreateParams": {
           "properties": {
             "cwd": {
@@ -4502,6 +4532,10 @@
         "WorkspaceCloseParams": {
           "properties": {
             "close_group": {
+              "type": "boolean"
+            },
+            "force": {
+              "description": "Close even when panes have open todos; the result lists them.",
               "type": "boolean"
             },
             "workspace_id": {
@@ -5394,7 +5428,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/TabTarget"
+              "$ref": "#/schemas/request/$defs/TabCloseParams"
             }
           },
           "required": [
@@ -6146,7 +6180,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/PaneTarget"
+              "$ref": "#/schemas/request/$defs/PaneCloseParams"
             }
           },
           "required": [
@@ -6904,6 +6938,25 @@
             "no_foreground_client"
           ],
           "type": "string"
+        },
+        "ClosedPaneTodos": {
+          "description": "The open todos a forced close dropped with their pane.",
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            },
+            "todos": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/TodoInfo"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "pane_id",
+            "todos"
+          ],
+          "type": "object"
         },
         "ConfigReloadStatus": {
           "enum": [
@@ -10283,6 +10336,26 @@
               "required": [
                 "type",
                 "removed"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "A forced close: the open todos of every pane it closed.",
+              "properties": {
+                "closed_todos": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/ClosedPaneTodos"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "closed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "closed_todos"
               ],
               "type": "object"
             },

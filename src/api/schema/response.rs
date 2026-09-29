@@ -236,6 +236,10 @@ pub enum ResponseResult {
     TodoCleared {
         removed: u32,
     },
+    /// A forced close: the open todos of every pane it closed.
+    Closed {
+        closed_todos: Vec<super::todos::ClosedPaneTodos>,
+    },
     ClientWindowTitle {
         changed: bool,
         reason: ClientWindowTitleReason,

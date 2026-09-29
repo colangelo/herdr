@@ -1,18 +1,21 @@
 use crate::api::schema::{
     EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, LayoutSetSplitRatioParams, Method,
-    PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PaneRenameParams,
-    PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, TabCreateParams,
-    TabMoveParams, TabRenameParams, TabTarget, TodoAddParams, TodoClearParams, TodoRemoveParams,
-    TodoUpdateParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams,
-    WorkspaceMoveParams, WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams,
-    WorktreeOpenParams, WorktreeRemoveParams,
+    PaneCloseParams, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams,
+    PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
+    PaneZoomParams, TabCloseParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
+    TodoAddParams, TodoClearParams, TodoRemoveParams, TodoUpdateParams, WorkspaceCloseParams,
+    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
+    WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
 };
 
 use super::App;
 
 impl App {
     pub(crate) fn dispatch_runtime_mutation(&mut self, id: &'static str, method: Method) -> String {
-        self.dispatch_api_request(id, method)
+        let outer = std::mem::replace(&mut self.tui_request_in_flight, true);
+        let response = self.dispatch_api_request(id, method);
+        self.tui_request_in_flight = outer;
+        response
     }
 
     pub(crate) fn dispatch_deferred_runtime_mutation(
@@ -20,7 +23,10 @@ impl App {
         id: &'static str,
         method: Method,
     ) -> Option<String> {
-        self.dispatch_deferred_api_request(id, method)
+        let outer = std::mem::replace(&mut self.tui_request_in_flight, true);
+        let response = self.dispatch_deferred_api_request(id, method);
+        self.tui_request_in_flight = outer;
+        response
     }
 
     pub(crate) fn runtime_workspace_focus(
@@ -73,6 +79,7 @@ impl App {
             Method::WorkspaceClose(WorkspaceCloseParams {
                 workspace_id,
                 close_group: true,
+                force: false,
             }),
         )
     }
@@ -102,7 +109,13 @@ impl App {
     }
 
     pub(crate) fn runtime_tab_close(&mut self, id: &'static str, tab_id: String) -> String {
-        self.dispatch_runtime_mutation(id, Method::TabClose(TabTarget { tab_id }))
+        self.dispatch_runtime_mutation(
+            id,
+            Method::TabClose(TabCloseParams {
+                tab_id,
+                force: false,
+            }),
+        )
     }
 
     pub(crate) fn runtime_server_reload_config(&mut self, id: &'static str) -> String {
@@ -114,7 +127,13 @@ impl App {
     }
 
     pub(crate) fn runtime_pane_close(&mut self, id: &'static str, pane_id: String) -> String {
-        self.dispatch_runtime_mutation(id, Method::PaneClose(PaneTarget { pane_id }))
+        self.dispatch_runtime_mutation(
+            id,
+            Method::PaneClose(PaneCloseParams {
+                pane_id,
+                force: false,
+            }),
+        )
     }
 
     pub(crate) fn runtime_pane_respawn(&mut self, id: &'static str, pane_id: String) -> String {

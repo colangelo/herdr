@@ -176,6 +176,10 @@ pub struct App {
     /// is already running its replacement. Each entry absorbs exactly one
     /// event, because a runtime reports its death exactly once.
     pub(crate) respawn_replaced_runtimes: std::collections::HashSet<crate::layout::PaneId>,
+    /// True while the TUI's own request runs (`dispatch_runtime_mutation`).
+    /// Only those may open a confirmation modal; a request from a script or
+    /// another client is answered instead (fork issue 120).
+    pub(crate) tui_request_in_flight: bool,
     pub(crate) local_terminal_notifications: bool,
     /// Whether this process applies `AppEvent::PrefixInputSource` to the host input source.
     /// The headless server sets this to false: the switch belongs to the foreground client,
@@ -1020,6 +1024,7 @@ impl App {
             full_redraw_pending: false,
             overlay_panes: HashMap::new(),
             respawn_replaced_runtimes: std::collections::HashSet::new(),
+            tui_request_in_flight: false,
             local_terminal_notifications: true,
             local_input_source_switch: true,
             config_reloaded_from_disk: false,
@@ -5808,8 +5813,9 @@ mod tests {
 
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req_pane_close".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneCloseParams {
                 pane_id: target_pane_id,
+                force: false,
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -5834,8 +5840,9 @@ mod tests {
 
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req_pane_close_last".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneCloseParams {
                 pane_id: target_pane_id,
+                force: false,
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -5845,7 +5852,7 @@ mod tests {
     }
 
     #[test]
-    fn pane_close_request_requires_confirmation_before_closing_parent_worktree_group() {
+    fn pane_close_request_is_refused_without_a_modal_before_closing_parent_worktree_group() {
         let mut app = test_app();
         let mut parent = Workspace::test_new("api-pane-close-parent");
         parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
@@ -5873,15 +5880,17 @@ mod tests {
 
         let response = app.handle_api_request(crate::api::schema::Request {
             id: "req_pane_close_parent_group".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneCloseParams {
                 pane_id: target_pane_id,
+                force: false,
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
 
         assert_eq!(response["error"]["code"], "confirmation_required");
-        assert_eq!(app.state.mode, Mode::ConfirmClose);
-        assert_eq!(app.state.selected, 0);
+        // An API close is answered, not asked on screen (fork issue 120).
+        assert_ne!(app.state.mode, Mode::ConfirmClose);
+        assert_eq!(app.state.selected, 1);
         assert_eq!(app.state.workspaces.len(), 2);
     }
 

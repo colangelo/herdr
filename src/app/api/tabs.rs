@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, ResponseResult, TabCreateParams, TabListParams,
-    TabMoveParams, TabRenameParams, TabTarget,
+    EventData, EventEnvelope, EventKind, ResponseResult, TabCloseParams, TabCreateParams,
+    TabListParams, TabMoveParams, TabRenameParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -224,7 +224,10 @@ impl App {
         encode_success(id, ResponseResult::TabList { tabs })
     }
 
-    pub(super) fn handle_tab_close(&mut self, id: String, target: TabTarget) -> String {
+    /// Same rule as `close_pane`: only the TUI's own close may open a modal
+    /// (and it never asked about todos); any other caller is answered, and
+    /// open todos need `force`.
+    pub(super) fn handle_tab_close(&mut self, id: String, target: TabCloseParams) -> String {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&target.tab_id) else {
             return tab_not_found(id, &target.tab_id);
         };
@@ -243,8 +246,25 @@ impl App {
             .map(|tab| tab.layout.pane_ids())
             .unwrap_or_default();
 
+        if !self.tui_request_in_flight && !target.force {
+            if closes_workspace && self.would_ask_before_closing_worktree_group(ws_idx) {
+                return encode_error(
+                    id,
+                    "confirmation_required",
+                    "closing this tab would close a worktree group; pass --force (force=true) to close it anyway",
+                );
+            }
+            let open = self.open_todos_in(pane_ids.iter().map(|pane_id| (ws_idx, *pane_id)));
+            if !open.is_empty() {
+                return super::panes::open_todos_refusal(id, "this tab", &open);
+            }
+        }
+        let dropped = self.open_todos_in(pane_ids.iter().map(|pane_id| (ws_idx, *pane_id)));
+
         if closes_workspace {
-            if self.state.confirm_implicit_worktree_group_close(ws_idx) {
+            if self.tui_request_in_flight
+                && self.state.confirm_implicit_worktree_group_close(ws_idx)
+            {
                 return encode_error(
                     id,
                     "confirmation_required",
@@ -270,7 +290,8 @@ impl App {
                     workspace: Some(workspace),
                 },
             });
-            return encode_success(id, ResponseResult::Ok {});
+            self.state.drop_stale_close_confirmation();
+            return super::panes::closed_response(id, target.force, dropped);
         }
 
         let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
@@ -295,7 +316,8 @@ impl App {
             },
         });
 
-        encode_success(id, ResponseResult::Ok {})
+        self.state.drop_stale_close_confirmation();
+        super::panes::closed_response(id, target.force, dropped)
     }
 
     fn tab_list_info(&self, ws_idx: usize) -> Vec<crate::api::schema::TabInfo> {
@@ -346,8 +368,9 @@ mod tests {
 
         let response = app.handle_tab_close(
             "req".into(),
-            TabTarget {
+            TabCloseParams {
                 tab_id: tab_id.clone(),
+                force: false,
             },
         );
 

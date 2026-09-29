@@ -1,12 +1,12 @@
 use bytes::Bytes;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, PaneClearAgentAuthorityParams, PaneCurrentParams,
-    PaneDirection, PaneEdgesParams, PaneEdgesResult, PaneFocusDirectionParams,
-    PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo, PaneInputSetParams,
-    PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot, PaneLayoutSplit,
-    PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason, PaneMoveResult,
-    PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
+    ClosedPaneTodos, EventData, EventEnvelope, EventKind, PaneClearAgentAuthorityParams,
+    PaneCloseParams, PaneCurrentParams, PaneDirection, PaneEdgesParams, PaneEdgesResult,
+    PaneFocusDirectionParams, PaneFocusDirectionReason, PaneFocusDirectionResult, PaneInfo,
+    PaneInputSetParams, PaneLayoutPane, PaneLayoutParams, PaneLayoutRect, PaneLayoutSnapshot,
+    PaneLayoutSplit, PaneListParams, PaneMoveDestination, PaneMoveParams, PaneMoveReason,
+    PaneMoveResult, PaneNeighborParams, PaneNeighborResult, PaneProcessInfo, PaneProcessInfoParams,
     PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
@@ -1690,47 +1690,70 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
-    pub(super) fn handle_pane_close(&mut self, id: String, target: PaneTarget) -> String {
-        match self.close_pane(id.clone(), &target) {
-            Ok(()) => encode_success(id, ResponseResult::Ok {}),
+    pub(super) fn handle_pane_close(&mut self, id: String, params: PaneCloseParams) -> String {
+        match self.close_pane(id.clone(), &params.pane_id, params.force) {
+            Ok(dropped) => closed_response(id, params.force, dropped),
             Err(response) => response,
         }
     }
 
-    /// Close a pane; `Err` carries the encoded error response.
-    pub(super) fn close_pane(&mut self, id: String, target: &PaneTarget) -> Result<(), String> {
-        let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
-            return Err(pane_not_found(id, &target.pane_id));
+    /// Close a pane; `Ok` carries the open todos it dropped, `Err` the encoded
+    /// error response.
+    ///
+    /// The TUI's own close asks with a modal and treats its retry as the
+    /// answer. Any other caller is answered instead: `confirmation_required`
+    /// without `force`, and nothing changes on any client's screen.
+    pub(super) fn close_pane(
+        &mut self,
+        id: String,
+        pane_ref: &str,
+        force: bool,
+    ) -> Result<Vec<ClosedPaneTodos>, String> {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(pane_ref) else {
+            return Err(pane_not_found(id, pane_ref));
         };
         let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
-            return Err(pane_not_found(id, &target.pane_id));
+            return Err(pane_not_found(id, pane_ref));
         };
         let workspace_id = self.public_workspace_id(ws_idx);
         let layout_update_target = self.layout_update_target_after_pane_removal(ws_idx, pane_id);
-        if self.state.close_pane_would_close_workspace(ws_idx, pane_id)
-            && self.state.confirm_implicit_worktree_group_close(ws_idx)
-        {
-            return Err(encode_error(
-                id,
-                "confirmation_required",
-                "closing this pane would close a worktree group",
-            ));
+        let closes_workspace = self.state.close_pane_would_close_workspace(ws_idx, pane_id);
+        if self.tui_request_in_flight {
+            if closes_workspace && self.state.confirm_implicit_worktree_group_close(ws_idx) {
+                return Err(encode_error(
+                    id,
+                    "confirmation_required",
+                    "closing this pane would close a worktree group",
+                ));
+            }
+            // After the worktree-group check so the bigger warning still wins
+            // when both apply.
+            if self.state.confirm_pane_close_with_todos(ws_idx, pane_id) {
+                return Err(encode_error(
+                    id,
+                    "confirmation_required",
+                    "this pane still has outstanding todos",
+                ));
+            }
+        } else if !force {
+            if closes_workspace && self.would_ask_before_closing_worktree_group(ws_idx) {
+                return Err(encode_error(
+                    id,
+                    "confirmation_required",
+                    "closing this pane would close a worktree group; pass --force (force=true) to close it anyway",
+                ));
+            }
+            let open = self.open_todos_in([(ws_idx, pane_id)]);
+            if !open.is_empty() {
+                return Err(open_todos_refusal(id, "this pane", &open));
+            }
         }
-        // After the worktree-group check so the bigger warning still wins when
-        // both apply. Gating here rather than in the TUI means an external
-        // pane.close over the socket gets the same answer the TUI does.
-        if self.state.confirm_pane_close_with_todos(ws_idx, pane_id) {
-            return Err(encode_error(
-                id,
-                "confirmation_required",
-                "this pane still has outstanding todos",
-            ));
-        }
+        let dropped = self.open_todos_in([(ws_idx, pane_id)]);
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
         let should_close_workspace = {
             let Some(ws) = self.state.workspaces.get_mut(ws_idx) else {
-                return Err(pane_not_found(id, &target.pane_id));
+                return Err(pane_not_found(id, pane_ref));
             };
             ws.close_pane(pane_id)
         };
@@ -1770,8 +1793,41 @@ impl App {
                 self.emit_layout_updated_event(ws_idx, tab_idx);
             }
         }
+        self.state.drop_stale_close_confirmation();
 
-        Ok(())
+        Ok(dropped)
+    }
+
+    /// The same question the TUI asks before an implicit worktree group close.
+    pub(super) fn would_ask_before_closing_worktree_group(&self, ws_idx: usize) -> bool {
+        self.state.confirm_close
+            && self
+                .state
+                .workspace_close_would_close_worktree_group(ws_idx)
+    }
+
+    /// The open todos of these panes, as a forced close reports them.
+    pub(super) fn open_todos_in(
+        &self,
+        panes: impl IntoIterator<Item = (usize, PaneId)>,
+    ) -> Vec<ClosedPaneTodos> {
+        panes
+            .into_iter()
+            .filter_map(|(ws_idx, pane_id)| {
+                let terminal = self.state.pane_terminal(pane_id)?;
+                let public_pane_id = self.public_pane_id(ws_idx, pane_id)?;
+                let todos: Vec<_> = terminal
+                    .todos()
+                    .iter()
+                    .filter(|todo| !todo.done)
+                    .map(|todo| self.todo_info(&public_pane_id, todo))
+                    .collect();
+                (!todos.is_empty()).then_some(ClosedPaneTodos {
+                    pane_id: public_pane_id,
+                    todos,
+                })
+            })
+            .collect()
     }
 
     /// Whether the pane still has a live child process. Deliberately the cheap
@@ -2086,6 +2142,41 @@ fn split_path_id(idx: usize, path: &[bool]) -> String {
         .collect::<Vec<_>>()
         .join("");
     format!("split_{idx}_{path}")
+}
+
+/// `confirmation_required` for a close that would drop open todos, naming them.
+pub(super) fn open_todos_refusal(id: String, what: &str, open: &[ClosedPaneTodos]) -> String {
+    let todos = open
+        .iter()
+        .flat_map(|pane| {
+            pane.todos
+                .iter()
+                .map(move |todo| format!("{}: {}", pane.pane_id, todo.text))
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    encode_error(
+        id,
+        "confirmation_required",
+        format!(
+            "{what} still has open todos ({todos}); pass --force (force=true) to close it anyway"
+        ),
+    )
+}
+
+/// A forced close always answers with the todos it dropped, so a script can
+/// keep them; an ordinary close answers `ok`.
+pub(super) fn closed_response(id: String, force: bool, dropped: Vec<ClosedPaneTodos>) -> String {
+    if force {
+        encode_success(
+            id,
+            ResponseResult::Closed {
+                closed_todos: dropped,
+            },
+        )
+    } else {
+        encode_success(id, ResponseResult::Ok {})
+    }
 }
 
 fn invalid_agent(id: String) -> String {
@@ -2566,8 +2657,9 @@ mod tests {
 
         let response = app.handle_pane_close(
             "req".into(),
-            PaneTarget {
+            PaneCloseParams {
                 pane_id: public_pane_id,
+                force: false,
             },
         );
 

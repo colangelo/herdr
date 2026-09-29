@@ -21,6 +21,9 @@ pub struct WorkspaceCloseParams {
     pub workspace_id: String,
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub close_group: bool,
+    /// Close even when panes have open todos; the result lists them.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

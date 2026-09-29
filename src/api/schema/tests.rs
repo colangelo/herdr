@@ -82,6 +82,7 @@ fn workspace_close_group_intent_defaults_false_and_round_trips() {
         method: Method::WorkspaceClose(WorkspaceCloseParams {
             workspace_id: "w1".into(),
             close_group: true,
+            force: false,
         }),
     };
     let json = serde_json::to_value(&explicit).unwrap();

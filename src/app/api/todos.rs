@@ -72,7 +72,7 @@ impl App {
     }
 
     /// A link is alive while its target pane still resolves to a public id.
-    fn todo_info(&self, pane_id: &str, todo: &PaneTodo) -> TodoInfo {
+    pub(super) fn todo_info(&self, pane_id: &str, todo: &PaneTodo) -> TodoInfo {
         let link_pane_id = todo
             .link
             .as_ref()

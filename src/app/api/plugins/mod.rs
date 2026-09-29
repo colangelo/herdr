@@ -488,12 +488,7 @@ impl App {
             return encode_error(id, "plugin_pane_not_found", "plugin pane not found");
         }
         let pane_id = params.pane_id;
-        if let Err(response) = self.close_pane(
-            id.clone(),
-            &crate::api::schema::PaneTarget {
-                pane_id: pane_id.clone(),
-            },
-        ) {
+        if let Err(response) = self.close_pane(id.clone(), &pane_id, false) {
             return response;
         }
         encode_success(id, ResponseResult::PluginPaneClosed { pane_id })

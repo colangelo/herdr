@@ -27,6 +27,13 @@ pub struct TodoInfo {
     pub updated_at_unix: u64,
 }
 
+/// The open todos a forced close dropped with their pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClosedPaneTodos {
+    pub pane_id: String,
+    pub todos: Vec<TodoInfo>,
+}
+
 /// Params for `todo.list`: a `pane_id` scopes the result to one pane, no
 /// `pane_id` returns every pane's todos.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
