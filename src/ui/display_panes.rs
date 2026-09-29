@@ -102,8 +102,41 @@ fn label_text(label: &DisplayPaneLabel, max_width: usize, numbered: bool) -> Str
     truncate_end(&format!("{head}  {size}"), max_width)
 }
 
-fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel, numbered: bool) {
+/// The one look of a pane label, shared by `prefix+i` and the resize labels
+/// (fork issue 122) so they cannot drift: the labels mode's red border (the
+/// focused pane) or muted red (the others, #118), bold text on the panel
+/// background. Not the pane border colour, which is only red while `prefix+i`
+/// is open.
+struct LabelStyle {
+    border: ratatui::style::Color,
+    text: Style,
+    background: ratatui::style::Color,
+}
+
+fn label_style(app: &AppState, focused: bool) -> LabelStyle {
     let p = &app.palette;
+    LabelStyle {
+        border: if focused { p.red } else { p.muted_red() },
+        text: Style::default()
+            .fg(p.text)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD),
+        background: p.panel_bg,
+    }
+}
+
+/// Where a boxed label goes in its pane: centered, `text_width` plus chrome.
+fn label_box(pane: Rect, text_width: u16) -> Rect {
+    let width = text_width + LABEL_CHROME_COLS;
+    Rect::new(
+        pane.x + (pane.width - width) / 2,
+        pane.y + (pane.height - LABEL_ROWS) / 2,
+        width,
+        LABEL_ROWS,
+    )
+}
+
+fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel, numbered: bool) {
     let pane = label.inner_rect.intersection(frame.area());
     if pane.is_empty() {
         return;
@@ -117,22 +150,12 @@ fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel, num
     let text = label_text(label, usize::from(max_text), numbered);
     let text_width = display_width_u16(&text);
 
-    let border = app.pane_border_color(label.focused);
-    let text_style = Style::default()
-        .fg(p.text)
-        .bg(p.panel_bg)
-        .add_modifier(Modifier::BOLD);
-    let line = Line::from(Span::styled(text, text_style));
+    let style = label_style(app, label.focused);
+    let line = Line::from(Span::styled(text, style.text));
 
     if boxed {
-        let width = text_width + LABEL_CHROME_COLS;
-        let area = Rect::new(
-            pane.x + (pane.width - width) / 2,
-            pane.y + (pane.height - LABEL_ROWS) / 2,
-            width,
-            LABEL_ROWS,
-        );
-        if let Some(inner) = render_panel_shell(frame, area, border, p.panel_bg) {
+        let area = label_box(pane, text_width);
+        if let Some(inner) = render_panel_shell(frame, area, style.border, style.background) {
             let text_area = Rect::new(inner.x + 1, inner.y, text_width, 1);
             frame.render_widget(Paragraph::new(line), text_area);
         }
@@ -211,6 +234,8 @@ mod tests {
     use crate::app::state::{AppState, Mode};
     use crate::ui::test_support::{draw_sized, layout_sized, overlay_snapshot_of, rect_rows};
 
+    use super::{display_width_u16, label_box, label_text, LABEL_CHROME_COLS};
+
     /// Wide enough that two side-by-side labels fit uncut; the fixed
     /// snapshot size below covers the placement.
     const WIDTH: u16 = 140;
@@ -260,6 +285,61 @@ mod tests {
                 (inner.y..inner.y + inner.height).contains(&(row as u16)),
                 "{text:?} is drawn inside its own pane"
             );
+        }
+    }
+
+    /// Fork issue 122 (ac, on .116): the resize labels look exactly like the
+    /// `prefix+i` ones — border, text and background, focused and not — and
+    /// differ only by the digit.
+    #[test]
+    fn resize_labels_are_styled_like_the_display_panes_labels() {
+        let mut app = two_pane_app();
+        app.open_display_panes(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+        let labels = app.display_panes_labels();
+        let panes = draw_sized(&app, WIDTH, HEIGHT);
+
+        app.close_overlay(crate::app::state::OverlayKind::DisplayPanes);
+        app.mode = Mode::Resize;
+        layout_sized(&mut app, WIDTH, HEIGHT);
+        let resize = draw_sized(&app, WIDTH, HEIGHT);
+
+        let styled = |buffer: &ratatui::buffer::Buffer, x: u16, y: u16| {
+            let cell = &buffer[(x, y)];
+            (cell.fg, cell.bg, cell.modifier)
+        };
+        assert!(labels.iter().any(|label| label.focused));
+        assert!(labels.iter().any(|label| !label.focused));
+        for label in &labels {
+            let pane = label.inner_rect;
+            let max = usize::from(pane.width - LABEL_CHROME_COLS);
+            let numbered = label_box(pane, display_width_u16(&label_text(label, max, true)));
+            let plain = label_box(pane, display_width_u16(&label_text(label, max, false)));
+            for (name, dx, dy) in [
+                ("top-left corner", 0, 0),
+                ("top border", 1, 0),
+                ("left border", 0, 1),
+                ("bottom-right corner", u16::MAX, 2),
+                ("padding", 1, 1),
+                ("first text cell", 2, 1),
+            ] {
+                let at = |area: Rect| {
+                    let x = if dx == u16::MAX {
+                        area.x + area.width - 1
+                    } else {
+                        area.x + dx
+                    };
+                    (x, area.y + dy)
+                };
+                let (px, py) = at(numbered);
+                let (rx, ry) = at(plain);
+                assert_eq!(
+                    styled(&panes, px, py),
+                    styled(&resize, rx, ry),
+                    "{name} of the {} label",
+                    if label.focused { "focused" } else { "other" }
+                );
+            }
         }
     }
 
