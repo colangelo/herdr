@@ -1035,6 +1035,7 @@ impl App {
                     context: err.to_string(),
                     position: None,
                     target: None,
+                    anchor_pane: None,
                 });
                 self.sync_toast_deadline(previous_toast);
                 finish_custom_command_context(&mut self.state, context, previous_mode);
@@ -1131,6 +1132,7 @@ impl App {
                     context: err.to_string(),
                     position: None,
                     target: None,
+                    anchor_pane: None,
                 });
                 self.sync_toast_deadline(previous_toast);
             }
@@ -1188,6 +1190,7 @@ impl App {
                 context: format!("focused pane {public_pane_id}"),
                 position: None,
                 target: None,
+                anchor_pane: None,
             });
         }
         Ok(())
@@ -1876,12 +1879,18 @@ fn set_pane_move_feedback(
     title: impl Into<String>,
     context: impl Into<String>,
 ) {
+    // The note is about the pane just acted on: the focused one.
+    let anchor_pane = state
+        .active
+        .and_then(|ws_idx| state.workspaces.get(ws_idx))
+        .and_then(crate::workspace::Workspace::focused_pane_id);
     state.toast = Some(crate::app::state::ToastNotification {
         kind: crate::app::state::ToastKind::NeedsAttention,
         title: title.into(),
         context: context.into(),
         position: None,
         target: None,
+        anchor_pane,
     });
 }
 
@@ -2994,6 +3003,19 @@ mod tests {
         app.execute_tui_navigate_action(NavigateAction::NextAgent, ActionContext::Prefix);
 
         assert_eq!(app.state.active, Some(1));
+    }
+
+    // Fork issue 129: a pane-action note is about the focused pane.
+    #[test]
+    fn a_pane_action_note_names_the_focused_pane() {
+        let mut state = state_with_workspaces(&["test"]);
+        let focused = state.workspaces[0].focused_pane_id();
+
+        set_pane_move_feedback(&mut state, "pane move unavailable", "no adjacent tab");
+
+        let toast = state.toast.as_ref().expect("note");
+        assert!(focused.is_some());
+        assert_eq!(toast.anchor_pane, focused);
     }
 
     #[test]
@@ -4447,6 +4469,7 @@ command = "echo custom"
                 workspace_id: target_workspace_id,
                 pane_id: target_pane,
             }),
+            anchor_pane: None,
         });
 
         handle_navigate_key(

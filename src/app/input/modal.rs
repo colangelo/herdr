@@ -2098,6 +2098,7 @@ mod tests {
             context: "ctx".to_string(),
             position: None,
             target,
+            anchor_pane: None,
         }
     }
 

@@ -2425,12 +2425,15 @@ impl HeadlessServer {
                 }
                 false
             }
-            AppEvent::ClipboardWrite { content } => {
+            AppEvent::ClipboardWrite {
+                content,
+                source_pane,
+            } => {
                 // Clipboard writes are client-local side effects. Forward them only to
                 // the foreground client instead of broadcasting to every attached client.
                 let data = base64::engine::general_purpose::STANDARD.encode(content.as_slice());
                 if self.send_to_foreground_client(ServerMessage::Clipboard { data }) {
-                    self.app.show_clipboard_feedback();
+                    self.app.show_clipboard_feedback(*source_pane);
                 }
                 true
             }
@@ -10629,6 +10632,7 @@ next_tab = ""
             context: "background · 2".to_owned(),
             position: None,
             target: None,
+            anchor_pane: None,
         });
         server.render_and_stream();
         let initial = read_server_frame(
@@ -10667,6 +10671,7 @@ next_tab = ""
         let (mut server, client_rx, pane_id) = retained_test_server(b"aaaa");
         server.app.state.copy_feedback = Some(crate::app::state::CopyFeedback {
             message: "copied to clipboard".to_owned(),
+            source_pane: None,
         });
         server.render_and_stream();
         let initial = read_server_frame(
@@ -11151,6 +11156,7 @@ next_tab = ""
 
         let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            source_pane: None,
         });
 
         assert!(changed);
@@ -11186,6 +11192,7 @@ next_tab = ""
 
         let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            source_pane: None,
         });
 
         assert!(changed);
@@ -11218,6 +11225,7 @@ next_tab = ""
 
         let changed = server.handle_internal_event_with_forwarding(AppEvent::ClipboardWrite {
             content: b"test".to_vec(),
+            source_pane: None,
         });
 
         assert!(changed);

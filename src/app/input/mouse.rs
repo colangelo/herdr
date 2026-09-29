@@ -4347,6 +4347,7 @@ mod tests {
                 workspace_id,
                 pane_id: target_pane,
             }),
+            anchor_pane: None,
         });
         app.state.mode = Mode::Settings;
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));

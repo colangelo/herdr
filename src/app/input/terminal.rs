@@ -497,7 +497,7 @@ mod tests {
 
     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
         match app.event_rx.try_recv().expect("clipboard write event") {
-            AppEvent::ClipboardWrite { content } => content,
+            AppEvent::ClipboardWrite { content, .. } => content,
             event => panic!("unexpected event: {event:?}"),
         }
     }
@@ -813,6 +813,7 @@ mod tests {
                 workspace_id: "missing".into(),
                 pane_id: info.id,
             }),
+            anchor_pane: None,
         });
         app.state.view.toast_hit_area = Rect::new(0, 0, 1, 1);
 

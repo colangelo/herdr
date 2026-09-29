@@ -2735,7 +2735,10 @@ impl AppState {
         self.selection = Some(selection);
         self.selection_autoscroll = None;
         if let Some(text) = text {
-            self.request_clipboard_write = Some(text.into_bytes());
+            self.request_clipboard_write = Some(super::state::ClipboardWriteRequest {
+                content: text.into_bytes(),
+                source_pane: Some(pane_id),
+            });
             info!("copied double-clicked token to clipboard");
         }
         true
@@ -2806,7 +2809,10 @@ impl AppState {
             .and_then(|rt| rt.extract_selection(&sel));
         if let Some(text) = text {
             if !text.is_empty() {
-                self.request_clipboard_write = Some(text.into_bytes());
+                self.request_clipboard_write = Some(super::state::ClipboardWriteRequest {
+                    content: text.into_bytes(),
+                    source_pane: Some(sel.pane_id),
+                });
                 info!("copied selection to clipboard");
             }
         }
@@ -3262,6 +3268,7 @@ impl AppState {
                         context: crate::update::update_install_instruction(&install_command),
                         position: None,
                         target: None,
+                        anchor_pane: None,
                     });
                 }
                 Vec::new()
@@ -3294,6 +3301,7 @@ impl AppState {
                         context: agent_list,
                         position: None,
                         target: None,
+                        anchor_pane: None,
                     });
                 }
                 Vec::new()
@@ -3832,6 +3840,7 @@ impl AppState {
                     workspace_id: workspace_id.clone(),
                     pane_id,
                 }),
+                anchor_pane: None,
             }
         };
         let toast = (!is_active_tab).then(build_toast);

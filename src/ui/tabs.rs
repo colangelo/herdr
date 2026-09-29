@@ -914,6 +914,7 @@ mod tests {
                 context: String::new(),
                 position: None,
                 target: None,
+                anchor_pane: None,
             });
         }
         app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);

@@ -166,9 +166,14 @@ pub enum AppEvent {
     /// A pane child emitted one or more executable BEL characters.
     /// The host-facing process forwards them to its outer terminal.
     TerminalBell { pane_id: PaneId, count: u16 },
-    /// A pane child emitted a valid OSC 52 clipboard write. The main loop
-    /// re-emits it through herdr's own clipboard writer.
-    ClipboardWrite { content: Vec<u8> },
+    /// A pane child emitted a valid OSC 52 clipboard write, or herdr copied
+    /// text itself. The main loop re-emits it through herdr's own clipboard
+    /// writer. `source_pane` is the pane the text came from, when there is
+    /// one, so the feedback can show there (fork issue 129).
+    ClipboardWrite {
+        content: Vec<u8>,
+        source_pane: Option<PaneId>,
+    },
     /// Prefix-mode ASCII input-source request, emitted on entering/leaving the ASCII input
     /// realm. The foreground process applies the host-local TIS switch (`active = true`) /
     /// restore (`active = false`): the client in server mode (via server forwarding), the

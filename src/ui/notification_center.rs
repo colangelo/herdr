@@ -246,6 +246,7 @@ mod tests {
             context: String::new(),
             position: None,
             target: None,
+            anchor_pane: None,
         }
     }
 

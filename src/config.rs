@@ -27,8 +27,9 @@ pub use self::{
         SidebarActiveBorderConfig, SidebarCollapsedModeConfig, SidebarStyleConfig,
         SortMotionConfig, SortMotionEasingConfig, StateColorsConfig, StateSymbolsConfig,
         StatusIndicatorStyle, StatusSpinnerConfig, TabBarPositionConfig, ToastClipboardPosition,
-        ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize, UpdateChannelConfig,
-        WorkspaceSortConfig, MAX_STATUS_SPINNER_MS, MAX_TOAST_DELAY_SECONDS, MIN_STATUS_SPINNER_MS,
+        ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize, ToastPaneFeedback,
+        UpdateChannelConfig, WorkspaceSortConfig, MAX_STATUS_SPINNER_MS, MAX_TOAST_DELAY_SECONDS,
+        MIN_STATUS_SPINNER_MS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,

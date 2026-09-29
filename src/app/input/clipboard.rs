@@ -14,12 +14,15 @@ fn is_retained_selection_copy_key(key: &TerminalKey) -> bool {
 
 impl App {
     pub(super) fn dispatch_pending_clipboard_write(&mut self) -> bool {
-        let Some(content) = self.state.request_clipboard_write.take() else {
+        let Some(request) = self.state.request_clipboard_write.take() else {
             return false;
         };
         if self
             .event_tx
-            .try_send(crate::events::AppEvent::ClipboardWrite { content })
+            .try_send(crate::events::AppEvent::ClipboardWrite {
+                content: request.content,
+                source_pane: request.source_pane,
+            })
             .is_err()
         {
             tracing::warn!("failed to queue clipboard write event");
@@ -117,7 +120,7 @@ mod tests {
 
     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
         match app.event_rx.try_recv().expect("clipboard write event") {
-            AppEvent::ClipboardWrite { content } => content,
+            AppEvent::ClipboardWrite { content, .. } => content,
             event => panic!("unexpected event: {event:?}"),
         }
     }
@@ -159,7 +162,10 @@ mod tests {
         assert!(app.state.selection.is_none());
         assert!(input_rx.try_recv().is_err());
 
-        app.handle_internal_event(AppEvent::ClipboardWrite { content });
+        app.handle_internal_event(AppEvent::ClipboardWrite {
+            content,
+            source_pane: None,
+        });
         assert_eq!(
             app.state
                 .copy_feedback
@@ -205,6 +211,27 @@ mod tests {
             expected
         );
         assert!(app.event_rx.try_recv().is_err());
+    }
+
+    // Fork issue 129: a herdr copy names the pane its text came from.
+    #[tokio::test]
+    async fn a_herdr_copy_names_its_source_pane() {
+        let (mut app, info, _input_rx) = app_with_screen_bytes_and_input(b"alpha beta");
+        app.state.copy_on_select = false;
+        drag_select_range(&mut app, &info, 0, 4);
+
+        app.handle_terminal_key_headless(TerminalKey::new(KeyCode::Char('c'), KeyModifiers::SUPER));
+
+        match app.event_rx.try_recv().expect("clipboard write event") {
+            AppEvent::ClipboardWrite {
+                content,
+                source_pane,
+            } => {
+                assert_eq!(content, b"alpha");
+                assert_eq!(source_pane, Some(info.id));
+            }
+            event => panic!("unexpected event: {event:?}"),
+        }
     }
 
     #[tokio::test]

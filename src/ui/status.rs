@@ -46,9 +46,10 @@ pub(crate) fn copy_feedback_rect(
     let height = 3u16.min(area.height);
     let x = match position {
         ToastClipboardPosition::TopLeft | ToastClipboardPosition::BottomLeft => area.x,
-        ToastClipboardPosition::TopCenter | ToastClipboardPosition::BottomCenter => {
-            area.x + area.width.saturating_sub(width) / 2
-        }
+        // `Pane` lands here only as the fallback: no pane in view to center in.
+        ToastClipboardPosition::TopCenter
+        | ToastClipboardPosition::BottomCenter
+        | ToastClipboardPosition::Pane => area.x + area.width.saturating_sub(width) / 2,
         ToastClipboardPosition::TopRight | ToastClipboardPosition::BottomRight => {
             area.x + area.width.saturating_sub(width)
         }
@@ -59,11 +60,56 @@ pub(crate) fn copy_feedback_rect(
         | ToastClipboardPosition::TopRight => area.y + offset_rows.min(area.height),
         ToastClipboardPosition::BottomLeft
         | ToastClipboardPosition::BottomCenter
-        | ToastClipboardPosition::BottomRight => {
-            area.y + area.height.saturating_sub(height + offset_rows)
-        }
+        | ToastClipboardPosition::BottomRight
+        | ToastClipboardPosition::Pane => area.y + area.height.saturating_sub(height + offset_rows),
     };
     Rect::new(x, y, width, height)
+}
+
+/// A `width` x `height` box centered in `area`, or `None` when it does not fit.
+fn centered_in(area: Rect, width: u16, height: u16) -> Option<Rect> {
+    (width > 0 && height > 0 && width <= area.width && height <= area.height).then(|| {
+        Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + (area.height - height) / 2,
+            width,
+            height,
+        )
+    })
+}
+
+/// The copy feedback box centered in `pane`, a pane's inner area, or `None`
+/// when the whole box does not fit there (fork issue 129).
+pub(crate) fn copy_feedback_rect_in_pane(pane: Rect, feedback: &CopyFeedback) -> Option<Rect> {
+    centered_in(pane, feedback.message.len() as u16 + 4, 3)
+}
+
+/// A toast centered in `pane`, a pane's inner area, at its natural size, or
+/// `None` when it does not fit there (fork issue 129).
+pub(crate) fn toast_notification_rect_in_pane(
+    pane: Rect,
+    toast: &ToastNotification,
+    size: ToastHerdrSize,
+) -> Option<Rect> {
+    let (width, height) = toast_box_size(toast, size, pane.width);
+    centered_in(pane, width, height)
+}
+
+/// A toast's box size before it is clipped to its anchor area.
+fn toast_box_size(
+    toast: &ToastNotification,
+    size: ToastHerdrSize,
+    anchor_width: u16,
+) -> (u16, u16) {
+    let (pad_cols, pad_rows) = toast_size_padding(size);
+    let content_width = display_width_u16(&toast.title)
+        .max(display_width_u16(&toast.context))
+        .saturating_add(4);
+    let width = content_width
+        .saturating_add(2 + pad_cols * 2)
+        .max(toast_size_min_width(size, anchor_width));
+    let content_height: u16 = if toast.context.is_empty() { 1 } else { 2 };
+    (width, content_height + 2 + pad_rows * 2)
 }
 
 pub(crate) fn toast_notification_rect(
@@ -82,16 +128,9 @@ pub(crate) fn toast_notification_rect(
     } else {
         area
     };
-    let (pad_cols, pad_rows) = toast_size_padding(size);
-    let content_width = display_width_u16(&toast.title)
-        .max(display_width_u16(&toast.context))
-        .saturating_add(4);
-    let width = content_width
-        .saturating_add(2 + pad_cols * 2)
-        .max(toast_size_min_width(size, anchor.width))
-        .min(anchor.width);
-    let content_height: u16 = if toast.context.is_empty() { 1 } else { 2 };
-    let height = (content_height + 2 + pad_rows * 2).min(anchor.height);
+    let (width, height) = toast_box_size(toast, size, anchor.width);
+    let width = width.min(anchor.width);
+    let height = height.min(anchor.height);
     let x = match position {
         ToastHerdrPosition::TopLeft | ToastHerdrPosition::BottomLeft => anchor.x,
         ToastHerdrPosition::TopRight | ToastHerdrPosition::BottomRight => {
@@ -115,11 +154,8 @@ pub(crate) fn toast_notification_rect(
 
 pub(super) fn render_toast_notification(
     frame: &mut Frame,
-    area: Rect,
-    content_area: Rect,
+    toast_area: Rect,
     toast: &ToastNotification,
-    offset_for_warning: bool,
-    position: ToastHerdrPosition,
     size: ToastHerdrSize,
     p: &Palette,
 ) {
@@ -128,14 +164,6 @@ pub(super) fn render_toast_notification(
         ToastKind::Finished => p.blue,
         ToastKind::UpdateInstalled => p.accent,
     };
-    let toast_area = toast_notification_rect(
-        area,
-        content_area,
-        toast,
-        offset_for_warning,
-        position,
-        size,
-    );
 
     frame.render_widget(Clear, toast_area);
     let (pad_cols, pad_rows) = toast_size_padding(size);
@@ -175,13 +203,10 @@ pub(super) fn render_toast_notification(
 
 pub(super) fn render_copy_feedback(
     frame: &mut Frame,
-    area: Rect,
+    feedback_area: Rect,
     feedback: &CopyFeedback,
-    offset_rows: u16,
-    position: ToastClipboardPosition,
     p: &Palette,
 ) {
-    let feedback_area = copy_feedback_rect(area, feedback, offset_rows, position);
     if feedback_area.is_empty() {
         return;
     }
@@ -319,12 +344,14 @@ mod tests {
             context: "workspace".to_string(),
             position: None,
             target: None,
+            anchor_pane: None,
         }
     }
 
     fn feedback() -> CopyFeedback {
         CopyFeedback {
             message: "copied to clipboard".to_string(),
+            source_pane: None,
         }
     }
 
@@ -563,6 +590,7 @@ mod tests {
             context: "提交 herdr 的反馈".to_string(),
             position: None,
             target: None,
+            anchor_pane: None,
         };
 
         let rect = toast_notification_rect(
@@ -578,6 +606,46 @@ mod tests {
             display_width_u16(&toast.title).max(display_width_u16(&toast.context)) + 6;
         assert_eq!(rect.width, expected_content_width);
         assert_eq!(rect.x + rect.width, area.x + area.width);
+    }
+
+    // Fork issue 129: feedback centered in a pane, or nothing when it does
+    // not fit there.
+    #[test]
+    fn feedback_centers_in_a_pane_that_holds_it() {
+        let pane = Rect::new(40, 5, 60, 20);
+        let copy = copy_feedback_rect_in_pane(pane, &feedback()).expect("fits");
+        assert_eq!((copy.width, copy.height), (23, 3));
+        assert_eq!((copy.x, copy.y), (40 + (60 - 23) / 2, 5 + (20 - 3) / 2));
+
+        let note =
+            toast_notification_rect_in_pane(pane, &toast(), ToastHerdrSize::Auto).expect("fits");
+        assert_eq!(note.x, pane.x + (pane.width - note.width) / 2);
+        assert_eq!(note.y, pane.y + (pane.height - note.height) / 2);
+    }
+
+    #[test]
+    fn feedback_does_not_center_in_a_pane_too_small_for_it() {
+        assert_eq!(
+            copy_feedback_rect_in_pane(Rect::new(0, 0, 22, 10), &feedback()),
+            None
+        );
+        assert_eq!(
+            copy_feedback_rect_in_pane(Rect::new(0, 0, 40, 2), &feedback()),
+            None
+        );
+        assert_eq!(
+            toast_notification_rect_in_pane(Rect::new(0, 0, 8, 10), &toast(), ToastHerdrSize::Auto),
+            None
+        );
+    }
+
+    #[test]
+    fn pane_position_falls_back_to_bottom_center() {
+        let area = Rect::new(0, 0, 80, 24);
+        assert_eq!(
+            copy_feedback_rect(area, &feedback(), 0, ToastClipboardPosition::Pane),
+            copy_feedback_rect(area, &feedback(), 0, ToastClipboardPosition::BottomCenter)
+        );
     }
 
     #[test]

@@ -1796,6 +1796,10 @@ pub struct ToastNotification {
     pub context: String,
     pub position: Option<crate::config::ToastHerdrPosition>,
     pub target: Option<ToastTarget>,
+    /// The pane a note about a pane action is about; with
+    /// `[ui.toast.herdr] pane_feedback = "pane"` it is drawn there (fork
+    /// issue 129). `None` for every other toast.
+    pub anchor_pane: Option<PaneId>,
 }
 
 /// Upper bound on retained notification log entries; older entries are
@@ -2181,6 +2185,16 @@ pub struct AgentNotificationDelivery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyFeedback {
     pub message: String,
+    /// The pane the copied text came from, when known (fork issue 129).
+    pub source_pane: Option<PaneId>,
+}
+
+/// A clipboard write herdr's own UI asked for, and the pane the text came
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipboardWriteRequest {
+    pub content: Vec<u8>,
+    pub source_pane: Option<PaneId>,
 }
 
 pub struct ReleaseNotesState {
@@ -2679,7 +2693,7 @@ pub struct AppState {
     pub request_client_config_reload: bool,
     /// Set when UI interaction requested a clipboard write that must be
     /// handled by the outer App/event loop instead of directly from AppState.
-    pub request_clipboard_write: Option<Vec<u8>>,
+    pub request_clipboard_write: Option<ClipboardWriteRequest>,
     /// Sends queued by the alt-screen scroll passthrough mode; the App layer
     /// encodes them against the pinned pane's terminal state and sends them,
     /// keeping the PTY effect out of AppState.
@@ -4622,6 +4636,7 @@ mod tests {
             context: "ctx".to_string(),
             position: None,
             target,
+            anchor_pane: None,
         }
     }
 

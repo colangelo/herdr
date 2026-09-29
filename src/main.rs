@@ -585,9 +585,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # needs_attention_seconds = 8
 # finished_seconds = 5
 # update_seconds = 3
+# Where notes about a pane action (a refused pane move, a failed clear
+# scrollback) show: "corner" (the position above) or "pane" (centered in the
+# pane acted on, the corner when it is too small).
+# pane_feedback = "corner"
 
 [ui.toast.clipboard]
 # enabled = true
+# Copied-to-clipboard popup position: top-left, top-center, top-right,
+# bottom-left, bottom-center, bottom-right, or "pane" (centered in the pane the
+# text came from, bottom-center when it is too small).
 # position = "bottom-center"
 
 # Play sounds when agents change state in background workspaces

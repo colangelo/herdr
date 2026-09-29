@@ -134,12 +134,16 @@ impl App {
             return Vec::new();
         }
 
-        if let AppEvent::ClipboardWrite { content } = ev {
+        if let AppEvent::ClipboardWrite {
+            content,
+            source_pane,
+        } = ev
+        {
             #[cfg(not(test))]
             crate::selection::write_osc52_bytes(&content);
             #[cfg(test)]
             let _ = content;
-            self.show_clipboard_feedback();
+            self.show_clipboard_feedback(source_pane);
             return Vec::new();
         }
 
@@ -490,7 +494,7 @@ impl App {
         }
     }
 
-    pub(crate) fn show_clipboard_feedback(&mut self) {
+    pub(crate) fn show_clipboard_feedback(&mut self, source_pane: Option<crate::layout::PaneId>) {
         if !self.state.toast_config.clipboard.enabled {
             self.state.copy_feedback = None;
             self.copy_feedback_deadline = None;
@@ -498,6 +502,7 @@ impl App {
         }
         self.state.copy_feedback = Some(crate::app::state::CopyFeedback {
             message: "copied to clipboard".to_string(),
+            source_pane,
         });
         self.copy_feedback_deadline = Some(Instant::now() + super::COPY_FEEDBACK_DURATION);
     }
@@ -1463,6 +1468,7 @@ impl App {
                             context: body.unwrap_or_default(),
                             position: params.position,
                             target: None,
+                            anchor_pane: None,
                         });
                     self.sync_toast_deadline(previous_toast);
                     self.emit_api_notification_sound(requested_sound);
@@ -2826,6 +2832,7 @@ mod tests {
                 workspace_id,
                 pane_id: root,
             }),
+            anchor_pane: None,
         });
 
         app.handle_internal_event(AppEvent::StateChanged {

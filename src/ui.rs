@@ -78,8 +78,8 @@ use self::settings::render_settings_overlay;
 pub(crate) use self::sidebar::workspace_drop_indicator_row;
 use self::sidebar::{render_sidebar, render_sidebar_collapsed};
 use self::status::{
-    copy_feedback_rect, render_config_diagnostic, render_copy_feedback, render_toast_notification,
-    toast_notification_rect,
+    copy_feedback_rect, copy_feedback_rect_in_pane, render_config_diagnostic, render_copy_feedback,
+    render_toast_notification, toast_notification_rect, toast_notification_rect_in_pane,
 };
 pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
@@ -646,6 +646,16 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
     }
     let mut copy_feedback_offset = u16::from(has_config_diagnostic);
     let mut toast_rect = None;
+    // Feedback about one pane can be drawn in that pane (fork issue 129): its
+    // inner area when it is shown in the visible tab.
+    let shown_pane_area = |pane: Option<crate::layout::PaneId>| {
+        let pane = pane.filter(|_| app.view.layout != ViewLayout::Mobile)?;
+        app.view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == pane)
+            .map(|info| info.inner_rect)
+    };
     if let Some(toast) = &app.toast {
         if app.view.layout == ViewLayout::Mobile {
             render_mobile_toast_banner(
@@ -656,24 +666,24 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 &app.palette,
             );
         } else {
-            render_toast_notification(
-                frame,
-                frame.area(),
-                app.view.terminal_area,
-                toast,
-                has_config_diagnostic,
-                toast.position.unwrap_or(app.toast_config.herdr.position),
-                app.toast_config.herdr.size,
-                &app.palette,
-            );
-            toast_rect = Some(toast_notification_rect(
-                frame.area(),
-                app.view.terminal_area,
-                toast,
-                has_config_diagnostic,
-                toast.position.unwrap_or(app.toast_config.herdr.position),
-                app.toast_config.herdr.size,
-            ));
+            let size = app.toast_config.herdr.size;
+            let in_pane = (app.toast_config.herdr.pane_feedback
+                == crate::config::ToastPaneFeedback::Pane)
+                .then(|| shown_pane_area(toast.anchor_pane))
+                .flatten()
+                .and_then(|pane| toast_notification_rect_in_pane(pane, toast, size));
+            let rect = in_pane.unwrap_or_else(|| {
+                toast_notification_rect(
+                    frame.area(),
+                    app.view.terminal_area,
+                    toast,
+                    has_config_diagnostic,
+                    toast.position.unwrap_or(app.toast_config.herdr.position),
+                    size,
+                )
+            });
+            render_toast_notification(frame, rect, toast, size, &app.palette);
+            toast_rect = Some(rect);
         }
         if app.view.layout == ViewLayout::Mobile {
             toast_rect = Some(mobile_toast_banner_rect(
@@ -688,23 +698,42 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
         } else {
             terminal_area
         };
-        if let Some(toast_rect) = toast_rect {
-            copy_feedback_offset = copy_feedback_offset_for_toast(
-                area,
-                feedback,
-                copy_feedback_offset,
-                app.toast_config.clipboard.position,
-                toast_rect,
-            );
+        let position = app.toast_config.clipboard.position;
+        let in_pane = (position == crate::config::ToastClipboardPosition::Pane)
+            .then(|| shown_pane_area(feedback.source_pane))
+            .flatten()
+            .and_then(|pane| copy_feedback_in_pane(pane, feedback, toast_rect));
+        let rect = in_pane.unwrap_or_else(|| {
+            if let Some(toast_rect) = toast_rect {
+                copy_feedback_offset = copy_feedback_offset_for_toast(
+                    area,
+                    feedback,
+                    copy_feedback_offset,
+                    position,
+                    toast_rect,
+                );
+            }
+            copy_feedback_rect(area, feedback, copy_feedback_offset, position)
+        });
+        render_copy_feedback(frame, rect, feedback, &app.palette);
+    }
+}
+
+/// The copy feedback box centered in `pane`, moved under a toast drawn there;
+/// `None` when it does not fit.
+fn copy_feedback_in_pane(
+    pane: Rect,
+    feedback: &crate::app::state::CopyFeedback,
+    toast_rect: Option<Rect>,
+) -> Option<Rect> {
+    let rect = copy_feedback_rect_in_pane(pane, feedback)?;
+    match toast_rect {
+        Some(toast) if rects_overlap(rect, toast) => {
+            let y = toast.y.saturating_add(toast.height);
+            (y.saturating_add(rect.height) <= pane.y.saturating_add(pane.height))
+                .then_some(Rect { y, ..rect })
         }
-        render_copy_feedback(
-            frame,
-            area,
-            feedback,
-            copy_feedback_offset,
-            app.toast_config.clipboard.position,
-            &app.palette,
-        );
+        _ => Some(rect),
     }
 }
 
@@ -942,6 +971,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 24);
         let feedback = crate::app::state::CopyFeedback {
             message: "copied to clipboard".into(),
+            source_pane: None,
         };
         let toast = crate::app::state::ToastNotification {
             kind: crate::app::state::ToastKind::Finished,
@@ -949,6 +979,7 @@ mod tests {
             context: "workspace · 1".into(),
             position: None,
             target: None,
+            anchor_pane: None,
         };
 
         let bottom_right_toast = toast_notification_rect(
@@ -1097,6 +1128,7 @@ mod tests {
             context: "one".into(),
             position: None,
             target: None,
+            anchor_pane: None,
         });
 
         compute_view(&mut app, Rect::new(0, 0, 100, 20));
@@ -1122,6 +1154,7 @@ mod tests {
             context: "one".into(),
             position: None,
             target: None,
+            anchor_pane: None,
         });
 
         compute_view(&mut app, Rect::new(0, 0, 100, 20));
@@ -1175,6 +1208,121 @@ mod tests {
             app.view.tab_bar_rect.y,
         );
         assert!(mode_row.contains("PREFIX"), "{mode_row}");
+    }
+
+    fn find_text(buffer: &ratatui::buffer::Buffer, needle: &str) -> Option<(u16, u16)> {
+        let area = buffer.area;
+        (area.y..area.y + area.height).find_map(|y| {
+            let row: String = (area.x..area.x + area.width)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect();
+            // Columns, not bytes: border and dot glyphs are multi-byte.
+            row.find(needle)
+                .map(|byte| (area.x + row[..byte].chars().count() as u16, y))
+        })
+    }
+
+    fn two_pane_app() -> (crate::app::state::AppState, crate::layout::PaneId) {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = Workspace::test_new("one");
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        compute_view(&mut app, Rect::new(0, 0, 120, 30));
+        (app, right)
+    }
+
+    // Fork issue 129: feedback about a pane drawn in that pane.
+    #[test]
+    fn copy_feedback_renders_in_its_source_pane_only_when_configured() {
+        let (mut app, right) = two_pane_app();
+        let right_inner = app
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == right)
+            .unwrap()
+            .inner_rect;
+        let feedback = crate::app::state::CopyFeedback {
+            message: "copied to clipboard".into(),
+            source_pane: Some(right),
+        };
+        app.copy_feedback = Some(feedback.clone());
+        let draw = |app: &crate::app::state::AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            find_text(terminal.backend().buffer(), "copied to clipboard").expect("feedback drawn")
+        };
+
+        let default_rect = copy_feedback_rect(
+            app.view.terminal_area,
+            &feedback,
+            0,
+            crate::config::ToastClipboardPosition::BottomCenter,
+        );
+        assert_eq!(
+            draw(&app).1,
+            default_rect.y + 1,
+            "default stays at the bottom"
+        );
+
+        app.toast_config.clipboard.position = crate::config::ToastClipboardPosition::Pane;
+        let in_pane = copy_feedback_rect_in_pane(right_inner, &feedback).unwrap();
+        let (x, y) = draw(&app);
+        assert_eq!(y, in_pane.y + 1);
+        assert!(
+            x > in_pane.x && x < in_pane.x + in_pane.width,
+            "inside the pane"
+        );
+
+        app.copy_feedback.as_mut().unwrap().source_pane =
+            Some(crate::layout::PaneId::from_raw(9_999));
+        assert_eq!(
+            draw(&app).1,
+            default_rect.y + 1,
+            "a pane not in view falls back"
+        );
+    }
+
+    #[test]
+    fn a_pane_action_note_renders_in_its_pane_only_when_configured() {
+        let (mut app, right) = two_pane_app();
+        let right_inner = app
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == right)
+            .unwrap()
+            .inner_rect;
+        app.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "pane move unavailable".into(),
+            context: "no adjacent tab".into(),
+            position: None,
+            target: None,
+            anchor_pane: Some(right),
+        });
+        let draw = |app: &crate::app::state::AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            find_text(terminal.backend().buffer(), "pane move unavailable").expect("note drawn")
+        };
+
+        let (_, corner_y) = draw(&app);
+        assert!(corner_y >= 25, "default stays in the bottom-right corner");
+
+        app.toast_config.herdr.pane_feedback = crate::config::ToastPaneFeedback::Pane;
+        let note = toast_notification_rect_in_pane(
+            right_inner,
+            app.toast.as_ref().unwrap(),
+            app.toast_config.herdr.size,
+        )
+        .unwrap();
+        let (x, y) = draw(&app);
+        assert_eq!(y, note.y + 1);
+        assert!(x > note.x && x < note.x + note.width, "inside the pane");
     }
 
     #[test]

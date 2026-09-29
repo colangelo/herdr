@@ -1963,6 +1963,7 @@ impl App {
                         context: "using config.toml".to_string(),
                         position: None,
                         target: None,
+                        anchor_pane: None,
                     });
             }
         } else {
@@ -1976,6 +1977,7 @@ impl App {
                         context: "with warnings".to_string(),
                         position: None,
                         target: None,
+                        anchor_pane: None,
                     });
             }
         }
@@ -2981,6 +2983,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            source_pane: None,
         });
 
         assert!(app.state.toast.is_none());
@@ -2990,12 +2993,27 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_feedback_keeps_the_source_pane() {
+        let mut app = test_app();
+        let pane = crate::layout::PaneId::from_raw(7);
+
+        app.handle_internal_event(AppEvent::ClipboardWrite {
+            content: b"copied".to_vec(),
+            source_pane: Some(pane),
+        });
+
+        let feedback = app.state.copy_feedback.as_ref().expect("copy feedback");
+        assert_eq!(feedback.source_pane, Some(pane));
+    }
+
+    #[test]
     fn clipboard_feedback_can_be_disabled() {
         let mut app = test_app();
         app.state.toast_config.clipboard.enabled = false;
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            source_pane: None,
         });
 
         assert!(app.state.copy_feedback.is_none());
@@ -3011,11 +3029,13 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            anchor_pane: None,
         });
         let original_toast = app.state.toast.clone();
 
         app.handle_internal_event(AppEvent::ClipboardWrite {
             content: b"copied".to_vec(),
+            source_pane: None,
         });
 
         assert_eq!(app.state.toast, original_toast);
@@ -3135,6 +3155,7 @@ mod tests {
             context: "background · 2".to_string(),
             position: None,
             target: None,
+            anchor_pane: None,
         });
 
         let response =
@@ -3174,6 +3195,7 @@ mod tests {
             context: "ctx".to_string(),
             position: None,
             target,
+            anchor_pane: None,
         }
     }
 

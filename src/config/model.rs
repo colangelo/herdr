@@ -103,6 +103,22 @@ pub enum ToastClipboardPosition {
     #[default]
     BottomCenter,
     BottomRight,
+    /// Centered in the pane the text was copied from; bottom-center when
+    /// there is no such pane in view or it is too small (fork issue 129).
+    Pane,
+}
+
+/// Where herdr's notes about a pane action (a refused or failed pane move,
+/// clear scrollback, todo save) show (fork issue 129).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ToastPaneFeedback {
+    /// In the `[ui.toast.herdr]` position, like every other toast.
+    #[default]
+    Corner,
+    /// Centered in the pane acted on; the corner when that pane is not in
+    /// view or is too small.
+    Pane,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -466,6 +482,9 @@ pub struct HerdrToastConfig {
     /// How long an update-installed toast stays visible, in seconds. 0 keeps
     /// it visible until clicked or replaced. Default: 3.
     pub update_seconds: u64,
+    /// Where notes about a pane action show: "corner" (the position above)
+    /// or "pane" (centered in the pane acted on). Default: corner.
+    pub pane_feedback: ToastPaneFeedback,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -1735,6 +1754,7 @@ impl Default for HerdrToastConfig {
             needs_attention_seconds: 8,
             finished_seconds: 5,
             update_seconds: 3,
+            pane_feedback: ToastPaneFeedback::Corner,
         }
     }
 }
@@ -2661,6 +2681,30 @@ mouse_scroll_lines = 1
 mouse_scroll_lines = 0
 "#;
         assert!(toml::from_str::<Config>(toml).is_err());
+    }
+
+    // Fork issue 129.
+    #[test]
+    fn pane_feedback_config_parses_and_defaults_off() {
+        let config: Config = toml::from_str(
+            "[ui.toast.herdr]\npane_feedback = \"pane\"\n\n[ui.toast.clipboard]\nposition = \"pane\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.ui.toast.herdr.pane_feedback, ToastPaneFeedback::Pane);
+        assert_eq!(
+            config.ui.toast.clipboard.position,
+            ToastClipboardPosition::Pane
+        );
+
+        let defaults = Config::default();
+        assert_eq!(
+            defaults.ui.toast.herdr.pane_feedback,
+            ToastPaneFeedback::Corner
+        );
+        assert_eq!(
+            defaults.ui.toast.clipboard.position,
+            ToastClipboardPosition::BottomCenter
+        );
     }
 
     #[test]
