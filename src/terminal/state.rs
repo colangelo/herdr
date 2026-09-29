@@ -2312,7 +2312,16 @@ impl TerminalState {
                 let (source, agent, kind, value) = self.session_for_snapshot()?;
                 let session =
                     crate::agent_resume::session_ref_from_snapshot(&source, &agent, kind, &value)?;
-                crate::agent_resume::plan(&source, &agent, &session.session_ref)?
+                let plan = crate::agent_resume::plan(&source, &agent, &session.session_ref)?;
+                // No hook report: the transcript shows the model, effort and
+                // mode it runs in now (fork issue 123).
+                if plan.agent == "claude" {
+                    let transcript =
+                        crate::agent_resume::claude_transcript_resume(&value, &self.cwd);
+                    plan.with_claude_transcript(transcript)
+                } else {
+                    plan
+                }
             }
         };
         Some(plan.with_launch_flags(self.agent_launch_for_snapshot()))

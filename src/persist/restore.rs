@@ -987,7 +987,10 @@ fn pane_restore_startup<'a>(
     } else if let Some(resume) = reported_resume {
         Some(reported_resume_from_snapshot(resume).plan(cwd))
     } else {
-        session.and_then(|session| restore_plan_for_snapshot(session, true))
+        session.and_then(|session| {
+            restore_plan_for_snapshot(session, true)
+                .map(|plan| with_session_transcript(plan, session, cwd))
+        })
     }
     .map(|plan| plan.with_launch_flags(launch.as_ref()));
     let has_native_agent_restore = restore_plan.is_some();
@@ -1022,6 +1025,20 @@ fn pane_restore_startup<'a>(
         duplicate_agent_session,
         reserved_agent_session,
     }
+}
+
+/// A Claude session with no hook report restores in the model, effort and
+/// mode its transcript shows (fork issue 123).
+fn with_session_transcript(
+    plan: crate::agent_resume::AgentResumePlan,
+    session: &PaneAgentSessionSnapshot,
+    cwd: &std::path::Path,
+) -> crate::agent_resume::AgentResumePlan {
+    if plan.agent != "claude" {
+        return plan;
+    }
+    let transcript = crate::agent_resume::claude_transcript_resume(&session.value, cwd);
+    plan.with_claude_transcript(transcript)
 }
 
 fn saved_reported_resume(pane: &super::snapshot::PaneSnapshot) -> Option<&PaneAgentResumeSnapshot> {

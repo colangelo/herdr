@@ -2,8 +2,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+mod claude_transcript;
 mod launch_flags;
 
+pub use claude_transcript::claude_transcript_resume;
 pub use launch_flags::{compose_resume_argv, AgentLaunchArgv, AgentLaunchFlags};
 
 const MAX_SESSION_ID_LEN: usize = 512;
@@ -58,6 +60,23 @@ impl ReportedAgentResume {
 }
 
 impl AgentResumePlan {
+    /// For a Claude session herdr resumes with the built-in
+    /// `claude --resume <id>` (no hook report), the command read from its
+    /// transcript instead: the model, effort and mode it runs in now. Only a
+    /// command for the same session, and one restore can type, is taken.
+    pub fn with_claude_transcript(mut self, transcript: Option<Vec<String>>) -> Self {
+        let Some(argv) = transcript else {
+            return self;
+        };
+        let same_session = self.agent == "claude"
+            && argv.len() >= 3
+            && argv[..3] == self.argv[..self.argv.len().min(3)];
+        if same_session && validate_resume_argv(&argv).is_ok() {
+            self.argv = argv;
+        }
+        self
+    }
+
     /// The plan with the launch flags its agent was started with added
     /// (`compose_resume_argv`). A record of another agent, or a result restore
     /// could not type safely, leaves the plan as it was.
@@ -344,6 +363,76 @@ fn valid_session_path(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claude_session_without_a_report_takes_its_transcript_command() {
+        let session = AgentSessionRef::id("s1").unwrap();
+        let plan = plan("herdr:claude", "claude", &session).unwrap();
+        let transcript: Vec<String> = [
+            "claude",
+            "--resume",
+            "s1",
+            "--model",
+            "claude-sonnet-5-5",
+            "--effort",
+            "low",
+        ]
+        .map(String::from)
+        .to_vec();
+        let launch = AgentLaunchFlags {
+            agent: "claude".into(),
+            flags: ["--model", "opus", "--settings", "/u/g.json"]
+                .map(String::from)
+                .to_vec(),
+        };
+
+        let plan = plan
+            .with_claude_transcript(Some(transcript))
+            .with_launch_flags(Some(&launch));
+
+        assert_eq!(
+            plan.argv,
+            [
+                "claude",
+                "--resume",
+                "s1",
+                "--model",
+                "claude-sonnet-5-5",
+                "--effort",
+                "low",
+                "--settings",
+                "/u/g.json"
+            ],
+            "the transcript's model wins over the launch one; launch-only flags are added"
+        );
+    }
+
+    #[test]
+    fn a_transcript_never_replaces_another_agent_or_session() {
+        let codex = plan("herdr:codex", "codex", &AgentSessionRef::id("t1").unwrap()).unwrap();
+        let other: Vec<String> = ["claude", "--resume", "zzz"].map(String::from).to_vec();
+        assert_eq!(
+            codex
+                .clone()
+                .with_claude_transcript(Some(other.clone()))
+                .argv,
+            codex.argv
+        );
+        let claude = plan(
+            "herdr:claude",
+            "claude",
+            &AgentSessionRef::id("s1").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            claude.clone().with_claude_transcript(Some(other)).argv,
+            claude.argv
+        );
+        assert_eq!(
+            claude.clone().with_claude_transcript(None).argv,
+            claude.argv
+        );
+    }
 
     fn absolute_test_path(name: &str) -> String {
         std::env::current_dir()

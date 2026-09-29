@@ -70,6 +70,8 @@ const fn flag(
     }
 }
 
+const ALLOW_BYPASS: &str = "--allow-dangerously-skip-permissions";
+
 const CLAUDE: &[CarriedFlag] = &[
     flag(&["--settings"], Arity::One, true, "settings"),
     flag(&["--add-dir"], Arity::Many, true, "add-dir"),
@@ -98,7 +100,7 @@ const CLAUDE: &[CarriedFlag] = &[
         &["--allow-dangerously-skip-permissions"],
         Arity::None,
         false,
-        "permission",
+        "allow-bypass",
     ),
 ];
 
@@ -252,6 +254,15 @@ pub fn compose_resume_argv(agent: &str, base: &[String], launch_flags: &[String]
     for word in launch_flags {
         if is_flag(word) {
             keep = group_of(word).is_some_and(|group| !base_groups.contains(&group));
+            // Started in bypass but resumed in another mode: as the hook does,
+            // keep bypass reachable with shift+tab without forcing it.
+            if !keep
+                && agent == "claude"
+                && word == "--dangerously-skip-permissions"
+                && !argv.iter().any(|arg| arg == ALLOW_BYPASS)
+            {
+                argv.push(ALLOW_BYPASS.to_string());
+            }
         }
         if keep {
             argv.push(word.clone());
@@ -471,12 +482,41 @@ mod tests {
                 "auto",
                 "--settings",
                 "/u/gpt.json",
+                "--allow-dangerously-skip-permissions",
                 "--plugin-dir",
                 "/p1",
                 "--plugin-dir",
                 "/p2",
             ])
         );
+    }
+
+    #[test]
+    fn a_bypass_launch_keeps_bypass_reachable_but_not_forced() {
+        // As the hook does: started with --dangerously-skip-permissions, now
+        // in another mode, the pane can still shift+tab back to bypass.
+        let base = words(&["claude", "--resume", "s1", "--permission-mode", "plan"]);
+        let launch = words(&["--dangerously-skip-permissions"]);
+        assert_eq!(
+            compose_resume_argv("claude", &base, &launch),
+            words(&[
+                "claude",
+                "--resume",
+                "s1",
+                "--permission-mode",
+                "plan",
+                "--allow-dangerously-skip-permissions"
+            ])
+        );
+        let already = words(&[
+            "claude",
+            "--resume",
+            "s1",
+            "--allow-dangerously-skip-permissions",
+            "--permission-mode",
+            "plan",
+        ]);
+        assert_eq!(compose_resume_argv("claude", &already, &launch), already);
     }
 
     #[test]
