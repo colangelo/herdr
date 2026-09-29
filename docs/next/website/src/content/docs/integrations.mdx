@@ -112,6 +112,8 @@ Claude Code and Codex panes also get back the launch-only flags they were starte
 - Claude Code: `--settings`, `--add-dir`, `--mcp-config`, `--strict-mcp-config`, `--agent`, `--plugin-dir`, `--setting-sources` and `--fallback-model`, plus `--model` and the permission flags when the hook has not reported them.
 - Codex: `-m`/`--model`, `-s`/`--sandbox`, `-a`/`--ask-for-approval`, `-c`/`--config`, `-p`/`--profile`, `-C`/`--cd`, `--add-dir`, `--enable`, `--disable`, `--oss`, `--local-provider`, `--search`, `--strict-config`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`, `--dangerously-bypass-hook-trust`, `--no-alt-screen` and `--no-daemon`.
 
+A Claude pane with a session but no hook report yet (for example one that has not taken a turn since Herdr was upgraded) restores with the model, effort and permission mode its transcript shows: Herdr reads the end of `<claude config dir>/projects/<project>/<session id>.jsonl` with the hook's rules. A pane started with `--dangerously-skip-permissions` that now runs in another mode keeps `--allow-dangerously-skip-permissions`, so bypass stays reachable with shift+tab.
+
 Prompts, session ids and one-shot options are never kept, relative paths are made absolute, and a value the resume command already carries (the model a Claude session switched to) wins over the launch value. A GPT Claude pane started with `--settings ~/.config/claude/gpt.settings.json` therefore restores with that settings file. A Codex started as `codex resume <id>` restores even when its hook never reported, because the id is on its command line.
 
 `herdr pane list` and `herdr pane get` show the command a restore would run now, as `agent_session.restore_argv`, so you can check every pane before a restart:
