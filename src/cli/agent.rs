@@ -204,6 +204,9 @@ fn print_agent_explain_text(explain: &serde_json::Value, verbose: bool) {
     if let Some(reason) = explain["screen_detection_skip_reason"].as_str() {
         println!("screen_detection_skip_reason: {reason}");
     }
+    if let Some(reason) = explain["blocked_reason"].as_str() {
+        println!("blocked_reason: {reason}");
+    }
     if let Some(reason) = explain["skipped_update_reason"].as_str() {
         println!("skipped_update_reason: {reason}");
     }

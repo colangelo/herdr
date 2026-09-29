@@ -653,6 +653,7 @@ fn claude_bash_prompt_with_dont_ask_again_option_matches_bash_rule() {
         Some("bash_permission_prompt")
     );
     assert!(result.visible_blocker);
+    assert_eq!(result.blocked_reason, Some(BlockedReason::Permission));
 }
 
 #[test]
@@ -847,11 +848,166 @@ fn claude_question_dialog_in_a_named_session_is_blocked() {
         assert_eq!(result.state, AgentState::Blocked, "{label} session");
         assert_eq!(
             result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
-            Some("live_blocked_form"),
+            Some("ask_user_question_dialog"),
             "{label} session"
         );
         assert!(result.visible_blocker, "{label} session");
+        assert_eq!(
+            result.blocked_reason,
+            Some(BlockedReason::Question),
+            "{label} session"
+        );
+        assert_eq!(
+            result.into_detection().blocked_reason,
+            Some(BlockedReason::Question),
+            "{label} session"
+        );
     }
+}
+
+// Fork issue 137: a form that is not a question dialog (no free-text or chat
+// option) stays with live_blocked_form and reports `form`.
+#[test]
+fn claude_select_form_without_question_options_reports_form() {
+    let screen = "────────────────\n  1. Yes\n  2. No\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n";
+    let result = osc_explain(Agent::Claude, screen, "", "");
+    assert_eq!(
+        result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("live_blocked_form")
+    );
+    assert_eq!(result.blocked_reason, Some(BlockedReason::Form));
+}
+
+#[test]
+fn claude_generic_permission_prompt_reports_permission() {
+    let screen = concat!(
+        "────────────────────────────────────────────────────────────────\n",
+        " Edit file\n",
+        " src/main.rs\n\n",
+        " Do you want to proceed?\n",
+        " ❯ 1. Yes\n",
+        "   2. No\n\n",
+        " Esc to cancel\n",
+    );
+    let result = osc_explain(Agent::Claude, screen, "", "");
+    assert_eq!(result.state, AgentState::Blocked);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("generic_permission_prompt")
+    );
+    assert_eq!(result.blocked_reason, Some(BlockedReason::Permission));
+}
+
+#[test]
+fn blocked_reason_comes_from_the_matched_rule_and_defaults_to_other() {
+    with_manifest_dirs("blocked-reason", || {
+        write_local_codex(&rules_manifest(
+            r#"
+[[rules]]
+id = "plain_blocked"
+state = "blocked"
+priority = 10
+contains = ["plain gate"]
+
+[[rules]]
+id = "form_blocked"
+state = "blocked"
+priority = 20
+blocked_reason = "form"
+contains = ["form gate"]
+
+[[rules]]
+id = "working"
+state = "working"
+priority = 5
+contains = ["busy"]
+"#,
+        ));
+
+        let plain = explain(Agent::Codex, "plain gate");
+        assert_eq!(plain.state, AgentState::Blocked);
+        assert_eq!(plain.blocked_reason, Some(BlockedReason::Other));
+        assert_eq!(
+            plain.into_detection().blocked_reason,
+            Some(BlockedReason::Other)
+        );
+
+        let form = explain(Agent::Codex, "form gate");
+        assert_eq!(form.blocked_reason, Some(BlockedReason::Form));
+
+        let working = explain(Agent::Codex, "busy");
+        assert_eq!(working.state, AgentState::Working);
+        assert_eq!(working.blocked_reason, None);
+        assert_eq!(working.into_detection().blocked_reason, None);
+
+        let fallback = explain(Agent::Codex, "nothing matches");
+        assert_eq!(fallback.blocked_reason, None);
+    });
+}
+
+#[test]
+fn manifest_validation_checks_blocked_reason() {
+    for reason in ["question", "permission", "form", "other"] {
+        assert!(
+            parse_manifest(&format!(
+                r#"
+id = "codex"
+
+[[rules]]
+id = "ok"
+state = "blocked"
+blocked_reason = "{reason}"
+contains = ["x"]
+"#
+            ))
+            .is_ok(),
+            "{reason}"
+        );
+    }
+
+    // An unknown value is rejected like any other bad key.
+    assert!(parse_manifest(
+        r#"
+id = "codex"
+
+[[rules]]
+id = "bad_value"
+state = "blocked"
+blocked_reason = "approval"
+contains = ["x"]
+"#
+    )
+    .is_err());
+
+    // A reason only means something on a blocked rule.
+    assert!(parse_manifest(
+        r#"
+id = "codex"
+
+[[rules]]
+id = "not_blocked"
+state = "idle"
+blocked_reason = "question"
+contains = ["x"]
+"#
+    )
+    .is_err());
+
+    // A manifest that declares an engine older than the key is rejected.
+    assert!(parse_manifest(
+        r#"
+id = "codex"
+version = "1"
+min_engine_version = 3
+
+[[rules]]
+id = "old_engine"
+state = "blocked"
+blocked_reason = "question"
+contains = ["x"]
+"#
+    )
+    .is_err());
 }
 
 #[test]
@@ -924,6 +1080,7 @@ fn claude_mcp_elicitation_is_blocked() {
             Some("mcp_elicitation_prompt"),
             "{result:#?}"
         );
+        assert_eq!(result.blocked_reason, Some(BlockedReason::Form));
     }
 }
 

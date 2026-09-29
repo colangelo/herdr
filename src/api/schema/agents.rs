@@ -210,6 +210,16 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_agent: Option<String>,
     pub agent_status: AgentStatus,
+    /// Why the agent is blocked: `question`, `permission`, `form` or
+    /// `other`. Present only while `agent_status` is `blocked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<crate::detect::BlockedReason>,
+    /// When the pane entered its current blocked spell, in unix
+    /// milliseconds. Present only while `agent_status` is `blocked`; it does
+    /// not move while the pane stays blocked and restarts after a server
+    /// restore or live handoff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_since: Option<i64>,
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub screen_detection_skipped: bool,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

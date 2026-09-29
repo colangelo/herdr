@@ -84,6 +84,9 @@ pub enum AppEvent {
         /// Working because of work the agent launched, not work it is doing;
         /// see `crate::detect::AgentDetection::background_work`.
         background_work: bool,
+        /// Why the state is Blocked, from the matched detection rule; see
+        /// `crate::detect::AgentDetection::blocked_reason`.
+        blocked_reason: Option<crate::detect::BlockedReason>,
         process_exited: bool,
         observed_at: Instant,
     },

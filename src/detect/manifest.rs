@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use super::{
     agent_label, manifest_update::ManifestVersion, parse_agent_label, Agent, AgentDetection,
-    AgentState,
+    AgentState, BlockedReason,
 };
 
 pub const DEFAULT_KNOWN_AGENT_IDLE_FALLBACK: &str = "default_known_agent_idle_fallback";
@@ -34,6 +34,9 @@ pub struct DetectionExplain {
     pub visible_idle: bool,
     pub visible_blocker: bool,
     pub visible_working: bool,
+    /// Why the state is Blocked (the matched rule's `blocked_reason`, else
+    /// `Other`); `None` when the state is not Blocked.
+    pub blocked_reason: Option<BlockedReason>,
     pub skip_state_update: bool,
     pub skipped_update_reason: Option<String>,
     pub fallback_reason: Option<String>,
@@ -164,6 +167,9 @@ struct ManifestRule {
     visible_blocker: bool,
     #[serde(default)]
     visible_working: bool,
+    /// Why the agent is blocked when this rule matches (fork issue 137).
+    /// Only valid on a `state = "blocked"` rule; unset reads as `other`.
+    blocked_reason: Option<BlockedReason>,
     #[serde(default)]
     skip_state_update: bool,
     #[serde(default)]
@@ -398,6 +404,7 @@ pub fn explain_for_label(agent_label: &str, screen_content: &str) -> DetectionEx
             visible_idle: false,
             visible_blocker: false,
             visible_working: false,
+            blocked_reason: None,
             skip_state_update: false,
             skipped_update_reason: None,
             fallback_reason: Some("unknown_agent".to_string()),
@@ -444,6 +451,7 @@ impl DetectionExplain {
             visible_blocker: self.visible_blocker,
             visible_working: self.visible_working,
             background_work,
+            blocked_reason: self.blocked_reason,
         }
     }
 }
@@ -525,6 +533,8 @@ fn evaluate_loaded_manifest(
         visible_idle: rule.visible_idle && state == AgentState::Idle,
         visible_blocker: rule.visible_blocker && state == AgentState::Blocked,
         visible_working: rule.visible_working && state == AgentState::Working,
+        blocked_reason: (state == AgentState::Blocked)
+            .then(|| rule.blocked_reason.unwrap_or(BlockedReason::Other)),
         skip_state_update: rule.skip_state_update,
         skipped_update_reason,
         fallback_reason: None,
@@ -582,6 +592,7 @@ fn fallback_explain(
         visible_idle: false,
         visible_blocker: false,
         visible_working: false,
+        blocked_reason: None,
         skip_state_update: false,
         skipped_update_reason: None,
         fallback_reason: known_agent.then(|| DEFAULT_KNOWN_AGENT_IDLE_FALLBACK.to_string()),
@@ -887,6 +898,7 @@ pub fn explain_to_json_value(explain: &DetectionExplain) -> serde_json::Value {
         "matched_rule": matched_rule,
         "visible_idle": explain.visible_idle,
         "visible_blocker": explain.visible_blocker,
+        "blocked_reason": explain.blocked_reason,
         "visible_working": explain.visible_working,
         "screen_detection_skipped": explain.screen_detection_skipped,
         "skip_state_update": explain.skip_state_update,
@@ -963,6 +975,23 @@ fn validate_manifest(manifest: &AgentManifest) -> Result<(), String> {
                 return Err(format!(
                     "rule {} uses skip_state_update with visible state evidence",
                     rule.id
+                ));
+            }
+        }
+        if rule.blocked_reason.is_some() {
+            if rule.state != Some(ManifestState::Blocked) {
+                return Err(format!(
+                    "rule {} uses blocked_reason without state = \"blocked\"",
+                    rule.id
+                ));
+            }
+            if manifest
+                .min_engine_version
+                .is_some_and(|version| version < BLOCKED_REASON_ENGINE_VERSION)
+            {
+                return Err(format!(
+                    "rule {} uses blocked_reason but min_engine_version is below {}",
+                    rule.id, BLOCKED_REASON_ENGINE_VERSION
                 ));
             }
         }
@@ -1345,6 +1374,7 @@ fn region_count(spec: &str, name: &str) -> Option<usize> {
 }
 
 const TOP_NON_EMPTY_LINES_ENGINE_VERSION: u32 = 3;
+const BLOCKED_REASON_ENGINE_VERSION: u32 = 4;
 const MAX_TOP_REGION_LINE_COUNT: usize = u16::MAX as usize;
 
 fn top_region_count(spec: &str) -> Option<usize> {

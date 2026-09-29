@@ -11942,6 +11942,7 @@ next_tab = ""
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
                 observed_at: Instant::now(),
             })
@@ -11991,6 +11992,7 @@ next_tab = ""
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: Instant::now(),
         });
@@ -12081,6 +12083,7 @@ next_tab = ""
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
                 observed_at: Instant::now(),
             })

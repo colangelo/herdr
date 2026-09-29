@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 // remains only for session-only/custom hook paths and fallback detection.
 // Process-exit updates clear matching hook authority before recomputing state.
 
-use crate::detect::{Agent, AgentState};
+use crate::detect::{Agent, AgentState, BlockedReason};
 use crate::terminal::TerminalId;
 
 /// How far apart a restarted agent's first session report and detection's
@@ -141,6 +141,20 @@ struct HeldSessionStartReport {
     received_at: Instant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockedSpell {
+    reason: BlockedReason,
+    since_unix_ms: i64,
+}
+
+fn unix_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
 /// Pure state for a server-owned terminal.
 ///
 /// During the migration this is still one-to-one with a pane-backed PTY, but
@@ -152,7 +166,15 @@ pub struct TerminalState {
     pub detected_agent: Option<Agent>,
     pub fallback_state: AgentState,
     fallback_visible_blocker: bool,
+    /// Why screen detection last reported Blocked; `None` unless
+    /// `fallback_state` is Blocked.
+    fallback_blocked_reason: Option<BlockedReason>,
     fallback_observed_at: Option<Instant>,
+    /// The current blocked spell (fork issue 137): why the effective state is
+    /// Blocked, and when it became Blocked, in unix ms. Set on entering
+    /// Blocked, kept while it stays Blocked, cleared on leaving. A runtime fact
+    /// that is not persisted and restarts after a restore or live handoff.
+    blocked_spell: Option<BlockedSpell>,
     pub hook_authority: Option<HookAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
@@ -213,7 +235,9 @@ impl TerminalState {
             detected_agent: None,
             fallback_state: AgentState::Unknown,
             fallback_visible_blocker: false,
+            fallback_blocked_reason: None,
             fallback_observed_at: None,
+            blocked_spell: None,
             hook_authority: None,
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -383,6 +407,9 @@ impl TerminalState {
         }
         self.detected_agent = crate::detect::parse_agent_label(&snapshot.authority.agent_label);
         self.state = snapshot.authority.state;
+        self.sync_blocked_spell(
+            (self.state == AgentState::Blocked).then_some(BlockedReason::Other),
+        );
         self.hook_authority = Some(snapshot.authority);
         self.agent_process_acquisition_pending = snapshot.acquisition_pending;
     }
@@ -406,6 +433,36 @@ impl TerminalState {
 
     pub(crate) fn set_background_work_observed(&mut self, observed: bool) {
         self.background_work_observed = observed;
+    }
+
+    /// Why the agent is blocked; `None` unless the state is Blocked.
+    pub fn blocked_reason(&self) -> Option<BlockedReason> {
+        (self.state == AgentState::Blocked).then(|| {
+            self.blocked_spell
+                .map_or(BlockedReason::Other, |spell| spell.reason)
+        })
+    }
+
+    /// When the current blocked spell began, in unix ms; `None` unless the
+    /// state is Blocked.
+    pub fn blocked_since_unix_ms(&self) -> Option<i64> {
+        self.blocked_spell
+            .filter(|_| self.state == AgentState::Blocked)
+            .map(|spell| spell.since_unix_ms)
+    }
+
+    /// Start, update or end the blocked spell for the effective state. Runs
+    /// on state recomputation only, never per frame; the clock is read only
+    /// when a spell starts.
+    fn sync_blocked_spell(&mut self, reason: Option<BlockedReason>) {
+        self.blocked_spell = match (reason, self.blocked_spell) {
+            (None, _) => None,
+            (Some(reason), Some(spell)) => Some(BlockedSpell { reason, ..spell }),
+            (Some(reason), None) => Some(BlockedSpell {
+                reason,
+                since_unix_ms: unix_now_ms(),
+            }),
+        };
     }
 
     pub(crate) fn terminal_title_stripped(&self) -> Option<String> {
@@ -511,6 +568,30 @@ impl TerminalState {
         process_exited: bool,
         now: Instant,
     ) -> TerminalStateMutation {
+        self.set_detected_screen_state_at(
+            agent,
+            fallback_state,
+            visible_blocker,
+            None,
+            _visible_working,
+            process_exited,
+            now,
+        )
+    }
+
+    /// Apply a screen detection result. `blocked_reason` is why the screen
+    /// reads Blocked (the matched rule's reason); ignored unless
+    /// `fallback_state` is Blocked, and `None` there reads as `Other`.
+    pub fn set_detected_screen_state_at(
+        &mut self,
+        agent: Option<Agent>,
+        fallback_state: AgentState,
+        visible_blocker: bool,
+        blocked_reason: Option<BlockedReason>,
+        _visible_working: bool,
+        process_exited: bool,
+        now: Instant,
+    ) -> TerminalStateMutation {
         let previous_agent_label = self.effective_agent_label().map(str::to_string);
         let previous_known_agent = self.effective_known_agent();
         let previous_state = self.state;
@@ -590,6 +671,8 @@ impl TerminalState {
         }
         self.fallback_state = fallback_state;
         self.fallback_visible_blocker = visible_blocker && fallback_state == AgentState::Blocked;
+        self.fallback_blocked_reason = (fallback_state == AgentState::Blocked)
+            .then(|| blocked_reason.unwrap_or(BlockedReason::Other));
         self.fallback_observed_at = Some(now);
         if process_exited {
             if let Some(agent) = agent {
@@ -2115,6 +2198,7 @@ impl TerminalState {
             self.detected_agent = None;
             self.fallback_state = AgentState::Unknown;
             self.fallback_visible_blocker = false;
+            self.fallback_blocked_reason = None;
             self.fallback_observed_at = None;
             self.clear_agent_name();
         }
@@ -2165,6 +2249,7 @@ impl TerminalState {
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
+        self.fallback_blocked_reason = None;
         self.fallback_observed_at = None;
         self.clear_agent_name();
         let current_session = self.current_session_identity_for_persistence();
@@ -2651,6 +2736,7 @@ impl TerminalState {
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
+        self.fallback_blocked_reason = None;
         self.fallback_observed_at = None;
         self.hook_authority = None;
         self.persisted_agent_session = None;
@@ -2663,6 +2749,7 @@ impl TerminalState {
         self.suppressed_full_lifecycle_hook_reports.clear();
         self.stale_full_lifecycle_hook_sessions.clear();
         self.state = AgentState::Unknown;
+        self.blocked_spell = None;
         self.last_agent_state_change_seq = None;
         self.launch_argv = None;
         self.respawn_shell_on_exit = false;
@@ -2735,15 +2822,24 @@ impl TerminalState {
         previous_presentation: EffectivePresentation,
         now: Instant,
     ) -> Option<EffectiveStateChange> {
-        let state = if self.visible_blocker_overrides_hook() {
-            AgentState::Blocked
+        // The screen's blocked reason applies when the screen decides the
+        // state; a hook report carries no reason, so it reads as `Other`.
+        let (state, screen_decides) = if self.visible_blocker_overrides_hook() {
+            (AgentState::Blocked, true)
         } else {
             self.hook_authority
                 .as_ref()
                 .filter(|authority| self.hook_authority_is_effective(authority))
-                .map(|authority| authority.state)
-                .unwrap_or(self.fallback_state)
+                .map_or((self.fallback_state, true), |authority| {
+                    (authority.state, false)
+                })
         };
+        let blocked_reason = (state == AgentState::Blocked).then(|| {
+            self.fallback_blocked_reason
+                .filter(|_| screen_decides)
+                .unwrap_or(BlockedReason::Other)
+        });
+        self.sync_blocked_spell(blocked_reason);
         let agent_label = self.effective_agent_label().map(str::to_string);
         let known_agent = self.effective_known_agent();
 
@@ -2945,6 +3041,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
         };
 
         assert_eq!(stabilize_agent_detection(detection), AgentState::Idle);
@@ -6814,5 +6911,109 @@ mod tests {
             terminal.hook_authority.as_ref().unwrap().source,
             "custom:pi"
         );
+    }
+
+    // Fork issue 137: a watcher needs to know why and since when a pane is
+    // blocked. The spell starts on entering Blocked, survives further blocked
+    // updates (even with another reason) and ends on leaving Blocked.
+    #[test]
+    fn a_blocked_spell_records_its_reason_and_start_until_it_ends() {
+        use crate::detect::BlockedReason;
+        let mut terminal = test_terminal();
+        let now = Instant::now();
+        terminal.set_detected_screen_state_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            None,
+            false,
+            false,
+            now,
+        );
+        assert_eq!(terminal.blocked_reason(), None);
+        assert_eq!(terminal.blocked_since_unix_ms(), None);
+
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis() as i64;
+        terminal.set_detected_screen_state_at(
+            Some(Agent::Claude),
+            AgentState::Blocked,
+            true,
+            Some(BlockedReason::Question),
+            false,
+            false,
+            now + Duration::from_millis(10),
+        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Question));
+        let since = terminal.blocked_since_unix_ms().expect("blocked since");
+        assert!(since >= before, "{since} < {before}");
+
+        std::thread::sleep(Duration::from_millis(5));
+        terminal.set_detected_screen_state_at(
+            Some(Agent::Claude),
+            AgentState::Blocked,
+            true,
+            Some(BlockedReason::Permission),
+            false,
+            false,
+            now + Duration::from_millis(20),
+        );
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Permission));
+        assert_eq!(terminal.blocked_since_unix_ms(), Some(since));
+
+        terminal.set_detected_screen_state_at(
+            Some(Agent::Claude),
+            AgentState::Idle,
+            false,
+            None,
+            false,
+            false,
+            now + Duration::from_millis(30),
+        );
+        assert_eq!(terminal.blocked_reason(), None);
+        assert_eq!(terminal.blocked_since_unix_ms(), None);
+
+        // A new spell gets a new start.
+        std::thread::sleep(Duration::from_millis(5));
+        terminal.set_detected_screen_state_at(
+            Some(Agent::Claude),
+            AgentState::Blocked,
+            false,
+            None,
+            false,
+            false,
+            now + Duration::from_millis(40),
+        );
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Other));
+        assert!(terminal.blocked_since_unix_ms().expect("new spell") > since);
+    }
+
+    #[test]
+    fn a_blocked_state_from_a_hook_reports_other() {
+        use crate::detect::BlockedReason;
+        let mut terminal = test_terminal();
+        terminal.set_hook_authority(
+            "custom:pi".into(),
+            "pi".into(),
+            AgentState::Blocked,
+            None,
+            None,
+        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.blocked_reason(), Some(BlockedReason::Other));
+        assert!(terminal.blocked_since_unix_ms().is_some());
+
+        terminal.set_hook_authority(
+            "custom:pi".into(),
+            "pi".into(),
+            AgentState::Idle,
+            None,
+            None,
+        );
+        assert_eq!(terminal.blocked_reason(), None);
+        assert_eq!(terminal.blocked_since_unix_ms(), None);
     }
 }

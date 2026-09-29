@@ -89,6 +89,31 @@
           ],
           "type": "string"
         },
+        "BlockedReason": {
+          "description": "Why an agent is blocked, as far as herdr can tell (fork issue 137). A\nmanifest rule names it with `blocked_reason`; a blocked state from a rule\nthat names none, or from a hook report, is `Other`.",
+          "oneOf": [
+            {
+              "const": "question",
+              "description": "The agent asked the user a question and waits for the answer.",
+              "type": "string"
+            },
+            {
+              "const": "permission",
+              "description": "The agent waits for approval to run a tool or command.",
+              "type": "string"
+            },
+            {
+              "const": "form",
+              "description": "The agent shows a form or selection that needs input.",
+              "type": "string"
+            },
+            {
+              "const": "other",
+              "description": "Blocked for a reason herdr cannot name.",
+              "type": "string"
+            }
+          ]
+        },
         "EventData": {
           "oneOf": [
             {
@@ -878,6 +903,25 @@
             },
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/BlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the agent is blocked: `question`, `permission`, `form` or\n`other`. Present only while `agent_status` is `blocked`."
+            },
+            "blocked_since": {
+              "description": "When the pane entered its current blocked spell, in unix\nmilliseconds. Present only while `agent_status` is `blocked`; it does\nnot move while the pane stays blocked and restarts after a server\nrestore or live handoff.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "cwd": {
               "type": [
@@ -6750,6 +6794,25 @@
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
             },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/BlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the agent is blocked: `question`, `permission`, `form` or\n`other`. Present only while `agent_status` is `blocked`."
+            },
+            "blocked_since": {
+              "description": "When the pane entered its current blocked spell, in unix\nmilliseconds. Present only while `agent_status` is `blocked`; it does\nnot move while the pane stays blocked and restarts after a server\nrestore or live handoff.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "cwd": {
               "type": [
                 "string",
@@ -6986,6 +7049,31 @@
             "unknown"
           ],
           "type": "string"
+        },
+        "BlockedReason": {
+          "description": "Why an agent is blocked, as far as herdr can tell (fork issue 137). A\nmanifest rule names it with `blocked_reason`; a blocked state from a rule\nthat names none, or from a hook report, is `Other`.",
+          "oneOf": [
+            {
+              "const": "question",
+              "description": "The agent asked the user a question and waits for the answer.",
+              "type": "string"
+            },
+            {
+              "const": "permission",
+              "description": "The agent waits for approval to run a tool or command.",
+              "type": "string"
+            },
+            {
+              "const": "form",
+              "description": "The agent shows a form or selection that needs input.",
+              "type": "string"
+            },
+            {
+              "const": "other",
+              "description": "Blocked for a reason herdr cannot name.",
+              "type": "string"
+            }
+          ]
         },
         "ClientWindowTitleReason": {
           "enum": [
@@ -8171,6 +8259,25 @@
             },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "blocked_reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/BlockedReason"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Why the agent is blocked: `question`, `permission`, `form` or\n`other`. Present only while `agent_status` is `blocked`."
+            },
+            "blocked_since": {
+              "description": "When the pane entered its current blocked spell, in unix\nmilliseconds. Present only while `agent_status` is `blocked`; it does\nnot move while the pane stays blocked and restarts after a server\nrestore or live handoff.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "cwd": {
               "type": [

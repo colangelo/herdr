@@ -19,6 +19,24 @@ pub enum AgentState {
     Unknown,
 }
 
+/// Why an agent is blocked, as far as herdr can tell (fork issue 137). A
+/// manifest rule names it with `blocked_reason`; a blocked state from a rule
+/// that names none, or from a hook report, is `Other`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockedReason {
+    /// The agent asked the user a question and waits for the answer.
+    Question,
+    /// The agent waits for approval to run a tool or command.
+    Permission,
+    /// The agent shows a form or selection that needs input.
+    Form,
+    /// Blocked for a reason herdr cannot name.
+    Other,
+}
+
 /// Screen-derived agent state plus confidence metadata used for source arbitration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentDetection {
@@ -42,6 +60,9 @@ pub struct AgentDetection {
     /// parked at its prompt and will wake when that work finishes, so the
     /// sidebar draws it apart from an agent mid-turn.
     pub background_work: bool,
+    /// Why the state is Blocked: the matched rule's `blocked_reason`, or
+    /// `Other` when it names none. `None` whenever the state is not Blocked.
+    pub blocked_reason: Option<BlockedReason>,
 }
 
 /// Which agent we detected running in a pane.
@@ -380,6 +401,7 @@ pub fn detect_agent_with_osc(
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
         };
     };
     manifest::detect_with_osc(

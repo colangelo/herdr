@@ -205,6 +205,7 @@ impl App {
                 "visible_idle": false,
                 "visible_blocker": false,
                 "visible_working": false,
+                "blocked_reason": terminal.blocked_reason(),
                 "screen_detection_skipped": true,
                 "screen_detection_skip_reason": "full_lifecycle_hook_authority",
                 "skip_state_update": false,
@@ -367,6 +368,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: true,
             observed_at,
         });
@@ -715,6 +717,84 @@ mod tests {
         };
         assert_eq!(agent.name.as_deref(), Some("reviewer"));
         assert_eq!(agent.name_source, None);
+    }
+
+    // Fork issue 137: a watcher reads why and since when an agent is blocked
+    // from the API instead of scraping its screen.
+    #[test]
+    fn agent_list_reports_blocked_reason_and_since_only_while_blocked() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let list_json = |app: &mut App| {
+            let listed: SuccessResponse =
+                serde_json::from_str(&app.handle_agent_list("req".into())).unwrap();
+            let ResponseResult::AgentList { agents } = listed.result else {
+                panic!("expected agent list");
+            };
+            serde_json::to_value(&agents[0]).unwrap()
+        };
+        let now = std::time::Instant::now();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_screen_state_at(
+                Some(Agent::Claude),
+                AgentState::Idle,
+                false,
+                None,
+                false,
+                false,
+                now,
+            );
+        let idle = list_json(&mut app);
+        assert!(idle.get("blocked_reason").is_none(), "{idle}");
+        assert!(idle.get("blocked_since").is_none(), "{idle}");
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_screen_state_at(
+                Some(Agent::Claude),
+                AgentState::Blocked,
+                true,
+                Some(crate::detect::BlockedReason::Question),
+                false,
+                false,
+                now,
+            );
+        let blocked = list_json(&mut app);
+        assert_eq!(blocked["agent_status"], "blocked");
+        assert_eq!(blocked["blocked_reason"], "question");
+        let since = blocked["blocked_since"].as_i64().expect("unix ms");
+        assert!(since > 1_700_000_000_000, "{since}");
+        let pane = app.pane_info(0, pane_id).expect("pane info");
+        assert_eq!(
+            pane.blocked_reason,
+            Some(crate::detect::BlockedReason::Question)
+        );
+        assert_eq!(pane.blocked_since, Some(since));
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_screen_state_at(
+                Some(Agent::Claude),
+                AgentState::Idle,
+                false,
+                None,
+                false,
+                false,
+                now,
+            );
+        let done = list_json(&mut app);
+        assert!(done.get("blocked_reason").is_none(), "{done}");
+        assert!(done.get("blocked_since").is_none(), "{done}");
     }
 
     #[test]

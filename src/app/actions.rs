@@ -3351,15 +3351,16 @@ impl AppState {
                 visible_blocker,
                 visible_working,
                 background_work,
+                blocked_reason,
                 process_exited,
                 observed_at,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
-                    let mutation = terminal.set_detected_state_with_screen_signals_at(
+                    let mutation = terminal.set_detected_screen_state_at(
                         agent,
                         state,
                         visible_blocker,
-                        false,
+                        blocked_reason,
                         visible_working,
                         process_exited,
                         observed_at,
@@ -5963,6 +5964,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6002,6 +6004,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6036,6 +6039,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6059,6 +6063,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6081,6 +6086,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6091,6 +6097,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6204,6 +6211,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: true,
             observed_at: Instant::now(),
         });
@@ -6238,6 +6246,7 @@ mod tests {
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
                 observed_at: Instant::now(),
             })
@@ -6259,6 +6268,7 @@ mod tests {
                 visible_blocker: agent_state == AgentState::Blocked,
                 visible_working: agent_state == AgentState::Working,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
                 observed_at: Instant::now(),
             });
@@ -6271,6 +6281,7 @@ mod tests {
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
                 observed_at: Instant::now(),
             })
@@ -6297,6 +6308,7 @@ mod tests {
             visible_blocker: false,
             visible_working: true,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: Instant::now(),
         });
@@ -6308,6 +6320,7 @@ mod tests {
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: true,
                 observed_at: Instant::now(),
             })
@@ -6354,6 +6367,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6379,6 +6393,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6412,6 +6427,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6424,6 +6440,7 @@ mod tests {
             visible_blocker: false,
             visible_working: true,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6448,6 +6465,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6474,6 +6492,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6502,6 +6521,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6620,6 +6640,7 @@ mod tests {
 
         state.handle_app_event(AppEvent::StateChanged {
             background_work: false,
+            blocked_reason: None,
             pane_id,
             agent: Some(Agent::Pi),
             state: AgentState::Idle,
@@ -6755,6 +6776,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6774,6 +6796,7 @@ mod tests {
             visible_blocker: true,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6805,6 +6828,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6829,6 +6853,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6856,6 +6881,7 @@ mod tests {
             visible_blocker: false,
             visible_working: true,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -6917,6 +6943,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -7051,6 +7078,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -7100,6 +7128,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -7130,6 +7159,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -7157,6 +7187,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -7181,6 +7212,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });
@@ -7203,6 +7235,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
             process_exited: false,
             observed_at: std::time::Instant::now(),
         });

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::detect::{Agent, AgentDetection, AgentState};
+use crate::detect::{Agent, AgentDetection, AgentState, BlockedReason};
 
 pub(super) const AGENT_PENDING_IDLE_RECHECK: std::time::Duration =
     std::time::Duration::from_millis(100);
@@ -19,6 +19,7 @@ pub(super) struct DetectionPublishState {
     pub(super) visible_blocker: bool,
     pub(super) visible_working: bool,
     pub(super) background_work: bool,
+    pub(super) blocked_reason: Option<BlockedReason>,
 }
 
 /// Initial detection-task variables derived from a handoff agent seed, so the
@@ -200,6 +201,7 @@ pub(super) fn should_publish_detection_update(
         || next.visible_blocker != previous.visible_blocker
         || next.visible_working != previous.visible_working
         || next.background_work != previous.background_work
+        || next.blocked_reason != previous.blocked_reason
         || agent_changed
         || process_exited
         || (stable_visible_signal_refresh_due && next.visible_blocker && previous.visible_blocker)
@@ -271,6 +273,7 @@ pub(super) enum DetectionPublishDecision {
         visible_blocker: bool,
         visible_working: bool,
         background_work: bool,
+        blocked_reason: Option<BlockedReason>,
         process_exited: bool,
     },
 }
@@ -282,6 +285,7 @@ pub(super) struct ScreenDetectionPublishInput {
     pub(super) last_visible_blocker: bool,
     pub(super) last_visible_working: bool,
     pub(super) last_background_work: bool,
+    pub(super) last_blocked_reason: Option<BlockedReason>,
     pub(super) last_visible_signal_refresh: Option<std::time::Instant>,
     pub(super) screen_detection: AgentDetection,
     pub(super) process_exited: bool,
@@ -299,6 +303,9 @@ pub(super) fn decide_screen_detection_publish(
     let visible_blocker = detection.visible_blocker && new_state == AgentState::Blocked;
     let visible_working = detection.visible_working && new_state == AgentState::Working;
     let background_work = detection.background_work && new_state == AgentState::Working;
+    let blocked_reason = detection
+        .blocked_reason
+        .filter(|_| new_state == AgentState::Blocked);
 
     let previous_publish = DetectionPublishState {
         state: input.current_state,
@@ -306,6 +313,7 @@ pub(super) fn decide_screen_detection_publish(
         visible_blocker: input.last_visible_blocker,
         visible_working: input.last_visible_working,
         background_work: input.last_background_work,
+        blocked_reason: input.last_blocked_reason,
     };
     let next_publish = DetectionPublishState {
         state: new_state,
@@ -313,6 +321,7 @@ pub(super) fn decide_screen_detection_publish(
         visible_blocker,
         visible_working,
         background_work,
+        blocked_reason,
     };
     let stable_refresh_due = stable_visible_signal_refresh_due(
         previous_publish,
@@ -339,6 +348,7 @@ pub(super) fn decide_screen_detection_publish(
             visible_blocker,
             visible_working,
             background_work,
+            blocked_reason,
             process_exited: input.process_exited,
         },
     }
@@ -368,6 +378,7 @@ pub(super) fn detection_update_for_publish_with_osc(
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
         });
     }
 
@@ -396,6 +407,7 @@ mod tests {
             visible_blocker: false,
             visible_working: false,
             background_work: false,
+            blocked_reason: None,
         }
     }
 
@@ -407,6 +419,7 @@ mod tests {
             visible_blocker: false,
             visible_working: state == AgentState::Working,
             background_work: false,
+            blocked_reason: (state == AgentState::Blocked).then_some(BlockedReason::Other),
         }
     }
 
@@ -421,6 +434,7 @@ mod tests {
             last_visible_blocker: false,
             last_visible_working: false,
             last_background_work: false,
+            last_blocked_reason: None,
             last_visible_signal_refresh: None,
             screen_detection,
             process_exited: false,
@@ -591,6 +605,7 @@ mod tests {
                 visible_blocker: false,
                 visible_working: true,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
             }
         );
@@ -612,8 +627,40 @@ mod tests {
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
             }
+        );
+    }
+
+    // Fork issue 137: a blocked pane whose reason changes (a permission prompt
+    // replaced by a question dialog) republishes so the reason stays current.
+    #[test]
+    fn screen_publish_republishes_when_only_the_blocked_reason_changes() {
+        let now = std::time::Instant::now();
+        let mut pending_idle = PendingIdleConfirmation::default();
+        let mut detection = screen_detection(AgentState::Blocked);
+        detection.blocked_reason = Some(BlockedReason::Question);
+        let mut input = screen_publish_input(AgentState::Blocked, detection, now);
+        input.last_blocked_reason = Some(BlockedReason::Permission);
+
+        assert_eq!(
+            decide_screen_detection_publish(input, &mut pending_idle),
+            DetectionPublishDecision::Publish {
+                state: AgentState::Blocked,
+                visible_idle: false,
+                visible_blocker: false,
+                visible_working: false,
+                background_work: false,
+                blocked_reason: Some(BlockedReason::Question),
+                process_exited: false,
+            }
+        );
+
+        input.last_blocked_reason = Some(BlockedReason::Question);
+        assert_eq!(
+            decide_screen_detection_publish(input, &mut pending_idle),
+            DetectionPublishDecision::NoPublish
         );
     }
 

@@ -278,6 +278,7 @@ async fn publish_state_changed_event(
     visible_blocker: bool,
     visible_working: bool,
     background_work: bool,
+    blocked_reason: Option<crate::detect::BlockedReason>,
     process_exited: bool,
     observed_at: std::time::Instant,
 ) {
@@ -292,6 +293,7 @@ async fn publish_state_changed_event(
             visible_blocker,
             visible_working,
             background_work,
+            blocked_reason,
             process_exited,
             observed_at,
         })
@@ -372,6 +374,7 @@ struct AgentDetectionPublishUpdate {
     visible_blocker: bool,
     visible_working: bool,
     background_work: bool,
+    blocked_reason: Option<crate::detect::BlockedReason>,
     process_exited: bool,
 }
 
@@ -383,6 +386,7 @@ struct DetectionPublishTrackers<'a> {
     last_visible_blocker: &'a mut bool,
     last_visible_working: &'a mut bool,
     last_background_work: &'a mut bool,
+    last_blocked_reason: &'a mut Option<crate::detect::BlockedReason>,
     last_visible_signal_refresh: &'a mut Option<std::time::Instant>,
 }
 
@@ -401,6 +405,7 @@ async fn apply_agent_detection_publish_update(
     *trackers.last_visible_blocker = update.visible_blocker;
     *trackers.last_visible_working = update.visible_working;
     *trackers.last_background_work = update.background_work;
+    *trackers.last_blocked_reason = update.blocked_reason;
     *trackers.last_visible_signal_refresh = if update.visible_blocker || update.visible_working {
         Some(observed_at)
     } else {
@@ -417,6 +422,7 @@ async fn apply_agent_detection_publish_update(
         update.visible_blocker,
         update.visible_working,
         update.background_work,
+        update.blocked_reason,
         update.process_exited,
         observed_at,
     )
@@ -1158,6 +1164,7 @@ fn spawn_basic_detection_task(
         let mut last_visible_blocker = seed.last_visible_blocker;
         let mut last_visible_working = seed.last_visible_working;
         let mut last_background_work = seed.last_background_work;
+        let mut last_blocked_reason = None;
         let mut seeded_hold = seed.agent.is_some();
         let mut last_visible_signal_refresh = None;
         let mut last_process_check = std::time::Instant::now();
@@ -1194,6 +1201,7 @@ fn spawn_basic_detection_task(
                     last_visible_blocker = false;
                     last_visible_working = false;
                     last_background_work = false;
+                    last_blocked_reason = None;
                     last_visible_signal_refresh = None;
                     last_process_check = std::time::Instant::now();
                     last_foreground_pgid = None;
@@ -1333,6 +1341,7 @@ fn spawn_basic_detection_task(
                             last_visible_idle = false;
                             last_visible_blocker = false;
                             last_visible_working = false;
+                            last_blocked_reason = None;
                             last_visible_signal_refresh = None;
                             publish_agent_process_detected_event(
                                 state_events.clone(),
@@ -1447,6 +1456,7 @@ fn spawn_basic_detection_task(
                     last_visible_blocker,
                     last_visible_working,
                     last_background_work,
+                    last_blocked_reason,
                     last_visible_signal_refresh,
                     process_exited,
                     agent_changed,
@@ -1461,6 +1471,7 @@ fn spawn_basic_detection_task(
                     visible_blocker,
                     visible_working,
                     background_work,
+                    blocked_reason,
                     process_exited: publish_process_exited,
                 } => {
                     apply_agent_detection_publish_update(
@@ -1473,6 +1484,7 @@ fn spawn_basic_detection_task(
                             visible_blocker,
                             visible_working,
                             background_work,
+                            blocked_reason,
                             process_exited: publish_process_exited,
                         },
                         now,
@@ -1482,6 +1494,7 @@ fn spawn_basic_detection_task(
                             last_visible_blocker: &mut last_visible_blocker,
                             last_visible_working: &mut last_visible_working,
                             last_background_work: &mut last_background_work,
+                            last_blocked_reason: &mut last_blocked_reason,
                             last_visible_signal_refresh: &mut last_visible_signal_refresh,
                         },
                         &mut foreground_shell_exit_reported,
@@ -2970,6 +2983,7 @@ impl PaneRuntime {
                 let mut last_visible_blocker = false;
                 let mut last_visible_working = false;
                 let mut last_background_work = false;
+                let mut last_blocked_reason = None;
                 let mut last_visible_signal_refresh = None;
                 let mut last_detection_text = String::new();
                 let mut last_screen_scan_detection_content_seq = None;
@@ -3014,6 +3028,7 @@ impl PaneRuntime {
                             last_visible_blocker = false;
                             last_visible_working = false;
                             last_background_work = false;
+                            last_blocked_reason = None;
                             last_visible_signal_refresh = None;
                             last_detection_text.clear();
                             last_screen_scan_detection_content_seq = None;
@@ -3201,6 +3216,7 @@ impl PaneRuntime {
                                         last_visible_idle = false;
                                         last_visible_blocker = false;
                                         last_visible_working = false;
+                                        last_blocked_reason = None;
                                         last_visible_signal_refresh = None;
                                         publish_agent_process_detected_event(
                                             state_events.clone(),
@@ -3336,6 +3352,7 @@ impl PaneRuntime {
                             last_visible_blocker,
                             last_visible_working,
                             last_background_work,
+                            last_blocked_reason,
                             last_visible_signal_refresh,
                             process_exited,
                             agent_changed,
@@ -3350,6 +3367,7 @@ impl PaneRuntime {
                             visible_blocker,
                             visible_working,
                             background_work,
+                            blocked_reason,
                             process_exited: publish_process_exited,
                         } => {
                             apply_agent_detection_publish_update(
@@ -3362,6 +3380,7 @@ impl PaneRuntime {
                                     visible_blocker,
                                     visible_working,
                                     background_work,
+                                    blocked_reason,
                                     process_exited: publish_process_exited,
                                 },
                                 now,
@@ -3371,6 +3390,7 @@ impl PaneRuntime {
                                     last_visible_blocker: &mut last_visible_blocker,
                                     last_visible_working: &mut last_visible_working,
                                     last_background_work: &mut last_background_work,
+                                    last_blocked_reason: &mut last_blocked_reason,
                                     last_visible_signal_refresh: &mut last_visible_signal_refresh,
                                 },
                                 &mut foreground_shell_exit_reported,
@@ -6337,6 +6357,7 @@ mod tests {
             false,
             false,
             false,
+            None,
             false,
             std::time::Instant::now(),
         );
@@ -6376,6 +6397,7 @@ mod tests {
                 visible_blocker: false,
                 visible_working: false,
                 background_work: false,
+                blocked_reason: None,
                 process_exited: false,
                 observed_at: _,
             } if delivered_pane == pane_id
