@@ -1128,16 +1128,13 @@ fn parse_pane_clear_args(args: &[String]) -> Result<String, String> {
 }
 
 fn pane_close(args: &[String]) -> std::io::Result<i32> {
-    let Some(raw_pane_id) = args.first() else {
-        eprintln!("usage: herdr pane close <pane_id>");
+    let (args, force) = super::take_force_flag(args);
+    let [raw_pane_id] = args.as_slice() else {
+        eprintln!("usage: herdr pane close <pane_id> [--force]");
         return Ok(2);
     };
-    if args.len() != 1 {
-        eprintln!("usage: herdr pane close <pane_id>");
-        return Ok(2);
-    }
 
-    super::runtime::pane_close(super::normalize_pane_id(raw_pane_id))
+    super::runtime::pane_close(super::normalize_pane_id(raw_pane_id), force)
 }
 
 fn pane_respawn(args: &[String]) -> std::io::Result<i32> {

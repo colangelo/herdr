@@ -162,16 +162,13 @@ fn tab_rename(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn tab_close(args: &[String]) -> std::io::Result<i32> {
-    let Some(raw_tab_id) = args.first() else {
-        eprintln!("usage: herdr tab close <tab_id>");
+    let (args, force) = super::take_force_flag(args);
+    let [raw_tab_id] = args.as_slice() else {
+        eprintln!("usage: herdr tab close <tab_id> [--force]");
         return Ok(2);
     };
-    if args.len() != 1 {
-        eprintln!("usage: herdr tab close <tab_id>");
-        return Ok(2);
-    }
 
-    super::runtime::tab_close(super::normalize_tab_id(raw_tab_id))
+    super::runtime::tab_close(super::normalize_tab_id(raw_tab_id), force)
 }
 
 fn print_tab_help() {

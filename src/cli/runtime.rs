@@ -1,10 +1,10 @@
 use crate::api::schema::{
-    EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, Method, PaneFocusDirectionParams,
-    PaneInputSetParams, PaneMoveParams, PaneRenameParams, PaneResizeParams, PaneSplitParams,
-    PaneSwapParams, PaneTarget, PaneZoomParams, Request, TabCreateParams, TabListParams,
-    TabRenameParams, TabTarget, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceRenameParams,
-    WorkspaceTarget, WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams,
-    WorktreeRemoveParams,
+    EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, Method, PaneCloseParams,
+    PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PaneRenameParams,
+    PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request,
+    TabCloseParams, TabCreateParams, TabListParams, TabRenameParams, TabTarget,
+    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceRenameParams, WorkspaceTarget,
+    WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams, WorktreeRemoveParams,
 };
 
 fn print_method_response(id: &'static str, method: Method) -> std::io::Result<i32> {
@@ -67,8 +67,11 @@ pub(super) fn tab_rename(params: TabRenameParams) -> std::io::Result<i32> {
     print_method_response("cli:tab:rename", Method::TabRename(params))
 }
 
-pub(super) fn tab_close(tab_id: String) -> std::io::Result<i32> {
-    print_method_response("cli:tab:close", Method::TabClose(TabTarget { tab_id }))
+pub(super) fn tab_close(tab_id: String, force: bool) -> std::io::Result<i32> {
+    print_method_response(
+        "cli:tab:close",
+        Method::TabClose(TabCloseParams { tab_id, force }),
+    )
 }
 
 pub(super) fn worktree_list(params: WorktreeListParams) -> std::io::Result<i32> {
@@ -119,8 +122,11 @@ pub(super) fn pane_move(params: PaneMoveParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:move", Method::PaneMove(params))
 }
 
-pub(super) fn pane_close(pane_id: String) -> std::io::Result<i32> {
-    print_method_response("cli:pane:close", Method::PaneClose(PaneTarget { pane_id }))
+pub(super) fn pane_close(pane_id: String, force: bool) -> std::io::Result<i32> {
+    print_method_response(
+        "cli:pane:close",
+        Method::PaneClose(PaneCloseParams { pane_id, force }),
+    )
 }
 
 pub(super) fn pane_respawn(pane_id: String) -> std::io::Result<i32> {

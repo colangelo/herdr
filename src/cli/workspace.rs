@@ -225,11 +225,12 @@ fn workspace_report_metadata(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn workspace_close(args: &[String]) -> std::io::Result<i32> {
-    let (raw_workspace_id, close_group) = match args {
-        [workspace_id] => (workspace_id, false),
-        [workspace_id, flag] if flag == "--group" => (workspace_id, true),
+    let (args, force) = super::take_force_flag(args);
+    let (raw_workspace_id, close_group) = match args.as_slice() {
+        [workspace_id] => (*workspace_id, false),
+        [workspace_id, flag] if *flag == "--group" => (*workspace_id, true),
         _ => {
-            eprintln!("usage: herdr workspace close <workspace_id> [--group]");
+            eprintln!("usage: herdr workspace close <workspace_id> [--group] [--force]");
             return Ok(2);
         }
     };
@@ -237,6 +238,7 @@ fn workspace_close(args: &[String]) -> std::io::Result<i32> {
     super::runtime::workspace_close(crate::api::schema::WorkspaceCloseParams {
         workspace_id: super::normalize_workspace_id(raw_workspace_id),
         close_group,
+        force,
     })
 }
 

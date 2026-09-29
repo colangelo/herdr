@@ -230,7 +230,11 @@ fn workspace_command() -> Command {
                 .arg(option("seq", "N"))
                 .arg(option("ttl-ms", "N")),
         )
-        .subcommand(id_command("close", "workspace_id", "Close a workspace"))
+        .subcommand(
+            id_command("close", "workspace_id", "Close a workspace")
+                .arg(flag("group"))
+                .arg(flag("force")),
+        )
 }
 
 fn worktree_command() -> Command {
@@ -299,7 +303,7 @@ fn tab_command() -> Command {
                 .arg(required("tab_id", "TAB_ID"))
                 .arg(required("label", "LABEL").num_args(1..)),
         )
-        .subcommand(id_command("close", "tab_id", "Close a tab"))
+        .subcommand(id_command("close", "tab_id", "Close a tab").arg(flag("force")))
 }
 
 fn notification_command() -> Command {
@@ -667,7 +671,7 @@ fn pane_command() -> Command {
                 .arg(Arg::new("pane_id").value_name("PANE_ID"))
                 .args(current_pane_args()),
         )
-        .subcommand(id_command("close", "pane_id", "Close a pane"))
+        .subcommand(id_command("close", "pane_id", "Close a pane").arg(flag("force")))
         .subcommand(id_command(
             "respawn",
             "pane_id",

@@ -890,6 +890,12 @@ pub(super) fn normalize_tab_id(value: &str) -> String {
     value.to_string()
 }
 
+/// Splits `--force` out of a close command's arguments.
+pub(super) fn take_force_flag(args: &[String]) -> (Vec<&String>, bool) {
+    let force = args.iter().any(|arg| arg == "--force");
+    (args.iter().filter(|arg| *arg != "--force").collect(), force)
+}
+
 pub(super) fn normalize_pane_id(value: &str) -> String {
     value.to_string()
 }
@@ -1075,6 +1081,22 @@ fn _print_json<T: Serialize>(value: &T) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn close_commands_take_force_anywhere() {
+        let args = |parts: &[&str]| {
+            parts
+                .iter()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+        };
+        let with = args(&["w1:p2", "--force"]);
+        assert_eq!(super::take_force_flag(&with), (vec![&with[0]], true));
+        let before = args(&["--force", "w1:p2"]);
+        assert_eq!(super::take_force_flag(&before), (vec![&before[1]], true));
+        let without = args(&["w1:p2"]);
+        assert_eq!(super::take_force_flag(&without), (vec![&without[0]], false));
+    }
+
     #[test]
     fn parses_channel_set_argument() {
         assert_eq!(
