@@ -1926,11 +1926,28 @@ impl App {
         let pid = self
             .lookup_runtime_sender(ws_idx, pane_id)
             .and_then(crate::terminal::TerminalRuntime::child_pid)?;
-        let name = crate::detect::foreground_process_group_id(pid)
-            .and_then(crate::detect::foreground_group_leader_job)
-            .and_then(|job| job.processes.into_iter().next())
-            .map(|process| process.name);
-        Some(StoppedProcess { pid, name })
+        // The foreground job's leader, or one PTY down when the pane runs a
+        // recognised wrapper (atuin's pty-proxy), so the process named is the
+        // program the user started, not the wrapper.
+        let leader = |job: &crate::platform::ForegroundJob| {
+            job.processes
+                .iter()
+                .find(|process| process.pid == job.process_group_id)
+                .or_else(|| job.processes.first())
+                .map(|process| StoppedProcess {
+                    pid: process.pid,
+                    name: Some(process.name.clone()),
+                })
+        };
+        let named = crate::detect::foreground_job(pid).and_then(|job| {
+            crate::detect::wrapped_shell_job(
+                &job,
+                crate::platform::nested_foreground_job_with_owner,
+            )
+            .and_then(|(_, nested)| leader(&nested))
+            .or_else(|| leader(&job))
+        });
+        Some(named.unwrap_or(StoppedProcess { pid, name: None }))
     }
 
     pub(super) fn handle_pane_send_keys(

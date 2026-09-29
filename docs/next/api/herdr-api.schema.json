@@ -10863,7 +10863,7 @@
           "type": "string"
         },
         "StoppedProcess": {
-          "description": "The process a forced respawn stopped: its pid and, when the platform can\ntell, the name of the pane's foreground process.",
+          "description": "The program a forced respawn stopped: the pane's foreground program (looked\nfor behind a wrapper such as atuin's pty-proxy), or the pane shell's pid\nwith no name when the platform cannot tell.",
           "properties": {
             "name": {
               "type": [

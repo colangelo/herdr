@@ -34,8 +34,9 @@ pub struct ClosedPaneTodos {
     pub todos: Vec<TodoInfo>,
 }
 
-/// The process a forced respawn stopped: its pid and, when the platform can
-/// tell, the name of the pane's foreground process.
+/// The program a forced respawn stopped: the pane's foreground program (looked
+/// for behind a wrapper such as atuin's pty-proxy), or the pane shell's pid
+/// with no name when the platform cannot tell.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StoppedProcess {
     pub pid: u32,
