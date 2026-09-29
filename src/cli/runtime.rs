@@ -1,7 +1,7 @@
 use crate::api::schema::{
     EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, Method, PaneCloseParams,
     PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams, PaneRenameParams,
-    PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomParams, Request,
+    PaneResizeParams, PaneRespawnParams, PaneSplitParams, PaneSwapParams, PaneZoomParams, Request,
     TabCloseParams, TabCreateParams, TabListParams, TabRenameParams, TabTarget,
     WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceRenameParams, WorkspaceTarget,
     WorktreeCreateParams, WorktreeListParams, WorktreeOpenParams, WorktreeRemoveParams,
@@ -129,10 +129,10 @@ pub(super) fn pane_close(pane_id: String, force: bool) -> std::io::Result<i32> {
     )
 }
 
-pub(super) fn pane_respawn(pane_id: String) -> std::io::Result<i32> {
+pub(super) fn pane_respawn(pane_id: String, force: bool) -> std::io::Result<i32> {
     print_method_response(
         "cli:pane:respawn",
-        Method::PaneRespawn(PaneTarget { pane_id }),
+        Method::PaneRespawn(PaneRespawnParams { pane_id, force }),
     )
 }
 

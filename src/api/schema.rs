@@ -233,7 +233,7 @@ pub enum Method {
     #[serde(rename = "pane.close")]
     PaneClose(PaneCloseParams),
     #[serde(rename = "pane.respawn")]
-    PaneRespawn(PaneTarget),
+    PaneRespawn(PaneRespawnParams),
     #[serde(rename = "popup.close")]
     PopupClose(EmptyParams),
     #[serde(rename = "events.subscribe")]

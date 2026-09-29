@@ -34,6 +34,15 @@ pub struct ClosedPaneTodos {
     pub todos: Vec<TodoInfo>,
 }
 
+/// The process a forced respawn stopped: its pid and, when the platform can
+/// tell, the name of the pane's foreground process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StoppedProcess {
+    pub pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
 /// Params for `todo.list`: a `pane_id` scopes the result to one pane, no
 /// `pane_id` returns every pane's todos.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

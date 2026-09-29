@@ -1,11 +1,12 @@
 use crate::api::schema::{
     EmptyParams, LayoutBalanceParams, LayoutSetPresetParams, LayoutSetSplitRatioParams, Method,
     PaneCloseParams, PaneFocusDirectionParams, PaneInputSetParams, PaneMoveParams,
-    PaneRenameParams, PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget,
-    PaneZoomParams, TabCloseParams, TabCreateParams, TabMoveParams, TabRenameParams, TabTarget,
-    TodoAddParams, TodoClearParams, TodoRemoveParams, TodoUpdateParams, WorkspaceCloseParams,
-    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams, WorktreeRemoveParams,
+    PaneRenameParams, PaneResizeParams, PaneRespawnParams, PaneSplitParams, PaneSwapParams,
+    PaneTarget, PaneZoomParams, TabCloseParams, TabCreateParams, TabMoveParams, TabRenameParams,
+    TabTarget, TodoAddParams, TodoClearParams, TodoRemoveParams, TodoUpdateParams,
+    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
+    WorkspaceRenameParams, WorkspaceTarget, WorktreeCreateParams, WorktreeOpenParams,
+    WorktreeRemoveParams,
 };
 
 use super::App;
@@ -137,7 +138,13 @@ impl App {
     }
 
     pub(crate) fn runtime_pane_respawn(&mut self, id: &'static str, pane_id: String) -> String {
-        self.dispatch_runtime_mutation(id, Method::PaneRespawn(PaneTarget { pane_id }))
+        self.dispatch_runtime_mutation(
+            id,
+            Method::PaneRespawn(PaneRespawnParams {
+                pane_id,
+                force: false,
+            }),
+        )
     }
 
     pub(crate) fn runtime_pane_rename(

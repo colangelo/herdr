@@ -10,9 +10,9 @@ use crate::api::schema::{
     PaneProcessInfoProcess, PaneReadParams, PaneReadResult, PaneReleaseAgentParams,
     PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
     PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
-    PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams,
-    PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode, PaneZoomParams, PaneZoomReason,
-    PaneZoomResult, ResponseResult,
+    PaneRespawnParams, PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams,
+    PaneSplitParams, PaneSwapParams, PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode,
+    PaneZoomParams, PaneZoomReason, PaneZoomResult, ResponseResult, StoppedProcess, TodoInfo,
 };
 use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
 use crate::app::App;
@@ -1840,28 +1840,75 @@ impl App {
             .is_some()
     }
 
-    pub(super) fn handle_pane_respawn(&mut self, id: String, target: PaneTarget) -> String {
-        let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
-            return pane_not_found(id, &target.pane_id);
+    /// Respawn a pane's process. The TUI's own request asks with a modal and
+    /// treats its retry as the answer; any other caller is answered instead:
+    /// `confirmation_required` naming the live work without `force`, and
+    /// nothing changes on any client's screen (fork issue 125).
+    pub(super) fn handle_pane_respawn(&mut self, id: String, params: PaneRespawnParams) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return pane_not_found(id, &params.pane_id);
         };
-        // Gating here rather than in the TUI means an external pane.respawn
-        // over the socket gets the same answer the keybinding does.
         let has_live_child = self.pane_has_live_child(ws_idx, pane_id);
-        if self
-            .state
-            .confirm_pane_respawn(ws_idx, pane_id, has_live_child)
-        {
-            return encode_error(
-                id,
-                "confirmation_required",
-                "this pane still has live work; repeat the request to confirm",
-            );
+        let mut report = None;
+        if self.tui_request_in_flight {
+            if self
+                .state
+                .confirm_pane_respawn(ws_idx, pane_id, has_live_child)
+            {
+                return encode_error(
+                    id,
+                    "confirmation_required",
+                    "this pane still has live work; repeat the request to confirm",
+                );
+            }
+        } else {
+            let stopped_process = has_live_child
+                .then(|| self.pane_live_process(ws_idx, pane_id))
+                .flatten();
+            let open_todos = self
+                .open_todos_in([(ws_idx, pane_id)])
+                .into_iter()
+                .flat_map(|pane| pane.todos)
+                .collect::<Vec<_>>();
+            if !params.force && (stopped_process.is_some() || !open_todos.is_empty()) {
+                return respawn_refusal(id, &params.pane_id, stopped_process.as_ref(), &open_todos);
+            }
+            report = params.force.then_some((stopped_process, open_todos));
         }
         if !self.respawn_pane_runtime(pane_id, crate::app::api::RespawnTarget::LaunchArgv) {
             return encode_error(id, "respawn_failed", "failed to respawn the pane process");
         }
+        // A forced respawn answers the question a modal may be asking about
+        // this pane, so that modal leaves.
+        if !self.tui_request_in_flight && self.state.confirm_respawn_pane == Some(pane_id) {
+            self.state.confirm_respawn_pane = None;
+            self.state.drop_stale_close_confirmation();
+        }
         self.emit_pane_updated(ws_idx, pane_id);
-        encode_success(id, ResponseResult::Ok {})
+        match report {
+            Some((stopped_process, open_todos)) => encode_success(
+                id,
+                ResponseResult::Respawned {
+                    stopped_process,
+                    open_todos,
+                },
+            ),
+            None => encode_success(id, ResponseResult::Ok {}),
+        }
+    }
+
+    /// The pane's running process as a refusal or a forced respawn names it:
+    /// the shell's pid, and the foreground process's name when known. Only
+    /// asked on a respawn from outside the TUI, never per frame.
+    fn pane_live_process(&self, ws_idx: usize, pane_id: PaneId) -> Option<StoppedProcess> {
+        let pid = self
+            .lookup_runtime_sender(ws_idx, pane_id)
+            .and_then(crate::terminal::TerminalRuntime::child_pid)?;
+        let name = crate::detect::foreground_process_group_id(pid)
+            .and_then(crate::detect::foreground_group_leader_job)
+            .and_then(|job| job.processes.into_iter().next())
+            .map(|process| process.name);
+        Some(StoppedProcess { pid, name })
     }
 
     pub(super) fn handle_pane_send_keys(
@@ -2164,6 +2211,39 @@ pub(super) fn open_todos_refusal(id: String, what: &str, open: &[ClosedPaneTodos
     )
 }
 
+/// `confirmation_required` for a respawn that would stop a running process or
+/// leave open todos behind, naming both.
+fn respawn_refusal(
+    id: String,
+    pane_ref: &str,
+    process: Option<&StoppedProcess>,
+    open_todos: &[TodoInfo],
+) -> String {
+    let mut reasons = Vec::new();
+    if let Some(process) = process {
+        reasons.push(match &process.name {
+            Some(name) => format!("is still running {name} (pid {})", process.pid),
+            None => format!("is still running a process (pid {})", process.pid),
+        });
+    }
+    if !open_todos.is_empty() {
+        let todos = open_todos
+            .iter()
+            .map(|todo| format!("{pane_ref}: {}", todo.text))
+            .collect::<Vec<_>>()
+            .join("; ");
+        reasons.push(format!("has open todos ({todos})"));
+    }
+    encode_error(
+        id,
+        "confirmation_required",
+        format!(
+            "this pane {}; pass --force (force=true) to respawn it anyway",
+            reasons.join(" and ")
+        ),
+    )
+}
+
 /// A forced close always answers with the todos it dropped, so a script can
 /// keep them; an ordinary close answers `ok`.
 pub(super) fn closed_response(id: String, force: bool, dropped: Vec<ClosedPaneTodos>) -> String {
@@ -2210,6 +2290,36 @@ mod tests {
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+
+    #[test]
+    fn a_respawn_refusal_names_the_running_process_and_the_open_todos() {
+        let todo = TodoInfo {
+            pane_id: "w1:p2".into(),
+            id: 1,
+            text: "finish the migration".into(),
+            done: false,
+            priority: crate::terminal::todo::TodoPriority::Normal,
+            link_pane_id: None,
+            link_label: None,
+            link_alive: false,
+            created_at_unix: 0,
+            updated_at_unix: 0,
+        };
+        let process = StoppedProcess {
+            pid: 4242,
+            name: Some("claude".into()),
+        };
+
+        let raw = respawn_refusal("r".into(), "w1:p2", Some(&process), &[todo]);
+        let response: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(response["error"]["code"], "confirmation_required");
+        assert_eq!(
+            response["error"]["message"],
+            "this pane is still running claude (pid 4242) and has open todos \
+             (w1:p2: finish the migration); pass --force (force=true) to respawn it anyway"
+        );
+    }
 
     fn app_with_test_workspace() -> (App, String) {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();

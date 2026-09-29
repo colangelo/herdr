@@ -3216,6 +3216,21 @@
           ],
           "type": "object"
         },
+        "PaneRespawnParams": {
+          "description": "`pane.respawn`. Without `force`, a respawn that would stop a running\nprocess or that leaves open todos behind is refused with\n`confirmation_required`; with it, the pane respawns and the result says\nwhat it went ahead over.",
+          "properties": {
+            "force": {
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "PaneRightClickTarget": {
           "enum": [
             "herdr",
@@ -6196,7 +6211,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/PaneTarget"
+              "$ref": "#/schemas/request/$defs/PaneRespawnParams"
             }
           },
           "required": [
@@ -10360,6 +10375,36 @@
               "type": "object"
             },
             {
+              "description": "A forced respawn: the process it stopped, if one was running, and the\nopen todos the pane still carries.",
+              "properties": {
+                "open_todos": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/TodoInfo"
+                  },
+                  "type": "array"
+                },
+                "stopped_process": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/StoppedProcess"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": {
+                  "const": "respawned",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "open_todos"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "changed": {
                   "type": "boolean"
@@ -10796,6 +10841,26 @@
             "down"
           ],
           "type": "string"
+        },
+        "StoppedProcess": {
+          "description": "The process a forced respawn stopped: its pid and, when the platform can\ntell, the name of the pane's foreground process.",
+          "properties": {
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pid": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "pid"
+          ],
+          "type": "object"
         },
         "TabInfo": {
           "properties": {

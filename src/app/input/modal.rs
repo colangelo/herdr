@@ -5583,17 +5583,121 @@ mod tests {
         );
     }
 
-    fn respawn_pane_via_api(app: &mut App, pane_id: crate::layout::PaneId) -> serde_json::Value {
+    /// The TUI's own respawn (the keybinding): the only one that may ask.
+    fn respawn_pane_via_tui(app: &mut App, pane_id: crate::layout::PaneId) -> serde_json::Value {
+        let public_pane_id = app
+            .public_pane_id(0, pane_id)
+            .expect("pane should have a public id");
+        let raw = app.runtime_pane_respawn("tui.pane.respawn", public_pane_id);
+        serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    /// A respawn sent over the socket by a script or another client.
+    fn respawn_pane_via_api(
+        app: &mut App,
+        pane_id: crate::layout::PaneId,
+        force: bool,
+    ) -> serde_json::Value {
         let public_pane_id = app
             .public_pane_id(0, pane_id)
             .expect("pane should have a public id");
         let raw = app.handle_api_request(crate::api::schema::Request {
             id: "test".into(),
-            method: crate::api::schema::Method::PaneRespawn(crate::api::schema::PaneTarget {
-                pane_id: public_pane_id,
-            }),
+            method: crate::api::schema::Method::PaneRespawn(
+                crate::api::schema::PaneRespawnParams {
+                    pane_id: public_pane_id,
+                    force,
+                },
+            ),
         });
         serde_json::from_str(&raw).expect("response should be json")
+    }
+
+    fn shut_down_runtimes(app: &mut App) {
+        for (_, runtime) in app.terminal_runtimes.drain() {
+            runtime.shutdown();
+        }
+    }
+
+    #[test]
+    fn an_api_respawn_of_a_pane_with_todos_leaves_the_screen_alone() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        // Twice: the retry must not be taken as the answer to a hidden modal.
+        for _ in 0..2 {
+            let response = respawn_pane_via_api(&mut app, pane_id, false);
+
+            assert_eq!(response["error"]["code"], "confirmation_required");
+            let message = response["error"]["message"].as_str().unwrap_or_default();
+            assert!(message.contains("unfinished"), "{message}");
+            assert!(message.contains("--force"), "{message}");
+            assert_eq!(app.state.mode, Mode::Terminal, "no modal on any client");
+            assert_eq!(app.state.confirm_respawn_pane, None);
+            assert!(
+                app.terminal_runtimes.len() == 0,
+                "nothing is respawned without force"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_forced_api_respawn_reports_what_it_overrode() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        let response = respawn_pane_via_api(&mut app, pane_id, true);
+
+        assert_eq!(response["result"]["type"], "respawned", "{response}");
+        assert_eq!(
+            response["result"]["open_todos"][0]["text"], "unfinished",
+            "{response}"
+        );
+        assert!(
+            response["result"]["stopped_process"].is_null(),
+            "no process was running: {response}"
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.terminal_runtimes.len(), 1, "the pane was respawned");
+        shut_down_runtimes(&mut app);
+    }
+
+    #[test]
+    fn an_api_respawn_does_not_answer_a_confirmation_on_screen() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        respawn_pane_via_tui(&mut app, pane_id);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+
+        let response = respawn_pane_via_api(&mut app, pane_id, false);
+
+        assert_eq!(response["error"]["code"], "confirmation_required");
+        assert_eq!(
+            app.state.mode,
+            Mode::ConfirmClose,
+            "the modal is still the user's"
+        );
+        assert_eq!(app.state.confirm_respawn_pane, Some(pane_id));
+        assert!(app.terminal_runtimes.len() == 0);
+    }
+
+    #[tokio::test]
+    async fn a_forced_api_respawn_takes_down_the_modal_that_named_the_pane() {
+        let mut app = one_unfinished_todo();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        respawn_pane_via_tui(&mut app, pane_id);
+        assert_eq!(app.state.mode, Mode::ConfirmClose);
+
+        let response = respawn_pane_via_api(&mut app, pane_id, true);
+
+        assert_eq!(response["result"]["type"], "respawned", "{response}");
+        assert_eq!(app.state.confirm_respawn_pane, None);
+        assert_ne!(
+            app.state.mode,
+            Mode::ConfirmClose,
+            "the answered question leaves the screen"
+        );
+        shut_down_runtimes(&mut app);
     }
 
     #[test]
@@ -5606,7 +5710,7 @@ mod tests {
         app.state.close_pane_todos();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
 
-        let response = respawn_pane_via_api(&mut app, pane_id);
+        let response = respawn_pane_via_tui(&mut app, pane_id);
 
         assert_eq!(response["error"]["code"], "confirmation_required");
         assert_eq!(app.state.mode, Mode::ConfirmClose);
@@ -5629,7 +5733,7 @@ mod tests {
         let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
             .attached_terminal_id
             .clone();
-        respawn_pane_via_api(&mut app, pane_id);
+        respawn_pane_via_tui(&mut app, pane_id);
 
         app.confirm_close_accept_via_api();
 
@@ -5665,7 +5769,7 @@ mod tests {
         )]);
         app.state.close_pane_todos();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
-        respawn_pane_via_api(&mut app, pane_id);
+        respawn_pane_via_tui(&mut app, pane_id);
 
         confirm_close_cancel(&mut app.state);
 
@@ -5684,9 +5788,12 @@ mod tests {
 
         let raw = app.handle_api_request(crate::api::schema::Request {
             id: "test".into(),
-            method: crate::api::schema::Method::PaneRespawn(crate::api::schema::PaneTarget {
-                pane_id: "nope-42".into(),
-            }),
+            method: crate::api::schema::Method::PaneRespawn(
+                crate::api::schema::PaneRespawnParams {
+                    pane_id: "nope-42".into(),
+                    force: false,
+                },
+            ),
         });
         let response: serde_json::Value =
             serde_json::from_str(&raw).expect("response should be json");

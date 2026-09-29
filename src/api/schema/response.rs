@@ -240,6 +240,12 @@ pub enum ResponseResult {
     Closed {
         closed_todos: Vec<super::todos::ClosedPaneTodos>,
     },
+    /// A forced respawn: the process it stopped, if one was running, and the
+    /// open todos the pane still carries.
+    Respawned {
+        stopped_process: Option<super::todos::StoppedProcess>,
+        open_todos: Vec<super::todos::TodoInfo>,
+    },
     ClientWindowTitle {
         changed: bool,
         reason: ClientWindowTitleReason,

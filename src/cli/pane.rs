@@ -1138,16 +1138,13 @@ fn pane_close(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn pane_respawn(args: &[String]) -> std::io::Result<i32> {
-    let Some(raw_pane_id) = args.first() else {
-        eprintln!("usage: herdr pane respawn <pane_id>");
+    let (args, force) = super::take_force_flag(args);
+    let [raw_pane_id] = args.as_slice() else {
+        eprintln!("usage: herdr pane respawn <pane_id> [--force]");
         return Ok(2);
     };
-    if args.len() != 1 {
-        eprintln!("usage: herdr pane respawn <pane_id>");
-        return Ok(2);
-    }
 
-    super::runtime::pane_respawn(super::normalize_pane_id(raw_pane_id))
+    super::runtime::pane_respawn(super::normalize_pane_id(raw_pane_id), force)
 }
 
 const PANE_SEND_TEXT_USAGE: &str =
@@ -1975,7 +1972,7 @@ fn print_pane_help() {
     eprintln!("  herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]");
     eprintln!("  herdr pane clear [<pane_id>|--pane ID|--current]");
     eprintln!("  herdr pane close <pane_id>");
-    eprintln!("  herdr pane respawn <pane_id>");
+    eprintln!("  herdr pane respawn <pane_id> [--force]");
     eprintln!("  herdr pane send-text <pane_id> <text> [--chunk BYTES [--chunk-delay MS]]");
     eprintln!("  herdr pane send-keys <pane_id> <key> [key ...]");
     eprintln!("  herdr pane wait-output <pane_id> (--match TEXT | --regex PATTERN) [--source visible|recent|recent-unwrapped] [--lines N] [--timeout MS] [--raw]");
