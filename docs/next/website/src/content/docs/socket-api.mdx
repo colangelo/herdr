@@ -399,10 +399,13 @@ re-identifies whatever comes back:
 ```
 
 The response is `type: "ok"`. A pane that still holds live work — a running
-child process or outstanding todos — fails the first request with
-`confirmation_required` and is left untouched; repeating the request confirms
-and respawns, the same confirmation the keybinding applies. Unknown pane ids
-fail with `pane_not_found`.
+child process or outstanding todos — fails with `confirmation_required`, the
+message naming the process and the todos, and is left untouched; no dialog opens
+on any client, and repeating the request gets the same answer. With
+`"force": true` the respawn goes ahead and the result is
+`{"type": "respawned", "stopped_process": {"pid": ..., "name": ...}, "open_todos": [...]}`:
+the process it stopped (`null` when none was running) and the open todos the
+pane keeps. Unknown pane ids fail with `pane_not_found`.
 
 The CLI wrapper for `notification.show` is:
 
