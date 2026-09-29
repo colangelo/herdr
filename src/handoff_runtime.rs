@@ -39,6 +39,11 @@ pub(crate) struct HandoffRuntimeState {
     /// which older fork servers write as a label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook_agent_state: Option<crate::terminal::state::HandoffAgentState>,
+    /// The pane finished and nobody has looked at it yet ("done"). Written
+    /// only when true, so older servers read the manifest unchanged (fork
+    /// issue 128).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unseen: bool,
 }
 
 #[cfg(unix)]
@@ -111,6 +116,7 @@ mod tests {
             agent: None,
             agent_state: None,
             hook_agent_state: None,
+            unseen: false,
         }
     }
 

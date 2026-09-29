@@ -2390,6 +2390,7 @@ impl PaneRuntime {
             agent: None,
             agent_state: None,
             hook_agent_state: None,
+            unseen: false,
         }
     }
 
@@ -2604,6 +2605,7 @@ impl PaneRuntime {
             agent: _,
             agent_state: _,
             hook_agent_state: _,
+            unseen: _,
         } = state;
         let pane_id = PaneId::from_raw(pane_id);
         use std::os::fd::FromRawFd;
@@ -6405,6 +6407,7 @@ mod tests {
                 agent: None,
                 agent_state: None,
                 hook_agent_state: None,
+                unseen: false,
             };
             let render_dirty = Arc::new(RenderSignal::new());
             let (events, _event_rx) = mpsc::channel(8);

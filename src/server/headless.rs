@@ -1379,6 +1379,10 @@ impl HeadlessServer {
                 }
                 handoff_runtime.hook_agent_state = terminal.handoff_agent_state();
             }
+            handoff_runtime.unseen = self
+                .app
+                .state
+                .pane_is_unseen(crate::layout::PaneId::from_raw(pane_id));
             handoff_entries.push((terminal_id.clone(), handoff_runtime));
         }
 

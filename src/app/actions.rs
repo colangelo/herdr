@@ -1464,6 +1464,15 @@ impl AppState {
         (changed_panes, changed_workspaces)
     }
 
+    /// The pane finished and nobody has looked at it yet ("done"); carried
+    /// by a live handoff (fork issue 128).
+    pub(crate) fn pane_is_unseen(&self, pane_id: PaneId) -> bool {
+        self.workspaces
+            .iter()
+            .find_map(|workspace| workspace.pane_state(pane_id))
+            .is_some_and(|pane| !pane.seen)
+    }
+
     pub(crate) fn pane_is_in_active_tab(&self, ws_idx: usize, pane_id: PaneId) -> bool {
         let Some(active_ws_idx) = self.active else {
             return false;
@@ -6070,6 +6079,17 @@ mod tests {
 
         let pane = state.workspaces[1].panes.get(&bg_pane_id).unwrap();
         assert!(!pane.seen);
+    }
+
+    #[test]
+    fn an_unseen_pane_is_reported_for_the_handoff() {
+        let mut state = app_with_workspaces(&["a", "b"]);
+        let pane_id = *state.workspaces[1].panes.keys().next().unwrap();
+        assert!(!state.pane_is_unseen(pane_id));
+
+        state.workspaces[1].panes.get_mut(&pane_id).unwrap().seen = false;
+
+        assert!(state.pane_is_unseen(pane_id));
     }
 
     // Fork issues 123/127: the launch flags of the agent running in the pane

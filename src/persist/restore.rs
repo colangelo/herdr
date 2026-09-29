@@ -726,6 +726,12 @@ fn restore_tab(
         let handoff_agent_state = imported_runtime
             .as_ref()
             .and_then(|imported| imported.state.hook_agent_state.clone());
+        #[cfg(unix)]
+        let handoff_unseen = imported_runtime
+            .as_ref()
+            .is_some_and(|imported| imported.state.unseen);
+        #[cfg(not(unix))]
+        let handoff_unseen = false;
         let pending_native_agent_restore = if was_imported {
             None
         } else {
@@ -880,7 +886,10 @@ fn restore_tab(
                 if let Some(agent_state) = handoff_agent_state {
                     terminal.restore_handoff_agent_state(agent_state);
                 }
-                panes.insert(*id, PaneState::new(terminal_id.clone()));
+                let mut pane = PaneState::new(terminal_id.clone());
+                // Done (finished, not yet looked at) survives a live handoff.
+                pane.seen = !handoff_unseen;
+                panes.insert(*id, pane);
                 terminal_runtimes.insert(terminal_id, runtime);
                 terminals.push(terminal);
             }
@@ -2713,6 +2722,94 @@ mod tests {
                 original.finish_agent_process_acquisition()
             );
         }
+    }
+
+    /// Fork issue 128: a pane that was done (finished, not yet looked at)
+    /// before a live handoff is still done after it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn live_handoff_keeps_an_unseen_pane_unseen() {
+        for unseen in [true, false] {
+            let (snapshot, _) = snapshot_with_saved_pane_history();
+            let (events, _events_rx) = mpsc::channel(32);
+            let (workspaces, terminals, runtimes) = restore(
+                &snapshot,
+                None,
+                24,
+                80,
+                4096,
+                test_restore_shell(),
+                crate::config::ShellModeConfig::NonLogin,
+                false,
+                events.clone(),
+                Arc::new(Notify::new()),
+                Arc::new(RenderSignal::new()),
+            );
+            let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
+            let snapshot = crate::persist::capture(
+                &workspaces,
+                &terminals,
+                &runtimes,
+                Some(0),
+                0,
+                26,
+                0.5,
+                Default::default(),
+                None,
+            );
+            let pane_id = workspaces[0].tabs[0].panes.keys().next().copied().unwrap();
+            let runtime = runtimes.values().next().unwrap();
+            runtime
+                .pause_handoff_reader(std::time::Duration::from_secs(2))
+                .unwrap();
+            let mut state = runtime.handoff_runtime_state(pane_id.raw());
+            state.unseen = unseen;
+            let state = serde_json::from_value(serde_json::to_value(state).unwrap()).unwrap();
+            let mut imports = HashMap::from([(
+                pane_id.raw(),
+                crate::handoff_runtime::ImportedHandoffRuntime {
+                    master_fd: runtime.duplicate_handoff_fd().unwrap(),
+                    state,
+                },
+            )]);
+            let (restored_workspaces, _, restored_runtimes) = restore_handoff(
+                &snapshot,
+                4096,
+                test_restore_shell(),
+                crate::config::ShellModeConfig::NonLogin,
+                &mut imports,
+                events,
+                Arc::new(Notify::new()),
+                Arc::new(RenderSignal::new()),
+            )
+            .unwrap();
+            drop(restored_runtimes);
+            drop(runtimes);
+            let pane = restored_workspaces[0].tabs[0]
+                .panes
+                .values()
+                .next()
+                .unwrap();
+            assert_eq!(pane.seen, !unseen, "unseen before the handoff: {unseen}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seen_pane_writes_no_unseen_field() {
+        let mut state: crate::handoff_runtime::HandoffRuntimeState =
+            serde_json::from_value(serde_json::json!({
+                "pane_id": 1, "child_pid": 2, "rows": 3, "cols": 4,
+                "cell_width_px": 0, "cell_height_px": 0
+            }))
+            .unwrap();
+        assert!(!state.unseen, "manifests from older servers read as seen");
+        assert!(serde_json::to_value(&state)
+            .unwrap()
+            .get("unseen")
+            .is_none());
+        state.unseen = true;
+        assert_eq!(serde_json::to_value(&state).unwrap()["unseen"], true);
     }
 
     #[tokio::test]
