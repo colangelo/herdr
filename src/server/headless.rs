@@ -11734,7 +11734,6 @@ next_tab = ""
                 agent: crate::detect::Agent::Pi,
                 observed_at: Instant::now(),
                 replaced_process: false,
-                launch: None,
             })
         );
 
@@ -12277,7 +12276,6 @@ next_tab = ""
             agent: crate::detect::Agent::Claude,
             observed_at: std::time::Instant::now(),
             replaced_process: false,
-            launch: None,
         });
         let report = |session: &str| {
             api::schema::Method::PaneReportAgentSession(api::schema::PaneReportAgentSessionParams {

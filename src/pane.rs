@@ -306,21 +306,16 @@ async fn publish_state_changed_event(
 async fn publish_agent_process_detected_event(
     state_events: mpsc::Sender<AppEvent>,
     pane_id: PaneId,
-    pane_pid: u32,
     agent: Agent,
     observed_at: std::time::Instant,
     replaced_process: bool,
 ) {
-    let launch = (pane_pid > 0)
-        .then(|| crate::detect::agent_launch(pane_pid, agent))
-        .flatten();
     if let Err(e) = state_events
         .send(AppEvent::AgentProcessDetected {
             pane_id,
             agent,
             observed_at,
             replaced_process,
-            launch,
         })
         .await
     {
@@ -328,6 +323,42 @@ async fn publish_agent_process_detected_event(
             pane = pane_id.raw(),
             err = %e,
             "failed to deliver AgentProcessDetected event"
+        );
+    }
+}
+
+/// Reads the command line of the agent a probe identified, once per agent
+/// process: on its first sighting, and for an agent already running when this
+/// task started (a live handoff or restore carries the agent over without a
+/// new sighting). `read_for` remembers which process was read.
+async fn publish_agent_launch_once(
+    state_events: &mpsc::Sender<AppEvent>,
+    pane_id: PaneId,
+    pane_pid: u32,
+    agent: Option<Agent>,
+    agent_process_group: Option<(Agent, u32)>,
+    read_for: &mut Option<(Agent, Option<(Agent, u32)>)>,
+) {
+    let Some(agent) = agent else {
+        return;
+    };
+    if pane_pid == 0 || *read_for == Some((agent, agent_process_group)) {
+        return;
+    }
+    *read_for = Some((agent, agent_process_group));
+    let launch = crate::detect::agent_launch(pane_pid, agent);
+    if let Err(e) = state_events
+        .send(AppEvent::AgentLaunchObserved {
+            pane_id,
+            agent,
+            launch,
+        })
+        .await
+    {
+        warn!(
+            pane = pane_id.raw(),
+            err = %e,
+            "failed to deliver AgentLaunchObserved event"
         );
     }
 }
@@ -1130,6 +1161,7 @@ fn spawn_basic_detection_task(
         let mut last_process_check = std::time::Instant::now();
         let mut last_foreground_pgid = None;
         let mut last_agent_process_group: Option<(Agent, u32)> = None;
+        let mut launch_read_for: Option<(Agent, Option<(Agent, u32)>)> = None;
         let mut wrapped_shell_watch = WrappedShellWatch::default();
         let mut has_process_probe = false;
         let mut acquisition_started_at = None;
@@ -1303,7 +1335,6 @@ fn spawn_basic_detection_task(
                             publish_agent_process_detected_event(
                                 state_events.clone(),
                                 pane_id,
-                                pid,
                                 agent,
                                 now,
                                 foreground_action
@@ -1315,6 +1346,15 @@ fn spawn_basic_detection_task(
                         }
                     }
                 }
+                publish_agent_launch_once(
+                    &state_events,
+                    pane_id,
+                    pid,
+                    new_agent.filter(|probed| agent == Some(*probed)),
+                    agent_process_group,
+                    &mut launch_read_for,
+                )
+                .await;
             }
 
             let process_exited = pending_foreground_shell_clear
@@ -2906,6 +2946,7 @@ impl PaneRuntime {
                 let mut last_observation = (Instant::now(), Some(0));
                 let mut last_foreground_pgid = None;
                 let mut last_agent_process_group: Option<(Agent, u32)> = None;
+                let mut launch_read_for: Option<(Agent, Option<(Agent, u32)>)> = None;
                 #[cfg(unix)]
                 let mut wrapped_shell_watch = WrappedShellWatch::default();
                 let mut has_process_probe = false;
@@ -3153,7 +3194,6 @@ impl PaneRuntime {
                                         publish_agent_process_detected_event(
                                             state_events.clone(),
                                             pane_id,
-                                            pid,
                                             agent,
                                             now,
                                             foreground_action == ForegroundShellAgentAction::ReportReplacementProcess,
@@ -3183,6 +3223,15 @@ impl PaneRuntime {
                                 }
                                 agent_changed = true;
                             }
+                            publish_agent_launch_once(
+                                &state_events,
+                                pane_id,
+                                pid,
+                                new_agent.filter(|probed| agent == Some(*probed)),
+                                agent_process_group,
+                                &mut launch_read_for,
+                            )
+                            .await;
                         }
                     }
 

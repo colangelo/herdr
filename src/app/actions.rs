@@ -3293,19 +3293,31 @@ impl AppState {
                 agent,
                 observed_at,
                 replaced_process,
-                launch,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
-                    let mutation = if replaced_process {
+                    Some(if replaced_process {
                         terminal.set_detected_agent_replacement_process_at(agent, observed_at)
                     } else {
                         terminal.set_detected_agent_process_at(agent, observed_at)
-                    };
-                    terminal.record_agent_launch(agent, launch.as_ref());
-                    Some(mutation)
+                    })
                 })
                 .into_iter()
                 .collect(),
+            AppEvent::AgentLaunchObserved {
+                pane_id,
+                agent,
+                launch,
+            } => {
+                // No state change to report: the record only changes what a
+                // restore runs, and `update_terminal_state` saves it.
+                self.update_terminal_state(pane_id, |terminal| {
+                    if terminal.detected_agent == Some(agent) {
+                        terminal.record_agent_launch(agent, launch.as_ref());
+                    }
+                    None
+                });
+                Vec::new()
+            }
             AppEvent::StateChanged {
                 pane_id,
                 agent,
@@ -6060,6 +6072,53 @@ mod tests {
         assert!(!pane.seen);
     }
 
+    // Fork issues 123/127: the launch flags of the agent running in the pane
+    // are kept and saved; a read for an agent that no longer runs is ignored.
+    #[test]
+    fn an_observed_launch_is_kept_only_for_the_agent_running_there() {
+        let mut state = app_with_workspaces(&["active"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0]
+            .terminal_id(pane_id)
+            .cloned()
+            .expect("pane terminal");
+        let observed = |agent: Agent, argv: &[&str]| AppEvent::AgentLaunchObserved {
+            pane_id,
+            agent,
+            launch: Some(crate::agent_resume::AgentLaunchArgv {
+                argv: argv.iter().map(|word| word.to_string()).collect(),
+                cwd: None,
+            }),
+        };
+        let flags = |state: &AppState| {
+            state
+                .terminals
+                .get(&terminal_id)
+                .and_then(|terminal| terminal.agent_launch_for_snapshot())
+                .map(|record| record.flags.clone())
+        };
+        state.handle_app_event(AppEvent::AgentProcessDetected {
+            pane_id,
+            agent: Agent::Claude,
+            observed_at: Instant::now(),
+            replaced_process: false,
+        });
+        state.session_dirty = false;
+
+        state.handle_app_event(observed(Agent::Codex, &["codex", "-m", "x"]));
+        assert_eq!(flags(&state), None, "codex does not run here");
+
+        state.handle_app_event(observed(
+            Agent::Claude,
+            &["claude", "--settings", "/u/g.json"],
+        ));
+        assert_eq!(
+            flags(&state),
+            Some(vec!["--settings".to_string(), "/u/g.json".to_string()])
+        );
+        assert!(state.session_dirty, "the record is saved");
+    }
+
     // #112, through the app's event order: `herdr pane run <pane> "claude …"`
     // right after the previous Claude quit. The new SessionStart arrives while
     // the old session is on record, then detection sees the old Claude's exit,
@@ -6093,7 +6152,6 @@ mod tests {
             agent: Agent::Claude,
             observed_at: Instant::now(),
             replaced_process: false,
-            launch: None,
         });
         state.handle_app_event(report("old-session", 1));
         assert_eq!(session(&state).as_deref(), Some("old-session"));
@@ -6114,7 +6172,6 @@ mod tests {
             agent: Agent::Claude,
             observed_at: Instant::now(),
             replaced_process: true,
-            launch: None,
         });
 
         assert_eq!(session(&state).as_deref(), Some("new-session"));
@@ -6132,7 +6189,6 @@ mod tests {
             agent: Agent::Pi,
             observed_at: Instant::now(),
             replaced_process: false,
-            launch: None,
         });
         let direct_idle = state
             .handle_app_event(AppEvent::StateChanged {
@@ -6154,7 +6210,6 @@ mod tests {
             agent: Agent::Pi,
             observed_at: Instant::now(),
             replaced_process: false,
-            launch: None,
         });
         for agent_state in [AgentState::Working, AgentState::Blocked] {
             state.handle_app_event(AppEvent::StateChanged {
@@ -6194,7 +6249,6 @@ mod tests {
             agent: Agent::Codex,
             observed_at: Instant::now(),
             replaced_process: false,
-            launch: None,
         });
         state.handle_app_event(AppEvent::StateChanged {
             pane_id,
@@ -6510,7 +6564,6 @@ mod tests {
         let (pane_id, terminal_id) = first_pane_terminal(&state);
         state.handle_app_event(AppEvent::AgentProcessDetected {
             replaced_process: false,
-            launch: None,
             pane_id,
             agent: Agent::Pi,
             observed_at: std::time::Instant::now(),
@@ -6593,7 +6646,6 @@ mod tests {
         let (pane_id, terminal_id) = first_pane_terminal(&state);
         state.handle_app_event(AppEvent::AgentProcessDetected {
             replaced_process: false,
-            launch: None,
             pane_id,
             agent: Agent::Pi,
             observed_at: std::time::Instant::now(),
