@@ -123,6 +123,10 @@ herdr agent rename reviewer --clear
 
 Targets accept a unique live agent name or the pane ID that currently hosts the agent. Terminal IDs and bare agent-kind labels are not accepted.
 
+An agent nobody renamed still gets a name when its terminal title looks like one. Claude Code keeps its title equal to its session name, so a pane titled `jev-astra` answers to `herdr agent read jev-astra`, and `agent list` shows `"name": "jev-astra"` with `"name_source": "title"`. The title counts as a name only when it is one word of up to 64 characters from letters, digits, `.`, `_` and `-`, starting with a letter or digit, and is not an agent kind or a shell name. So "Claude Code", an empty or spinner-only title, and a task sentence give no name. It is dropped when another agent has that name, or when two agents have the same title. The name follows the title: a Claude `/rename` changes it. A name set with `agent rename` always wins, carries no `name_source`, and is never replaced by the title; renaming to a name another agent only had from its title is allowed and takes it over.
+
+Agent notifications use this name: "direction-builder finished" rather than "claude finished". An agent with no name keeps its kind in the title. The context line (space, number, tab) is unchanged, and the title is the same in the herdr toast, the notification center, and terminal and system notifications.
+
 ## Custom status labels
 
 Integrations report lifecycle state as semantic state only. Add display customization separately with pane metadata tokens.
