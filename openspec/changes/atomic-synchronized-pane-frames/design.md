@@ -73,3 +73,25 @@ takes. No allocation.
 - Reproducer: the #126 throwaway measurement goes from 38% torn to 0 at the
   middle with keys sent, with a beta.
 - `just bench-render-scale` 1 vs 15 panes, before and after.
+
+## Implementation notes (2026-09-29)
+
+- The epoch is one global transition count (`SYNC_TRANSITIONS` in
+  `src/pane/terminal.rs`) plus, per pane, the count at its last begin or end.
+  A frame reads the count before it is built; after the build a shown pane
+  whose last transition is newer, or whose block is open and younger than
+  `SYNC_HOLD_MAX`, voids the frame. This needs no per-pane snapshot, so it
+  also works when the build changed which panes are shown.
+- A transition is the mode flipping across one write. A begin and its end in
+  one write are atomic under the core lock and are no transition; an end and
+  a new begin in one write restart the hold clock (the write contains
+  `CSI ? 2026 h` while the mode stays on).
+- The server builds every client frame as before (so layout and pane resizes
+  still apply) and only drops the send; the client owes a full frame
+  (`defer_full_render`), which also keeps the retained patch path off until a
+  complete frame is sent.
+- The local loop draws straight to the host terminal and cannot drop a frame
+  after drawing, so it checks before drawing only.
+- The hold check is in `synchronized_output_holds_frame`
+  (`src/ui/tab_surface.rs`); `just bench-render-scale` now includes it in each
+  sample.
