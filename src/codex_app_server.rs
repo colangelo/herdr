@@ -8,7 +8,9 @@
 //! socket. Both are off by default, and B needs A.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // Thread naming talks to the daemon's unix socket, so the naming helpers
 // below exist on unix only.
