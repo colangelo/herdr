@@ -749,6 +749,7 @@ impl App {
                 split_borders: Vec::new(),
             },
             drag: None,
+            resize_labels_until: None,
             workspace_presses: HashMap::new(),
             tab_presses: HashMap::new(),
             selection: None,
@@ -2113,6 +2114,9 @@ impl App {
                     let key = self.input_leases.normalize_press(&lease_key, key);
                     match key.kind {
                         crossterm::event::KeyEventKind::Press => {
+                            // Fork issue 122: any key ends the resize labels'
+                            // linger; a resize key shows them again as it runs.
+                            self.state.hide_resize_labels();
                             let initial_context = self.terminal_input_context();
                             let routes_to_terminal = initial_context
                                 .as_ref()

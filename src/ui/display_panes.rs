@@ -24,10 +24,19 @@ const MIN_NAME_COLS: usize = 4;
 pub(super) fn render_display_panes(app: &AppState, frame: &mut Frame, mode_bar_area: Rect) {
     let labels = app.display_panes_labels();
     for label in &labels {
-        render_label(app, frame, label);
+        render_label(app, frame, label, true);
     }
     render_summary_bar(app, frame, mode_bar_area, &labels);
     render_sidebar_section_sizes(app, frame);
+}
+
+/// The same labels while a pane is resized (fork issue 122), without the
+/// digit (nothing to press) and without the summary bar: the mode that is on
+/// keeps its own bar.
+pub(super) fn render_resize_labels(app: &AppState, frame: &mut Frame) {
+    for label in &app.display_panes_labels() {
+        render_label(app, frame, label, false);
+    }
 }
 
 /// The chip style of the labels mode: the theme's red, reversed, as the
@@ -68,11 +77,15 @@ fn render_sidebar_section_sizes(app: &AppState, frame: &mut Frame) {
 
 /// `2  w5:p16 · claude  138x27`, cut to `max_width`: the name goes first, then
 /// the tail of whatever is left.
-fn label_text(label: &DisplayPaneLabel, max_width: usize) -> String {
-    let index = label
-        .index
-        .map_or_else(|| "·".to_string(), |index| index.to_string());
-    let head = format!("{index}  {}", label.address);
+fn label_text(label: &DisplayPaneLabel, max_width: usize, numbered: bool) -> String {
+    let head = if numbered {
+        let index = label
+            .index
+            .map_or_else(|| "·".to_string(), |index| index.to_string());
+        format!("{index}  {}", label.address)
+    } else {
+        label.address.clone()
+    };
     let size = format!("{}x{}", label.inner_rect.width, label.inner_rect.height);
     let full = format!("{head} · {}  {size}", label.name);
     if display_width(&full) <= max_width {
@@ -89,7 +102,7 @@ fn label_text(label: &DisplayPaneLabel, max_width: usize) -> String {
     truncate_end(&format!("{head}  {size}"), max_width)
 }
 
-fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel) {
+fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel, numbered: bool) {
     let p = &app.palette;
     let pane = label.inner_rect.intersection(frame.area());
     if pane.is_empty() {
@@ -101,7 +114,7 @@ fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel) {
     } else {
         pane.width
     };
-    let text = label_text(label, usize::from(max_text));
+    let text = label_text(label, usize::from(max_text), numbered);
     let text_width = display_width_u16(&text);
 
     let border = app.pane_border_color(label.focused);
@@ -248,6 +261,46 @@ mod tests {
                 "{text:?} is drawn inside its own pane"
             );
         }
+    }
+
+    /// Fork issue 122: while resizing, each pane shows its label without the
+    /// digit, over the resize mode, whose bar stays.
+    #[test]
+    fn resize_mode_labels_every_pane_and_keeps_its_bar() {
+        let mut app = two_pane_app();
+        app.mode = Mode::Resize;
+        layout_sized(&mut app, WIDTH, HEIGHT);
+
+        let rows = screen(&app);
+        for label in app.display_panes_labels() {
+            let text = format!(
+                "{} · {}  {}x{}",
+                label.address, label.name, label.inner_rect.width, label.inner_rect.height
+            );
+            let row = rows
+                .iter()
+                .find(|row| row.contains(&text))
+                .unwrap_or_else(|| panic!("{text:?} is on screen:\n{}", rows.join("\n")));
+            let index = label.index.expect("numbered");
+            assert!(
+                !row.contains(&format!("{index}  {}", label.address)),
+                "no digit to press while resizing: {row:?}"
+            );
+        }
+        let bar = rows.last().unwrap();
+        assert!(bar.contains("RESIZE"), "{bar:?}");
+        assert!(!bar.contains("PANES"), "{bar:?}");
+    }
+
+    #[test]
+    fn no_labels_when_nothing_is_resized() {
+        let app = two_pane_app();
+        let rows = screen(&app);
+        let label = &app.display_panes_labels()[0];
+        let size = format!("{}x{}", label.inner_rect.width, label.inner_rect.height);
+        assert!(!rows
+            .iter()
+            .any(|row| row.contains(&format!("{}  {size}", label.name))));
     }
 
     #[test]

@@ -555,6 +555,12 @@ pub fn render_with_runtime_registry(
         render_floating_notification_indicator(app, frame);
     }
 
+    // Pane sizes while a pane is resized: a passive layer under every overlay
+    // (fork issue 122). Display panes draws its own numbered labels.
+    if app.mode != Mode::DisplayPanes && app.resize_labels_visible() {
+        display_panes::render_resize_labels(app, frame);
+    }
+
     // Ambient notifications sit above panes, but below interactive overlays.
     render_notifications(app, frame, terminal_area);
     render_popup_pane(app, terminal_runtimes, frame, terminal_area);

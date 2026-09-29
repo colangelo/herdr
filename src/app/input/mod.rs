@@ -86,6 +86,11 @@ impl App {
         &mut self,
         key: TerminalKey,
     ) -> Option<super::TerminalInputTarget> {
+        if key.kind != crossterm::event::KeyEventKind::Release {
+            // Fork issue 122: any key ends the resize labels' linger; a resize
+            // key shows them again as it runs.
+            self.state.hide_resize_labels();
+        }
         if self.state.popup_pane.is_some() {
             return self.handle_terminal_key(key).await;
         }
@@ -387,6 +392,10 @@ impl App {
         source_id: super::InputSourceId,
         mouse: MouseEvent,
     ) {
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
+            // Fork issue 122: a click ends the resize labels' linger.
+            self.state.hide_resize_labels();
+        }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.pending_url_click_sources.remove(&source_id);
@@ -498,7 +507,8 @@ impl App {
                         insert_idx,
                     } => self.move_tab_via_api(ws_idx, source_tab_idx, insert_idx),
                     MouseAction::SetSplitRatio { path, ratio } => {
-                        self.set_split_ratio_via_api(path, ratio)
+                        self.set_split_ratio_via_api(path, ratio);
+                        self.state.show_resize_labels(std::time::Instant::now());
                     }
                     MouseAction::RenameModal(action) => {
                         self.apply_rename_mouse_action_via_api(action)

@@ -42,7 +42,47 @@ pub(crate) struct DisplayPaneLabel {
     pub focused: bool,
 }
 
+/// How long the resize labels stay after the last resize step (fork issue
+/// 122): long enough to read the final size.
+pub(crate) const RESIZE_LABELS_LINGER: Duration = Duration::from_secs(1);
+
 impl AppState {
+    /// Whether the size labels show because a pane is being resized: a split
+    /// border is held, resize mode is on, or the last step was under
+    /// [`RESIZE_LABELS_LINGER`] ago. A passive layer, never a mode.
+    pub(crate) fn resize_labels_visible(&self) -> bool {
+        matches!(
+            self.drag.as_ref().map(|drag| &drag.target),
+            Some(super::state::DragTarget::PaneSplit { .. })
+        ) || self.mode == super::state::Mode::Resize
+            || self.resize_labels_until.is_some()
+    }
+
+    /// A resize step happened: keep the labels for the linger time.
+    pub(crate) fn show_resize_labels(&mut self, now: Instant) {
+        self.resize_labels_until = Some(now + RESIZE_LABELS_LINGER);
+    }
+
+    /// Any other key or click: the labels go now.
+    pub(crate) fn hide_resize_labels(&mut self) {
+        self.resize_labels_until = None;
+    }
+
+    /// When the lingering labels go, for the loops' wake-up list.
+    pub(crate) fn resize_labels_deadline(&self) -> Option<Instant> {
+        self.resize_labels_until
+    }
+
+    /// Drop the lingering labels once their time is up; `true` when that
+    /// changed what is drawn.
+    pub(crate) fn expire_resize_labels(&mut self, now: Instant) -> bool {
+        if self.resize_labels_until.is_some_and(|until| now >= until) {
+            self.resize_labels_until = None;
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn open_display_panes(&mut self, now: Instant) {
         self.open_overlay(Overlay::DisplayPanes(DisplayPanesState {
             deadline: now + DISPLAY_PANES_DURATION,
@@ -174,5 +214,71 @@ mod tests {
     fn a_closed_overlay_has_no_deadline() {
         let (state, _, _) = two_pane_state();
         assert_eq!(state.display_panes_deadline(), None);
+    }
+
+    // Fork issue 122: the same labels while a pane is resized.
+    mod resize_labels {
+        use super::*;
+        use crate::app::display_panes::RESIZE_LABELS_LINGER;
+        use crate::app::state::{DragState, DragTarget};
+
+        fn split_drag() -> DragState {
+            DragState {
+                target: DragTarget::PaneSplit {
+                    path: Vec::new(),
+                    direction: Direction::Horizontal,
+                    area: Rect::new(0, 0, 80, 24),
+                    grab_offset: 0,
+                },
+            }
+        }
+
+        #[test]
+        fn they_show_while_a_split_border_is_dragged() {
+            let (mut state, _, _) = two_pane_state();
+            assert!(!state.resize_labels_visible());
+
+            state.drag = Some(split_drag());
+
+            assert!(state.resize_labels_visible());
+            assert_eq!(state.mode, Mode::Terminal, "not a mode: input is untouched");
+        }
+
+        #[test]
+        fn they_stay_a_second_after_the_last_resize_then_go() {
+            let (mut state, _, _) = two_pane_state();
+            let now = Instant::now();
+            state.show_resize_labels(now);
+
+            assert!(state.resize_labels_visible());
+            assert_eq!(
+                state.resize_labels_deadline(),
+                Some(now + RESIZE_LABELS_LINGER)
+            );
+            assert!(!state.expire_resize_labels(now + RESIZE_LABELS_LINGER / 2));
+            assert!(state.resize_labels_visible());
+            assert!(state.expire_resize_labels(now + RESIZE_LABELS_LINGER));
+            assert!(!state.resize_labels_visible());
+            assert_eq!(state.resize_labels_deadline(), None);
+        }
+
+        #[test]
+        fn resize_mode_shows_them_until_it_ends() {
+            let (mut state, _, _) = two_pane_state();
+            state.mode = Mode::Resize;
+            assert!(state.resize_labels_visible());
+            state.mode = Mode::Terminal;
+            assert!(!state.resize_labels_visible());
+        }
+
+        #[test]
+        fn another_key_or_click_hides_them_at_once() {
+            let (mut state, _, _) = two_pane_state();
+            state.show_resize_labels(Instant::now());
+
+            state.hide_resize_labels();
+
+            assert!(!state.resize_labels_visible());
+        }
     }
 }

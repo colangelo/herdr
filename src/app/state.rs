@@ -2724,6 +2724,9 @@ pub struct AppState {
     // View geometry (computed before render, consumed by render + mouse)
     pub view: ViewState,
     pub(crate) drag: Option<DragState>,
+    /// Until when the resize size labels stay after the last resize step
+    /// (fork issue 122). Presentation only; see `display_panes`.
+    pub(crate) resize_labels_until: Option<std::time::Instant>,
     pub(crate) workspace_presses:
         std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
     pub(crate) tab_presses: std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
@@ -3871,6 +3874,7 @@ impl AppState {
                 split_borders: Vec::new(),
             },
             drag: None,
+            resize_labels_until: None,
             workspace_presses: std::collections::HashMap::new(),
             tab_presses: std::collections::HashMap::new(),
             selection: None,

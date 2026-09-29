@@ -454,18 +454,22 @@ impl App {
             NavigateAction::EnterResizeMode => self.state.mode = Mode::Resize,
             NavigateAction::ResizePaneLeft => {
                 self.resize_pane_direction_via_api(NavDirection::Left);
+                self.state.show_resize_labels(std::time::Instant::now());
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::ResizePaneDown => {
                 self.resize_pane_direction_via_api(NavDirection::Down);
+                self.state.show_resize_labels(std::time::Instant::now());
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::ResizePaneUp => {
                 self.resize_pane_direction_via_api(NavDirection::Up);
+                self.state.show_resize_labels(std::time::Instant::now());
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::ResizePaneRight => {
                 self.resize_pane_direction_via_api(NavDirection::Right);
+                self.state.show_resize_labels(std::time::Instant::now());
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::BalancePanes => {
@@ -2915,6 +2919,48 @@ mod tests {
         app.state.active = (!app.state.workspaces.is_empty()).then_some(0);
         app.state.selected = 0;
         app
+    }
+
+    // Fork issue 122: a single resize key shows the size labels for a
+    // moment; the next key, local or from a client, or a click takes them
+    // away.
+    #[tokio::test]
+    async fn a_resize_key_shows_the_size_labels_until_the_next_key() {
+        let mut app = app_with_test_workspaces(&["test"]);
+
+        app.execute_tui_navigate_action(NavigateAction::ResizePaneLeft, ActionContext::Prefix);
+
+        assert!(app.state.resize_labels_visible());
+        assert!(app.state.resize_labels_deadline().is_some());
+        app.handle_key(crate::input::TerminalKey::new(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+        ))
+        .await;
+        assert!(!app.state.resize_labels_visible());
+    }
+
+    #[test]
+    fn a_client_key_or_a_click_hides_the_lingering_size_labels() {
+        let mut app = app_with_test_workspaces(&["test"]);
+
+        app.state.show_resize_labels(std::time::Instant::now());
+        app.route_client_events(
+            vec![crate::raw_input::RawInputEvent::Key(
+                crate::input::TerminalKey::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            )],
+            false,
+        );
+        assert!(!app.state.resize_labels_visible());
+
+        app.state.show_resize_labels(std::time::Instant::now());
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(!app.state.resize_labels_visible());
     }
 
     #[test]

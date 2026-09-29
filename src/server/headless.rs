@@ -4870,6 +4870,7 @@ impl HeadlessServer {
         }
 
         changed |= self.app.expire_display_panes(now);
+        changed |= self.app.state.expire_resize_labels(now);
 
         if self
             .app

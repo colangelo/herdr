@@ -5040,6 +5040,43 @@ mod tests {
         assert_ne!(root_layout_ratio(&before), root_layout_ratio(&after));
     }
 
+    // Fork issue 122: the size labels show while a border is held and stay
+    // for the linger time after it is let go.
+    #[test]
+    fn dragging_a_split_shows_the_size_labels_and_they_linger_after_release() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("test")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.workspaces[0].test_split(Direction::Horizontal);
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let border = app.state.view.split_borders[0].clone();
+        let drag_row = border.area.y.saturating_add(1);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            border.pos,
+            drag_row,
+        ));
+        assert!(app.state.resize_labels_visible(), "held border");
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            border.pos.saturating_add(6),
+            drag_row,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            border.pos.saturating_add(6),
+            drag_row,
+        ));
+
+        assert!(app.state.drag.is_none());
+        assert!(app.state.resize_labels_visible(), "lingers after release");
+        let until = app.state.resize_labels_deadline().expect("linger deadline");
+        assert!(app.state.expire_resize_labels(until));
+        assert!(!app.state.resize_labels_visible());
+    }
+
     #[test]
     fn pane_split_hitbox_does_not_overlap_right_pane_content() {
         let mut app = app_for_mouse_test();

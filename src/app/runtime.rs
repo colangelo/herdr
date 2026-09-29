@@ -352,6 +352,7 @@ impl App {
         }
 
         changed |= self.expire_display_panes(now);
+        changed |= self.state.expire_resize_labels(now);
 
         if self
             .selection_autoscroll_deadline
@@ -622,6 +623,7 @@ impl App {
             self.state.next_managed_agent_deadline(),
             self.copy_feedback_deadline,
             self.state.display_panes_deadline(),
+            self.state.resize_labels_deadline(),
             include_git_refresh
                 .then(|| self.git_refresh_deadline())
                 .flatten(),
