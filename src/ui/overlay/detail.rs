@@ -54,7 +54,7 @@ pub(crate) fn render_detail_box(
     text: Option<&str>,
     p: &crate::app::state::Palette,
 ) {
-    let Some(inner) = render_panel_shell(frame, area, p.surface_dim, p.panel_bg) else {
+    let Some(inner) = render_panel_shell(frame, area, p.overlay0, p.panel_bg) else {
         return;
     };
     let text_area = Rect::new(
@@ -98,7 +98,38 @@ pub(crate) fn render_detail_box(
 
 #[cfg(test)]
 mod tests {
+    use ratatui::{backend::TestBackend, Terminal};
+
     use super::*;
+    use crate::app::state::Palette;
+
+    /// Fork issue 140: the frame was `surface_dim`, the panel colour itself,
+    /// so the box had no visible border. Both surfaces (the pane todos panel
+    /// and the session board) draw it through this function.
+    #[test]
+    fn the_box_frame_is_visible_against_the_panel_in_every_palette() {
+        let palettes = [
+            ("catppuccin", Palette::catppuccin()),
+            ("catppuccin_latte", Palette::catppuccin_latte()),
+            ("terminal", Palette::terminal()),
+            ("tokyo_night", Palette::tokyo_night()),
+            ("dracula", Palette::dracula()),
+            ("nord", Palette::nord()),
+            ("gruvbox", Palette::gruvbox()),
+            ("one_light", Palette::one_light()),
+            ("solarized", Palette::solarized()),
+            ("vesper", Palette::vesper()),
+        ];
+        for (name, p) in &palettes {
+            let mut terminal = Terminal::new(TestBackend::new(20, 5)).unwrap();
+            terminal
+                .draw(|frame| render_detail_box(frame, Rect::new(0, 0, 20, 5), Some("hi"), p))
+                .unwrap();
+            let corner = &terminal.backend().buffer()[(0, 0)];
+            assert_eq!(corner.fg, p.overlay0, "{name}");
+            assert_ne!(corner.fg, p.panel_bg, "{name}: frame differs from panel");
+        }
+    }
 
     #[test]
     fn a_box_is_its_borders_and_its_wrapped_text_capped() {
