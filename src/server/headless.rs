@@ -3392,7 +3392,13 @@ impl HeadlessServer {
                     render_state.request_repaint();
                     return true;
                 }
+                let mut window_resized = false;
                 if let Some(client) = self.clients.get_mut(&client_id) {
+                    // Fork issue 138: a real change of an app client's window
+                    // shows the pane-size labels, like a pane resize (#122).
+                    // The attach-time size arrives in Hello, not here, so a
+                    // resize repeating it (or any unchanged size) shows none.
+                    window_resized = client.terminal_size != (cols, rows);
                     client.terminal_size = (cols, rows);
                     let observed = crate::kitty_graphics::HostCellSize {
                         width_px: cell_width_px,
@@ -3404,6 +3410,9 @@ impl HeadlessServer {
                 }
                 self.promote_client_to_foreground(client_id);
                 self.resize_shared_runtime_to_effective_size();
+                if window_resized {
+                    self.app.state.show_resize_labels(Instant::now());
+                }
                 true
             }
             ServerEvent::ClientDetach { client_id } => {
@@ -5744,6 +5753,51 @@ mod tests {
             server.app.state.session_dirty,
             "a new remembered size is saved"
         );
+    }
+
+    // Fork issue 138: resizing the herdr window shows the pane-size labels.
+    fn client_resize(server: &mut HeadlessServer, cols: u16, rows: u16) {
+        server.handle_server_event(ServerEvent::ClientResize {
+            client_id: 1,
+            cols,
+            rows,
+            cell_width_px: 0,
+            cell_height_px: 0,
+        });
+    }
+
+    #[tokio::test]
+    async fn a_window_resize_shows_the_size_labels_until_it_settles() {
+        let (mut server, _client_rx, _) = retained_test_server(b"aaaa");
+        server.render_and_stream();
+
+        client_resize(&mut server, 80, 24);
+        assert!(
+            !server.app.state.resize_labels_visible(),
+            "repeating the attach-time size (from Hello) shows nothing"
+        );
+
+        client_resize(&mut server, 110, 30);
+        let first = server
+            .app
+            .state
+            .resize_labels_deadline()
+            .expect("labels armed");
+        std::thread::sleep(Duration::from_millis(5));
+        client_resize(&mut server, 120, 32);
+        let second = server
+            .app
+            .state
+            .resize_labels_deadline()
+            .expect("still armed");
+        assert!(second > first, "each change re-arms the linger");
+
+        assert!(!server
+            .app
+            .state
+            .expire_resize_labels(second - Duration::from_millis(1)));
+        assert!(server.app.state.expire_resize_labels(second));
+        assert!(!server.app.state.resize_labels_visible());
     }
 
     #[test]
