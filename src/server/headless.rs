@@ -3411,7 +3411,7 @@ impl HeadlessServer {
                 self.promote_client_to_foreground(client_id);
                 self.resize_shared_runtime_to_effective_size();
                 if window_resized {
-                    self.app.state.show_resize_labels(Instant::now());
+                    self.app.state.show_window_resize_labels(Instant::now());
                 }
                 true
             }
@@ -5792,6 +5792,14 @@ mod tests {
             .expect("still armed");
         assert!(second > first, "each change re-arms the linger");
 
+        assert!(
+            server.app.state.resize_labels_window_visible(),
+            "a window resize arms the window view"
+        );
+        assert!(
+            second.duration_since(first) < server.app.state.display_panes_duration,
+            "the second deadline is one linger after its own event"
+        );
         assert!(!server
             .app
             .state

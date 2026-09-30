@@ -416,6 +416,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # status_spinner = "on"
 # status_spinner_ms = 200
 
+# How long the prefix+i labels and the resize labels (window or pane) stay up,
+# in milliseconds, clamped to 500..=60000.
+# display_panes_ms = 3000
+
 # Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
 # terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.

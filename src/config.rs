@@ -21,15 +21,15 @@ pub use self::{
         CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
     },
     model::{
-        validated_sidebar_bounds, AgentPanelSortConfig, CodexAgentConfig, Config,
-        ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
+        clamp_display_panes_ms, validated_sidebar_bounds, AgentPanelSortConfig, CodexAgentConfig,
+        Config, ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
         NotificationCenterPositionConfig, PaneBorderActiveStyleConfig, ShellModeConfig,
         SidebarActiveBorderConfig, SidebarCollapsedModeConfig, SidebarStyleConfig,
         SortMotionConfig, SortMotionEasingConfig, StateColorsConfig, StateSymbolsConfig,
         StatusIndicatorStyle, StatusSpinnerConfig, TabBarPositionConfig, ToastClipboardPosition,
         ToastConfig, ToastDelivery, ToastHerdrPosition, ToastHerdrSize, ToastPaneFeedback,
-        UpdateChannelConfig, WorkspaceSortConfig, MAX_STATUS_SPINNER_MS, MAX_TOAST_DELAY_SECONDS,
-        MIN_STATUS_SPINNER_MS,
+        UpdateChannelConfig, WorkspaceSortConfig, MAX_DISPLAY_PANES_MS, MAX_STATUS_SPINNER_MS,
+        MAX_TOAST_DELAY_SECONDS, MIN_DISPLAY_PANES_MS, MIN_STATUS_SPINNER_MS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
@@ -45,7 +45,7 @@ pub(crate) use self::keybinds::parse_key_combo;
 // `AppState::test_new` seeds the spinner interval from the default; production
 // construction reads the value from `Config` instead.
 #[cfg(test)]
-pub use self::model::DEFAULT_STATUS_SPINNER_MS;
+pub use self::model::{DEFAULT_DISPLAY_PANES_MS, DEFAULT_STATUS_SPINNER_MS};
 pub(crate) use self::{
     io::upsert_top_level_bool,
     tab_bar::{
@@ -102,6 +102,7 @@ impl Config {
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.invalid_sidebar_bounds_diagnostic())
             .chain(self.invalid_headless_size_diagnostic())
+            .chain(self.display_panes_diagnostic())
             .collect()
     }
 
@@ -118,6 +119,16 @@ impl Config {
             format!(
                 "server.headless_cols and server.headless_rows must be greater than zero (got {}x{})",
                 self.server.headless_cols, self.server.headless_rows
+            )
+        })
+    }
+
+    fn display_panes_diagnostic(&self) -> Option<String> {
+        let ms = self.ui.display_panes_ms;
+        (clamp_display_panes_ms(ms) != ms).then(|| {
+            format!(
+                "ui.display_panes_ms ({ms}) is outside {MIN_DISPLAY_PANES_MS}..={MAX_DISPLAY_PANES_MS}; using {}",
+                clamp_display_panes_ms(ms)
             )
         })
     }

@@ -183,6 +183,17 @@ pub const MIN_STATUS_SPINNER_MS: u64 = 50;
 pub const MAX_STATUS_SPINNER_MS: u64 = 2000;
 pub const DEFAULT_STATUS_SPINNER_MS: u64 = 200;
 
+/// Bounds for `ui.display_panes_ms`: long enough to read the labels, short
+/// enough that they never outstay the moment they answer.
+pub const MIN_DISPLAY_PANES_MS: u64 = 500;
+pub const MAX_DISPLAY_PANES_MS: u64 = 60_000;
+pub const DEFAULT_DISPLAY_PANES_MS: u64 = 3000;
+
+/// `ui.display_panes_ms` held to its bounds.
+pub fn clamp_display_panes_ms(ms: u64) -> u64 {
+    ms.clamp(MIN_DISPLAY_PANES_MS, MAX_DISPLAY_PANES_MS)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceSortConfig {
@@ -1342,6 +1353,9 @@ pub struct UiConfig {
     pub status_spinner: StatusSpinnerConfig,
     /// Milliseconds between spinner frames, clamped to 50..=2000. Default: 200.
     pub status_spinner_ms: u64,
+    /// Milliseconds the `prefix+i` labels and the resize labels stay up,
+    /// clamped to 500..=60000. Default: 3000.
+    pub display_panes_ms: u64,
     /// Notification center position. "top-right" puts the indicator in the
     /// tab bar with the dropdown under its right edge; "bottom-right" floats
     /// the indicator in the frame's bottom-right corner with the dropdown
@@ -1701,6 +1715,7 @@ impl Default for UiConfig {
             state_symbols: StateSymbolsConfig::default(),
             status_spinner: StatusSpinnerConfig::default(),
             status_spinner_ms: DEFAULT_STATUS_SPINNER_MS,
+            display_panes_ms: DEFAULT_DISPLAY_PANES_MS,
             notification_center_position: NotificationCenterPositionConfig::TopRight,
             accent: "cyan".into(),
             workspace_number_color: None,
@@ -2158,6 +2173,33 @@ idle = "#4ade80"
         assert_eq!(config.ui.state_colors.idle.as_deref(), Some("#4ade80"));
         assert_eq!(config.ui.state_colors.done, None);
         assert_eq!(config.ui.state_colors.blocked, None);
+    }
+
+    #[test]
+    fn display_panes_ms_defaults_to_three_seconds_and_parses() {
+        assert_eq!(Config::default().ui.display_panes_ms, 3000);
+        assert_eq!(DEFAULT_DISPLAY_PANES_MS, 3000);
+        let config: Config = toml::from_str("[ui]\ndisplay_panes_ms = 5000\n").unwrap();
+        assert_eq!(config.ui.display_panes_ms, 5000);
+        assert!(config.collect_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn an_out_of_range_display_panes_ms_is_reported_and_clamped() {
+        for ms in [0, 499, 60_001] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\ndisplay_panes_ms = {ms}\n")).unwrap();
+            let diagnostics = config.collect_diagnostics();
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.contains("ui.display_panes_ms")),
+                "{ms}: {diagnostics:?}"
+            );
+        }
+        assert_eq!(clamp_display_panes_ms(0), MIN_DISPLAY_PANES_MS);
+        assert_eq!(clamp_display_panes_ms(u64::MAX), MAX_DISPLAY_PANES_MS);
+        assert_eq!(clamp_display_panes_ms(4000), 4000);
     }
 
     #[test]

@@ -26,7 +26,16 @@ pub(super) fn render_display_panes(app: &AppState, frame: &mut Frame, mode_bar_a
     for label in &labels {
         render_label(app, frame, label, true);
     }
-    render_summary_bar(app, frame, mode_bar_area, &labels);
+    render_summary_bar(app, frame, mode_bar_area, &labels, true);
+    render_sidebar_section_sizes(app, frame);
+}
+
+/// The window-resize extras (fork issue 138): everything `prefix+i` shows
+/// besides the numbered labels, minus the hints (nothing to press). The pane
+/// labels come from [`render_resize_labels`].
+pub(super) fn render_window_resize_summary(app: &AppState, frame: &mut Frame, mode_bar_area: Rect) {
+    let labels = app.display_panes_labels();
+    render_summary_bar(app, frame, mode_bar_area, &labels, false);
     render_sidebar_section_sizes(app, frame);
 }
 
@@ -168,7 +177,13 @@ fn render_label(app: &AppState, frame: &mut Frame, label: &DisplayPaneLabel, num
 /// ` PANES  window 310x56 · panes 281x55  1-3 focus  any key close  VERSION  0.8.2-…`: the
 /// window is the whole frame, the panes figure the area the tab's panes
 /// share.
-fn render_summary_bar(app: &AppState, frame: &mut Frame, area: Rect, labels: &[DisplayPaneLabel]) {
+fn render_summary_bar(
+    app: &AppState,
+    frame: &mut Frame,
+    area: Rect,
+    labels: &[DisplayPaneLabel],
+    hints: bool,
+) {
     let p = &app.palette;
     let key = Style::default().fg(p.red).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
@@ -187,7 +202,9 @@ fn render_summary_bar(app: &AppState, frame: &mut Frame, area: Rect, labels: &[D
         Span::raw("  "),
     ];
     let numbered = labels.iter().filter_map(|label| label.index).max();
-    if let Some(last) = numbered {
+    if !hints {
+        spans.pop();
+    } else if let Some(last) = numbered {
         let range = if last == 1 {
             "1".to_string()
         } else {
@@ -196,8 +213,10 @@ fn render_summary_bar(app: &AppState, frame: &mut Frame, area: Rect, labels: &[D
         spans.push(Span::styled(range, key));
         spans.push(Span::styled(" focus  ", dim));
     }
-    spans.push(Span::styled("any key", key));
-    spans.push(Span::styled(" close", dim));
+    if hints {
+        spans.push(Span::styled("any key", key));
+        spans.push(Span::styled(" close", dim));
+    }
 
     let bar = Rect::new(
         area.x,
@@ -449,6 +468,73 @@ mod tests {
 
         let (row, _) = mode_bar_row(&app, width, HEIGHT);
         assert!(row.ends_with("any key close"), "{row:?}");
+        assert!(!row.contains("VERSION"), "{row:?}");
+    }
+
+    /// Fork issue 138 (ac, on .119): a window resize shows what `prefix+i`
+    /// shows, minus what needs a key press: the pane labels, the window and
+    /// panes size and the version on the bar, the sidebar section sizes.
+    #[test]
+    fn a_window_resize_shows_the_window_size_panes_size_and_version() {
+        let mut app = two_pane_app();
+        app.show_window_resize_labels(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+
+        let (row, _) = mode_bar_row(&app, WIDTH, HEIGHT);
+        let panes = app.view.terminal_area;
+        assert!(row.contains("PANES"), "{row:?}");
+        assert!(
+            row.contains(&format!(
+                "window {WIDTH}x{HEIGHT} · panes {}x{}",
+                panes.width, panes.height
+            )),
+            "{row:?}"
+        );
+        assert!(
+            row.ends_with(&format!("VERSION  {}", crate::build_info::version())),
+            "{row:?}"
+        );
+        assert!(!row.contains("focus"), "{row:?}");
+        assert!(!row.contains("any key"), "{row:?}");
+
+        let rows = screen(&app);
+        for label in &app.display_panes_labels() {
+            let text = format!("{} · {}", label.address, label.name);
+            assert!(rows.iter().any(|row| row.contains(&text)), "{text:?}");
+        }
+        let sidebar = app.view.sidebar_rect;
+        let sidebar_rows: Vec<&String> = rows.iter().filter(|row| row.contains('x')).collect();
+        assert!(
+            !sidebar_rows.is_empty() && sidebar.width > 0,
+            "the sidebar sections show their sizes"
+        );
+    }
+
+    /// A pane-divider drag keeps showing the pane labels only.
+    #[test]
+    fn a_pane_drag_shows_no_summary_bar() {
+        let mut app = two_pane_app();
+        app.show_resize_labels(Instant::now());
+        layout_sized(&mut app, WIDTH, HEIGHT);
+
+        let (row, _) = mode_bar_row(&app, WIDTH, HEIGHT);
+        assert!(!row.contains("PANES"), "{row:?}");
+        assert!(!row.contains("VERSION"), "{row:?}");
+        assert!(!row.contains("window"), "{row:?}");
+    }
+
+    /// The window bar is as narrow-safe as the `prefix+i` one: the version
+    /// goes first.
+    #[test]
+    fn a_narrow_window_resize_bar_drops_the_version_first() {
+        let width = 50;
+        let mut app = two_pane_app();
+        layout_sized(&mut app, width, HEIGHT);
+        app.show_window_resize_labels(Instant::now());
+        layout_sized(&mut app, width, HEIGHT);
+
+        let (row, _) = mode_bar_row(&app, width, HEIGHT);
+        assert!(row.contains("window"), "{row:?}");
         assert!(!row.contains("VERSION"), "{row:?}");
     }
 

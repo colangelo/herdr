@@ -68,11 +68,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        app::{display_panes::DISPLAY_PANES_DURATION, state::Mode},
-        config::Config,
-        input::TerminalKey,
-        layout::PaneId,
-        workspace::Workspace,
+        app::state::Mode, config::Config, input::TerminalKey, layout::PaneId, workspace::Workspace,
     };
 
     fn app_with_two_panes() -> (App, PaneId, PaneId) {
@@ -161,7 +157,7 @@ mod tests {
         let opened = Instant::now();
         app.state.open_display_panes(opened);
 
-        let deadline = opened + DISPLAY_PANES_DURATION;
+        let deadline = opened + app.state.display_panes_duration;
         assert!(
             app.next_loop_deadline(opened, false)
                 .is_some_and(|wake| wake <= deadline),
@@ -182,7 +178,7 @@ mod tests {
         app.state.open_display_panes(Instant::now());
         app.state.open_notification_center();
 
-        assert!(!app.expire_display_panes(Instant::now() + DISPLAY_PANES_DURATION));
+        assert!(!app.expire_display_panes(Instant::now() + app.state.display_panes_duration));
         assert_eq!(
             app.state.overlay.as_ref().map(|open| open.kind()),
             Some(OverlayKind::NotificationCenter)

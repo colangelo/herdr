@@ -576,6 +576,12 @@ pub fn render_with_runtime_registry(
         terminal_area
     };
 
+    // The window-resize view (fork issue 138) adds the summary bar and the
+    // sidebar sizes to the pane labels; a mode's own bar draws over it.
+    if app.mode != Mode::DisplayPanes && app.resize_labels_window_visible() {
+        display_panes::render_window_resize_summary(app, frame, mode_bar_area);
+    }
+
     match app.mode {
         Mode::Onboarding => render_onboarding_overlay(app, frame, frame.area()),
         Mode::ReleaseNotes => render_release_notes_overlay(app, frame, frame.area()),

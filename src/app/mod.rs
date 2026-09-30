@@ -316,6 +316,10 @@ fn sort_motion_bubble_from_config(motion: crate::config::SortMotionConfig) -> bo
     matches!(motion, crate::config::SortMotionConfig::Bubble)
 }
 
+fn display_panes_duration_from_config(ms: u64) -> Duration {
+    Duration::from_millis(crate::config::clamp_display_panes_ms(ms))
+}
+
 fn status_spinner_interval_from_config(ms: u64) -> Duration {
     Duration::from_millis(ms.clamp(
         crate::config::MIN_STATUS_SPINNER_MS,
@@ -751,6 +755,7 @@ impl App {
             },
             drag: None,
             resize_labels_until: None,
+            resize_labels_window: false,
             workspace_presses: HashMap::new(),
             tab_presses: HashMap::new(),
             selection: None,
@@ -788,6 +793,7 @@ impl App {
             status_spinner_interval: status_spinner_interval_from_config(
                 config.ui.status_spinner_ms,
             ),
+            display_panes_duration: display_panes_duration_from_config(config.ui.display_panes_ms),
             spinner_frame: 0,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
@@ -1764,6 +1770,8 @@ impl App {
                 self.state.status_spinner = config.ui.status_spinner;
                 self.state.status_spinner_interval =
                     status_spinner_interval_from_config(config.ui.status_spinner_ms);
+                self.state.display_panes_duration =
+                    display_panes_duration_from_config(config.ui.display_panes_ms);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scroll = 0;
@@ -3922,6 +3930,29 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_display_panes_ms_live() {
+        let mut app = test_app();
+        assert_eq!(
+            app.state.display_panes_duration,
+            Duration::from_millis(3000)
+        );
+
+        let mut config = Config::default();
+        config.ui.display_panes_ms = 5000;
+        let report = app.apply_live_config(&config, &[], &[], false);
+
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.display_panes_duration,
+            Duration::from_millis(5000)
+        );
+
+        config.ui.display_panes_ms = 1;
+        app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(app.state.display_panes_duration, Duration::from_millis(500));
     }
 
     #[test]

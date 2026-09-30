@@ -7,16 +7,12 @@
 //! pane rects come from the view geometry, the address and the name from the
 //! same helpers the navigator uses. Nothing here is a runtime fact.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ratatui::layout::Rect;
 
 use super::state::{AppState, Overlay};
 use crate::layout::PaneId;
-
-/// How long the labels stay up with no input. tmux defaults to one second,
-/// which is too short to read a name and a size off three panes.
-pub(crate) const DISPLAY_PANES_DURATION: Duration = Duration::from_secs(3);
 
 /// Panes past this index still get a label, but no number to press.
 pub(crate) const DISPLAY_PANES_MAX_INDEX: usize = 9;
@@ -42,14 +38,10 @@ pub(crate) struct DisplayPaneLabel {
     pub focused: bool,
 }
 
-/// How long the resize labels stay after the last resize step (fork issue
-/// 122): long enough to read the final size.
-pub(crate) const RESIZE_LABELS_LINGER: Duration = Duration::from_secs(1);
-
 impl AppState {
     /// Whether the size labels show because a pane is being resized: a split
     /// border is held, resize mode is on, or the last step was under
-    /// [`RESIZE_LABELS_LINGER`] ago. A passive layer, never a mode.
+    /// `display_panes_duration` ago. A passive layer, never a mode.
     pub(crate) fn resize_labels_visible(&self) -> bool {
         matches!(
             self.drag.as_ref().map(|drag| &drag.target),
@@ -58,14 +50,29 @@ impl AppState {
             || self.resize_labels_until.is_some()
     }
 
-    /// A resize step happened: keep the labels for the linger time.
+    /// A pane resize step happened: keep the pane labels for the linger
+    /// time. A window view already showing stays (the window view wins).
     pub(crate) fn show_resize_labels(&mut self, now: Instant) {
-        self.resize_labels_until = Some(now + RESIZE_LABELS_LINGER);
+        self.resize_labels_until = Some(now + self.display_panes_duration);
+    }
+
+    /// The herdr window was resized (fork issue 138): the pane labels plus
+    /// the window summary bar and the sidebar section sizes, for the linger
+    /// time counted from this event.
+    pub(crate) fn show_window_resize_labels(&mut self, now: Instant) {
+        self.resize_labels_until = Some(now + self.display_panes_duration);
+        self.resize_labels_window = true;
+    }
+
+    /// Whether the lingering labels are the window-resize view.
+    pub(crate) fn resize_labels_window_visible(&self) -> bool {
+        self.resize_labels_window && self.resize_labels_until.is_some()
     }
 
     /// Any other key or click: the labels go now.
     pub(crate) fn hide_resize_labels(&mut self) {
         self.resize_labels_until = None;
+        self.resize_labels_window = false;
     }
 
     /// When the lingering labels go, for the loops' wake-up list.
@@ -78,6 +85,7 @@ impl AppState {
     pub(crate) fn expire_resize_labels(&mut self, now: Instant) -> bool {
         if self.resize_labels_until.is_some_and(|until| now >= until) {
             self.resize_labels_until = None;
+            self.resize_labels_window = false;
             return true;
         }
         false
@@ -85,7 +93,7 @@ impl AppState {
 
     pub(crate) fn open_display_panes(&mut self, now: Instant) {
         self.open_overlay(Overlay::DisplayPanes(DisplayPanesState {
-            deadline: now + DISPLAY_PANES_DURATION,
+            deadline: now + self.display_panes_duration,
         }));
     }
 
@@ -135,6 +143,8 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use ratatui::layout::Direction;
 
     use super::*;
@@ -163,7 +173,7 @@ mod tests {
         assert_eq!(state.mode, Mode::DisplayPanes);
         assert_eq!(
             state.display_panes_deadline(),
-            Some(now + DISPLAY_PANES_DURATION)
+            Some(now + state.display_panes_duration)
         );
         state.assert_invariants_for_test();
     }
@@ -219,7 +229,6 @@ mod tests {
     // Fork issue 122: the same labels while a pane is resized.
     mod resize_labels {
         use super::*;
-        use crate::app::display_panes::RESIZE_LABELS_LINGER;
         use crate::app::state::{DragState, DragTarget};
 
         fn split_drag() -> DragState {
@@ -253,13 +262,73 @@ mod tests {
             assert!(state.resize_labels_visible());
             assert_eq!(
                 state.resize_labels_deadline(),
-                Some(now + RESIZE_LABELS_LINGER)
+                Some(now + state.display_panes_duration)
             );
-            assert!(!state.expire_resize_labels(now + RESIZE_LABELS_LINGER / 2));
+            assert!(!state.expire_resize_labels(
+                now + state.display_panes_duration - Duration::from_millis(1)
+            ));
             assert!(state.resize_labels_visible());
-            assert!(state.expire_resize_labels(now + RESIZE_LABELS_LINGER));
+            assert!(state.expire_resize_labels(now + state.display_panes_duration));
             assert!(!state.resize_labels_visible());
             assert_eq!(state.resize_labels_deadline(), None);
+        }
+
+        #[test]
+        fn one_setting_sets_how_long_both_label_views_stay() {
+            let (mut state, _, _) = two_pane_state();
+            state.display_panes_duration = Duration::from_millis(7000);
+            let now = Instant::now();
+
+            state.open_display_panes(now);
+            assert_eq!(
+                state.display_panes_deadline(),
+                Some(now + Duration::from_millis(7000))
+            );
+            state.show_resize_labels(now);
+            assert_eq!(
+                state.resize_labels_deadline(),
+                Some(now + Duration::from_millis(7000))
+            );
+            assert!(!state.expire_resize_labels(now + Duration::from_millis(6999)));
+            assert!(state.expire_resize_labels(now + Duration::from_millis(7000)));
+        }
+
+        #[test]
+        fn every_resize_event_rearms_from_that_event() {
+            let (mut state, _, _) = two_pane_state();
+            let first = Instant::now();
+            let second = first + Duration::from_secs(2);
+            state.show_window_resize_labels(first);
+            state.show_window_resize_labels(second);
+            let linger = state.display_panes_duration;
+            assert!(!state.expire_resize_labels(first + linger));
+            assert!(!state.expire_resize_labels(second + linger - Duration::from_millis(1)));
+            assert!(state.expire_resize_labels(second + linger));
+        }
+
+        #[test]
+        fn a_window_resize_arms_the_window_view_and_a_drag_step_keeps_it() {
+            let (mut state, _, _) = two_pane_state();
+            let now = Instant::now();
+            state.show_resize_labels(now);
+            assert!(
+                !state.resize_labels_window_visible(),
+                "a drag is panes only"
+            );
+
+            state.show_window_resize_labels(now);
+            assert!(state.resize_labels_window_visible());
+            state.show_resize_labels(now + Duration::from_secs(1));
+            assert!(state.resize_labels_window_visible(), "the window view wins");
+
+            assert!(state
+                .expire_resize_labels(now + Duration::from_secs(1) + state.display_panes_duration));
+            assert!(!state.resize_labels_window_visible());
+            state.show_resize_labels(now);
+            assert!(
+                !state.resize_labels_window_visible(),
+                "expiry cleared the flag"
+            );
         }
 
         #[test]

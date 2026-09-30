@@ -2741,6 +2741,9 @@ pub struct AppState {
     /// Until when the resize size labels stay after the last resize step
     /// (fork issue 122). Presentation only; see `display_panes`.
     pub(crate) resize_labels_until: Option<std::time::Instant>,
+    /// The lingering labels are the window-resize view (fork issue 138):
+    /// they also show the window summary bar and sidebar section sizes.
+    pub(crate) resize_labels_window: bool,
     pub(crate) workspace_presses:
         std::collections::HashMap<crate::app::InputSourceId, WorkspacePressState>,
     pub(crate) tab_presses: std::collections::HashMap<crate::app::InputSourceId, TabPressState>,
@@ -2795,6 +2798,9 @@ pub struct AppState {
     pub status_spinner: crate::config::StatusSpinnerConfig,
     /// Interval between working-spinner frames; see `ui.status_spinner_ms`.
     pub status_spinner_interval: std::time::Duration,
+    /// How long the `prefix+i` labels and the resize labels stay up; see
+    /// `ui.display_panes_ms`.
+    pub display_panes_duration: std::time::Duration,
     /// Current working-spinner frame, stepped by `App::advance_spinner`.
     pub spinner_frame: u8,
     /// Transient session-wide projection override for the built-in Agents view.
@@ -3889,6 +3895,7 @@ impl AppState {
             },
             drag: None,
             resize_labels_until: None,
+            resize_labels_window: false,
             workspace_presses: std::collections::HashMap::new(),
             tab_presses: std::collections::HashMap::new(),
             selection: None,
@@ -3928,6 +3935,9 @@ impl AppState {
             status_spinner: crate::config::StatusSpinnerConfig::On,
             status_spinner_interval: std::time::Duration::from_millis(
                 crate::config::DEFAULT_STATUS_SPINNER_MS,
+            ),
+            display_panes_duration: std::time::Duration::from_millis(
+                crate::config::DEFAULT_DISPLAY_PANES_MS,
             ),
             spinner_frame: 0,
             agent_view_override: None,

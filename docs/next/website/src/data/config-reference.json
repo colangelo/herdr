@@ -1239,6 +1239,12 @@
           "description": "Milliseconds between working-spinner frames, clamped to 50..=2000."
         },
         {
+          "key": "ui.display_panes_ms",
+          "type": "integer",
+          "default": "3000",
+          "description": "Milliseconds the `prefix+i` labels and the resize labels stay up, clamped to 500..=60000."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",
