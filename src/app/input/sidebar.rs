@@ -271,8 +271,14 @@ impl AppState {
     pub(super) fn set_manual_sidebar_width(&mut self, divider_col: u16) {
         let sidebar = self.view.sidebar_rect;
         let width = divider_col.saturating_sub(sidebar.x).saturating_add(1);
+        let before = self.sidebar_width;
         self.sidebar_width = width.clamp(self.sidebar_min_width, self.sidebar_max_width);
         self.sidebar_width_source = crate::app::state::SidebarWidthSource::Manual;
+        // Fork issue 145: a real change shows the window view, like a window
+        // resize; a click that moves nothing shows no linger.
+        if self.sidebar_width != before {
+            self.show_window_resize_labels(std::time::Instant::now());
+        }
         self.mark_session_dirty();
     }
 
@@ -299,7 +305,11 @@ impl AppState {
         }
         let relative_y = row.saturating_sub(sidebar.y);
         let ratio = (relative_y as f32) / (content_height as f32);
+        let before = self.sidebar_section_split;
         self.sidebar_section_split = ratio.clamp(0.1, 0.9);
+        if self.sidebar_section_split != before {
+            self.show_window_resize_labels(std::time::Instant::now());
+        }
         self.mark_session_dirty();
     }
 

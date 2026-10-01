@@ -46,7 +46,8 @@ impl AppState {
         matches!(
             self.drag.as_ref().map(|drag| &drag.target),
             Some(super::state::DragTarget::PaneSplit { .. })
-        ) || self.mode == super::state::Mode::Resize
+        ) || self.resize_labels_window_visible()
+            || self.mode == super::state::Mode::Resize
             || self.resize_labels_until.is_some()
     }
 
@@ -64,9 +65,18 @@ impl AppState {
         self.resize_labels_window = true;
     }
 
-    /// Whether the lingering labels are the window-resize view.
+    /// Whether the labels are the window-resize view: lingering after a window
+    /// resize or a sidebar drag, or while a sidebar edge is held (fork issue
+    /// 145).
     pub(crate) fn resize_labels_window_visible(&self) -> bool {
-        self.resize_labels_window && self.resize_labels_until.is_some()
+        (self.resize_labels_window && self.resize_labels_until.is_some())
+            || matches!(
+                self.drag.as_ref().map(|drag| &drag.target),
+                Some(
+                    super::state::DragTarget::SidebarDivider
+                        | super::state::DragTarget::SidebarSectionDivider
+                )
+            )
     }
 
     /// Any other key or click: the labels go now.

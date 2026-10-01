@@ -510,6 +510,29 @@ mod tests {
         );
     }
 
+    /// Fork issue 145: while a sidebar edge is held the bar and sidebar sizes
+    /// show, as for a window resize.
+    #[test]
+    fn holding_a_sidebar_edge_shows_the_window_view() {
+        use crate::app::state::{DragState, DragTarget};
+        for target in [
+            DragTarget::SidebarDivider,
+            DragTarget::SidebarSectionDivider,
+        ] {
+            let mut app = two_pane_app();
+            app.drag = Some(DragState { target });
+            layout_sized(&mut app, WIDTH, HEIGHT);
+
+            let (row, _) = mode_bar_row(&app, WIDTH, HEIGHT);
+            assert!(row.contains(&format!("window {WIDTH}x{HEIGHT}")), "{row:?}");
+            assert!(
+                row.ends_with(&format!("VERSION  {}", crate::build_info::version())),
+                "{row:?}"
+            );
+            assert!(!row.contains("any key"), "{row:?}");
+        }
+    }
+
     /// A pane-divider drag keeps showing the pane labels only.
     #[test]
     fn a_pane_drag_shows_no_summary_bar() {

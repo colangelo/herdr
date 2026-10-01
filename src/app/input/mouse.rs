@@ -5529,6 +5529,116 @@ mod tests {
         assert!(app.state.drag.is_none());
     }
 
+    fn app_with_sidebar(width: u16, height: u16) -> crate::app::App {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.ensure_test_terminals();
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, width, height));
+        app
+    }
+
+    /// Fork issue 145: dragging the sidebar edge shows the window view (pane
+    /// labels, summary bar, sidebar sizes) while held and for the linger after.
+    #[test]
+    fn dragging_the_sidebar_edge_shows_the_window_view_and_lingers() {
+        let mut app = app_with_sidebar(120, 40);
+        let sidebar = app.state.view.sidebar_rect;
+        let edge = sidebar.x + sidebar.width - 1;
+        assert!(!app.state.resize_labels_visible());
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            edge,
+            sidebar.y + 3,
+        ));
+        assert!(
+            app.state.resize_labels_window_visible(),
+            "held: the window view is up"
+        );
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            edge + 6,
+            sidebar.y + 3,
+        ));
+        assert!(app.state.resize_labels_window_visible());
+        assert!(
+            app.state.resize_labels_deadline().is_some(),
+            "a real change arms the linger"
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            edge + 6,
+            sidebar.y + 3,
+        ));
+        assert!(app.state.drag.is_none());
+        assert!(
+            app.state.resize_labels_window_visible(),
+            "after release it lingers display_panes_ms"
+        );
+        let until = app.state.resize_labels_deadline().expect("armed");
+        assert!(app.state.expire_resize_labels(until));
+        assert!(!app.state.resize_labels_window_visible());
+    }
+
+    /// The edge between the sidebar's sections shows the same view.
+    #[test]
+    fn dragging_the_section_divider_shows_the_window_view_and_lingers() {
+        let mut app = app_with_sidebar(120, 40);
+        let rect = crate::ui::sidebar_section_divider_rect(
+            app.state.view.sidebar_rect,
+            app.state.sidebar_section_split,
+        );
+        assert!(rect.width > 0, "the divider is laid out");
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            rect.x + 1,
+            rect.y,
+        ));
+        assert!(app.state.resize_labels_window_visible(), "held");
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            rect.x + 1,
+            rect.y + 4,
+        ));
+        assert!(app.state.resize_labels_deadline().is_some());
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            rect.x + 1,
+            rect.y + 4,
+        ));
+        assert!(
+            app.state.resize_labels_window_visible(),
+            "lingers after release"
+        );
+    }
+
+    /// A click on the edge without moving arms no linger.
+    #[test]
+    fn a_click_on_the_sidebar_edge_without_moving_arms_nothing() {
+        let mut app = app_with_sidebar(120, 40);
+        let sidebar = app.state.view.sidebar_rect;
+        let edge = sidebar.x + sidebar.width - 1;
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            edge,
+            sidebar.y + 3,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            edge,
+            sidebar.y + 3,
+        ));
+
+        assert!(app.state.resize_labels_deadline().is_none());
+        assert!(!app.state.resize_labels_visible());
+    }
+
     #[test]
     fn right_click_inactive_tab_opens_menu_without_switching_tabs() {
         let mut app = app_for_mouse_test();
