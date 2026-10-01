@@ -30,6 +30,7 @@ import re
 import socket
 import subprocess
 import time
+from datetime import datetime
 
 source = "herdr:claude"
 action = os.environ.get("HERDR_ACTION", "")
@@ -82,8 +83,25 @@ def plain(value):
     return value if isinstance(value, str) and PLAIN_VALUE.match(value) else None
 
 
-def transcript_facts(path):
+def record_time(entry):
+    # `"timestamp": "2026-09-29T11:09:29.659Z"`, as unix seconds.
+    text = entry.get("timestamp")
+    if not isinstance(text, str):
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def transcript_facts(path, since=None):
+    # With `since` (when the claude process that runs now started), only
+    # records that process wrote count (fork issue 135): an older record is from
+    # an earlier run of the session, which may have used another model or
+    # effort. A record without a timestamp counts only after a timestamped one
+    # from this process, as in herdr's own transcript reader.
     facts = {"mode": None, "model": None, "effort": None, "saw_bypass": False}
+    live = since is None
     if not path:
         return facts
     try:
@@ -103,6 +121,11 @@ def transcript_facts(path):
             continue
         if not isinstance(entry, dict) or entry.get("isSidechain"):
             continue
+        written = record_time(entry)
+        if since is not None and written is not None:
+            live = written >= since
+        if not live:
+            continue
         if entry.get("type") == "user":
             mode = entry.get("permissionMode")
             if mode in RESUME_MODES:
@@ -118,29 +141,44 @@ def transcript_facts(path):
     return facts
 
 
-def claude_launch_flags():
+def claude_process():
     # Claude runs this hook as its child, sometimes through a shell: walk up to
-    # the Claude process and read the flags it was started with.
+    # the Claude process and return the flags it was started with and when it
+    # started (unix seconds, None when unknown).
     pid = os.getppid()
     for _ in range(4):
         if pid <= 1:
-            return []
+            return [], None
         try:
             line = subprocess.run(
-                ["ps", "-o", "ppid=,args=", "-p", str(pid)],
+                ["ps", "-o", "lstart=,ppid=,args=", "-p", str(pid)],
                 capture_output=True,
                 text=True,
                 timeout=1,
             ).stdout.strip()
-            parent, _, args = line.partition(" ")
+            started = line[:24]
+            parent, _, args = line[24:].strip().partition(" ")
             parent = int(parent)
         except Exception:
-            return []
+            return [], None
         words = args.split()
         if words and (os.path.basename(words[0]) == "claude" or "/claude/versions/" in words[0]):
-            return words[1:]
+            try:
+                since = time.mktime(time.strptime(started, "%a %b %d %H:%M:%S %Y"))
+            except Exception:
+                since = None
+            return words[1:], since
         pid = parent
-    return []
+    return [], None
+
+
+def flag_value(flags, name):
+    for index, flag in enumerate(flags):
+        if flag == name and index + 1 < len(flags):
+            return flags[index + 1]
+        if flag.startswith(name + "="):
+            return flag.split("=", 1)[1]
+    return None
 
 
 def launch_mode(flags):
@@ -157,14 +195,19 @@ def launch_mode(flags):
 def claude_resume_argv(session_id):
     if not plain(session_id):
         return None
-    facts = transcript_facts(agent_session_path)
+    facts = transcript_facts(agent_session_path, process_started)
     flags = launch_flags
     started_mode = launch_mode(flags)
     mode = next(
         (m for m in (hook_input.get("permission_mode"), facts["mode"], started_mode) if m in RESUME_MODES),
         None,
     )
-    model = plain(hook_input.get("model")) or facts["model"]
+    # The newest word wins: the hook input, then what this process wrote, then
+    # the flags it was started with. Never an earlier process's record.
+    model = plain(hook_input.get("model")) or facts["model"] or plain(flag_value(flags, "--model"))
+    effort = facts["effort"] or (
+        flag_value(flags, "--effort") if flag_value(flags, "--effort") in RESUME_EFFORTS else None
+    )
     bypass = (
         mode == "bypassPermissions"
         or facts["saw_bypass"]
@@ -174,8 +217,8 @@ def claude_resume_argv(session_id):
     argv = ["claude", "--resume", session_id]
     if model:
         argv += ["--model", model]
-    if facts["effort"]:
-        argv += ["--effort", facts["effort"]]
+    if effort:
+        argv += ["--effort", effort]
     if bypass:
         argv.append("--allow-dangerously-skip-permissions")
     if mode:
@@ -189,7 +232,7 @@ def claude_resume_argv(session_id):
 # conversation. Claude sets CLAUDE_CODE_ENTRYPOINT=sdk-cli for a print-mode run
 # (an interactive session says "cli"); the flags it was started with say the
 # same when the variable is missing.
-launch_flags = claude_launch_flags()
+launch_flags, process_started = claude_process()
 if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "sdk-cli" or any(
     flag in ("-p", "--print") or flag.startswith("--print=") for flag in launch_flags
 ):

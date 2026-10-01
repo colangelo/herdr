@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+/// Written after any process the tests start: what the live process wrote.
+const LATER: &str = "2099-01-01T00:00:00.000Z";
+/// Written before it: what an earlier run of the session wrote.
+const EARLIER: &str = "2020-01-01T00:00:00.000Z";
 const SESSION: &str = "4f1c2d3e-aaaa-bbbb-cccc-0123456789ab";
 
 struct Scratch(PathBuf);
@@ -117,11 +121,11 @@ fn run_hook_with_env(
 }
 
 fn user_line(mode: &str) -> Value {
-    json!({"type": "user", "permissionMode": mode, "message": {"role": "user", "content": "hi"}})
+    json!({"type": "user", "permissionMode": mode, "timestamp": LATER, "message": {"role": "user", "content": "hi"}})
 }
 
 fn assistant_line(model: &str, effort: &str) -> Value {
-    json!({"type": "assistant", "effort": effort, "message": {"role": "assistant", "model": model}})
+    json!({"type": "assistant", "effort": effort, "timestamp": LATER, "message": {"role": "assistant", "model": model}})
 }
 
 /// The resume command the hook reports for `event` with `extra` hook input
@@ -350,4 +354,87 @@ fn a_top_level_interactive_claude_still_reports_its_session() {
         .expect("an interactive session reports");
 
     assert_eq!(request["params"]["agent_session_id"], SESSION);
+}
+
+fn at(mut line: Value, timestamp: &str) -> Value {
+    line["timestamp"] = json!(timestamp);
+    line
+}
+
+/// Fork issue 135: a session resumed by id with new `--model`/`--effort` has a
+/// transcript whose last records are the earlier process's. The hook must not
+/// report those; the flags the live process started with are newer.
+#[test]
+fn a_resume_by_id_reports_the_new_flags_not_the_earlier_runs_records() {
+    let earlier = [
+        at(user_line("default"), EARLIER),
+        at(assistant_line("claude-opus-5-5", "high"), EARLIER),
+    ];
+    let argv = resume_argv(
+        "SessionStart",
+        json!({"source": "resume"}),
+        &earlier,
+        Some(&["--model", "claude-sonnet-5-5", "--effort", "medium"]),
+    )
+    .unwrap();
+    assert_eq!(
+        argv,
+        [
+            "claude",
+            "--resume",
+            SESSION,
+            "--model",
+            "claude-sonnet-5-5",
+            "--effort",
+            "medium"
+        ],
+        "the new flags win over the earlier run's opus/high"
+    );
+}
+
+#[test]
+fn an_earlier_runs_model_and_effort_are_not_reported_for_a_flagless_resume() {
+    let earlier = [
+        at(user_line("default"), EARLIER),
+        at(assistant_line("claude-opus-5-5", "high"), EARLIER),
+    ];
+    let argv = resume_argv(
+        "SessionStart",
+        json!({"source": "resume"}),
+        &earlier,
+        Some(&[]),
+    );
+    assert_eq!(
+        argv.unwrap(),
+        ["claude", "--resume", SESSION],
+        "the process runs its defaults, not the earlier run's"
+    );
+}
+
+#[test]
+fn what_the_live_process_wrote_beats_its_launch_flags() {
+    let lines = [
+        at(assistant_line("claude-opus-5-5", "high"), EARLIER),
+        at(assistant_line("claude-haiku-4-5", "low"), LATER),
+    ];
+    let argv = resume_argv(
+        "Stop",
+        json!({}),
+        &lines,
+        Some(&["--model", "claude-sonnet-5-5", "--effort", "medium"]),
+    )
+    .unwrap();
+    assert_eq!(
+        argv,
+        [
+            "claude",
+            "--resume",
+            SESSION,
+            "--model",
+            "claude-haiku-4-5",
+            "--effort",
+            "low"
+        ],
+        "a /model change in the session is newer than the launch flag"
+    );
 }
