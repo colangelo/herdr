@@ -35,6 +35,16 @@ impl Drop for Scratch {
 /// the child of a process named `claude` launched with those flags, the way
 /// Claude Code runs its hooks. Returns the request the hook sent, if any.
 fn run_hook(input: &Value, claude_flags: Option<&[&str]>) -> Option<Value> {
+    run_hook_with_env(input, claude_flags, &[])
+}
+
+/// [`run_hook`] with extra environment variables, as Claude sets them for its
+/// hooks.
+fn run_hook_with_env(
+    input: &Value,
+    claude_flags: Option<&[&str]>,
+    envs: &[(&str, &str)],
+) -> Option<Value> {
     let scratch = Scratch::new();
     let socket_path = scratch.0.join("s");
     let listener = UnixListener::bind(&socket_path).unwrap();
@@ -84,6 +94,7 @@ fn run_hook(input: &Value, claude_flags: Option<&[&str]>) -> Option<Value> {
         .env("HERDR_ENV", "1")
         .env("HERDR_SOCKET_PATH", &socket_path)
         .env("HERDR_PANE_ID", "p_test")
+        .envs(envs.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -307,4 +318,36 @@ fn prompt_and_stop_reports_carry_no_session_start_source() {
             "{event}"
         );
     }
+}
+
+/// Fork issue 143: a `claude -p` started from a session's Bash tool inherits
+/// `HERDR_PANE_ID`. Its hooks must not report its own session to the pane the
+/// parent owns; a top-level session still does.
+#[test]
+fn a_nested_print_mode_claude_does_not_take_the_panes_session() {
+    let input =
+        json!({"hook_event_name": "SessionStart", "session_id": SESSION, "source": "startup"});
+
+    // Claude sets this for a `-p` run, in the hook's environment.
+    assert!(
+        run_hook_with_env(&input, None, &[("CLAUDE_CODE_ENTRYPOINT", "sdk-cli")]).is_none(),
+        "the entrypoint of a print-mode run is not the pane's agent"
+    );
+    // And the flags it was started with say so too.
+    assert!(run_hook(&input, Some(&["-p", "say", "ok"])).is_none(), "-p");
+    assert!(
+        run_hook(&input, Some(&["--print", "say", "ok"])).is_none(),
+        "--print"
+    );
+}
+
+#[test]
+fn a_top_level_interactive_claude_still_reports_its_session() {
+    let input =
+        json!({"hook_event_name": "SessionStart", "session_id": SESSION, "source": "startup"});
+
+    let request = run_hook_with_env(&input, Some(&[]), &[("CLAUDE_CODE_ENTRYPOINT", "cli")])
+        .expect("an interactive session reports");
+
+    assert_eq!(request["params"]["agent_session_id"], SESSION);
 }

@@ -2,7 +2,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=claude
-# HERDR_INTEGRATION_VERSION=9
+# HERDR_INTEGRATION_VERSION=10
 
 param([string]$Action = "")
 
@@ -18,6 +18,10 @@ try {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($payload.agent_id)) { exit 0 }
+# A `claude -p` started from a session's Bash tool inherits HERDR_PANE_ID and
+# runs these hooks too (fork issue 143); it is not the pane's agent. Claude sets
+# this entrypoint for a print-mode run.
+if ($env:CLAUDE_CODE_ENTRYPOINT -eq "sdk-cli") { exit 0 }
 if ($payload.hook_event_name -eq "SubagentStop") { exit 0 }
 
 $sessionId = $payload.session_id

@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=claude
-# HERDR_INTEGRATION_VERSION=9
+# HERDR_INTEGRATION_VERSION=10
 
 set -eu
 
@@ -158,7 +158,7 @@ def claude_resume_argv(session_id):
     if not plain(session_id):
         return None
     facts = transcript_facts(agent_session_path)
-    flags = claude_launch_flags()
+    flags = launch_flags
     started_mode = launch_mode(flags)
     mode = next(
         (m for m in (hook_input.get("permission_mode"), facts["mode"], started_mode) if m in RESUME_MODES),
@@ -182,6 +182,18 @@ def claude_resume_argv(session_id):
         argv += ["--permission-mode", mode]
     return argv
 
+
+# A `claude -p` that a session starts from its Bash tool inherits HERDR_PANE_ID
+# and runs these same hooks (fork issue 143). It is not the pane's agent, and
+# reporting its session would hand the pane's restore record to a throwaway
+# conversation. Claude sets CLAUDE_CODE_ENTRYPOINT=sdk-cli for a print-mode run
+# (an interactive session says "cli"); the flags it was started with say the
+# same when the variable is missing.
+launch_flags = claude_launch_flags()
+if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "sdk-cli" or any(
+    flag in ("-p", "--print") or flag.startswith("--print=") for flag in launch_flags
+):
+    raise SystemExit(0)
 
 if agent_session_id:
     params = {
