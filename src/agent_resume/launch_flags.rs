@@ -266,14 +266,28 @@ pub fn without_missing_settings(
         return launch_flags.to_vec();
     }
     let mut kept = Vec::with_capacity(launch_flags.len());
+    // Inline JSON (`--settings '{"model":"x"}'`) is not a path: keep it.
+    let is_gone = |value: &str| {
+        let value = value.trim_start();
+        !value.is_empty() && !value.starts_with('{') && !exists(Path::new(value))
+    };
     let mut index = 0;
     while index < launch_flags.len() {
         let word = &launch_flags[index];
-        if word == "--settings" {
-            if let Some(path) = launch_flags.get(index + 1).filter(|value| !is_flag(value)) {
-                if !exists(Path::new(path)) {
+        if let Some(value) = word.strip_prefix("--settings=") {
+            if is_gone(value) {
+                tracing::warn!(
+                    path = %value,
+                    "dropping --settings from the resume command: the file is gone"
+                );
+                index += 1;
+                continue;
+            }
+        } else if word == "--settings" {
+            if let Some(value) = launch_flags.get(index + 1).filter(|value| !is_flag(value)) {
+                if is_gone(value) {
                     tracing::warn!(
-                        path = %path,
+                        path = %value,
                         "dropping --settings from the resume command: the file is gone"
                     );
                     index += 2;
@@ -350,6 +364,32 @@ mod tests {
             without_missing_settings("codex", &flags, |_| false),
             flags,
             "only Claude's --settings is checked"
+        );
+    }
+
+    #[test]
+    fn inline_json_settings_and_the_equals_form_are_handled() {
+        let json = words(&["--settings", " {\"model\":\"x\"}", "--model", "opus"]);
+        assert_eq!(
+            without_missing_settings("claude", &json, |_| false),
+            json,
+            "inline JSON is not a path and is kept"
+        );
+        let equals = words(&["--settings=/gone/s.json", "--model", "opus"]);
+        assert_eq!(
+            without_missing_settings("claude", &equals, |_| false),
+            words(&["--model", "opus"]),
+            "a missing path in the = form is dropped"
+        );
+        assert_eq!(
+            without_missing_settings("claude", &equals, |_| true),
+            equals,
+            "a present one is kept"
+        );
+        let inline_equals = words(&["--settings={\"a\":1}"]);
+        assert_eq!(
+            without_missing_settings("claude", &inline_equals, |_| false),
+            inline_equals
         );
     }
 
