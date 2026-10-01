@@ -3,9 +3,11 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 mod claude_transcript;
+mod footer;
 mod launch_flags;
 
 pub use claude_transcript::claude_transcript_resume;
+pub use footer::argv_with_live_footer;
 pub use launch_flags::{
     compose_resume_argv, without_missing_settings, AgentLaunchArgv, AgentLaunchFlags,
 };

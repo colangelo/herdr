@@ -470,12 +470,25 @@ fn capture_tab(
         let last_input_at_ms = terminal.and_then(|terminal| {
             crate::terminal::pane_last_input_at_ms(terminal, terminal_runtimes.get(&terminal.id))
         });
+        // A Claude pane's footer shows the model and effort it runs now; a hook
+        // record older than that must not win (fork issue 144). Read from the
+        // bottom of the buffer once per capture, only for a Claude record.
+        let footer = terminal
+            .and_then(|terminal| terminal.reported_resume_for_snapshot())
+            .filter(|resume| resume.agent == "claude")
+            .and_then(|_| terminal_runtimes.get(&terminal?.id))
+            .map(|runtime| runtime.detection_text())
+            .unwrap_or_default();
         let agent_resume = terminal
             .and_then(|terminal| terminal.reported_resume_for_snapshot())
             .map(|resume| PaneAgentResumeSnapshot {
                 source: resume.source.clone(),
                 agent: resume.agent.clone(),
-                argv: resume.argv.clone(),
+                argv: crate::agent_resume::argv_with_live_footer(
+                    &resume.agent,
+                    &resume.argv,
+                    &footer,
+                ),
             });
         let agent_launch = terminal
             .and_then(|terminal| terminal.agent_launch_for_snapshot())

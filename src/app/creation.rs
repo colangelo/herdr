@@ -496,7 +496,14 @@ impl App {
             blocked_since: terminal.blocked_since_unix_ms(),
             state_labels: presentation.state_labels,
             tokens: terminal.metadata_tokens.values(),
-            agent_session: terminal_agent_session_info(terminal),
+            agent_session: terminal_agent_session_info(
+                terminal,
+                (terminal.effective_agent_label() == Some("claude"))
+                    .then(|| self.terminal_runtimes.get(&terminal.id))
+                    .flatten()
+                    .map(|runtime| runtime.detection_text())
+                    .unwrap_or_default(),
+            ),
             last_input_at_unix: crate::terminal::pane_last_input_at_ms(
                 terminal,
                 self.terminal_runtimes.get(&terminal.id),
@@ -555,10 +562,15 @@ impl App {
     }
 }
 
+/// `footer` is the bottom of a Claude pane's buffer (fork issue 144): the
+/// model and effort it shows replace an older record's in the restore command.
 fn terminal_agent_session_info(
     terminal: &crate::terminal::TerminalState,
+    footer: String,
 ) -> Option<crate::api::schema::AgentSessionInfo> {
-    let restore_argv = terminal.restore_plan_preview().map(|plan| plan.argv);
+    let restore_argv = terminal
+        .restore_plan_preview()
+        .map(|plan| crate::agent_resume::argv_with_live_footer(&plan.agent, &plan.argv, &footer));
     if let Some(authority) = terminal.hook_authority.as_ref() {
         if let Some(session_ref) = authority.session_ref.as_ref() {
             return Some(crate::api::schema::AgentSessionInfo {
