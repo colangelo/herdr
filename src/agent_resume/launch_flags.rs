@@ -249,6 +249,44 @@ pub fn carried_launch_flags(agent: &str, argv: &[String], cwd: Option<&Path>) ->
     carried
 }
 
+/// The recorded launch flags without a `--settings` file that is not there.
+///
+/// Claude refuses to start on a settings path it cannot read, so a restore
+/// that carried one would fail to resume at all (fork issue 143): the
+/// scratchpad a launch pointed at is gone after a reboot. The flag is dropped
+/// whole, with a warning, and the session resumes without it. The check is
+/// made when the command is built, at snapshot and at restore, not when the
+/// flag is first recorded, so a file that is there again is used again.
+pub fn without_missing_settings(
+    agent: &str,
+    launch_flags: &[String],
+    exists: impl Fn(&Path) -> bool,
+) -> Vec<String> {
+    if agent != "claude" {
+        return launch_flags.to_vec();
+    }
+    let mut kept = Vec::with_capacity(launch_flags.len());
+    let mut index = 0;
+    while index < launch_flags.len() {
+        let word = &launch_flags[index];
+        if word == "--settings" {
+            if let Some(path) = launch_flags.get(index + 1).filter(|value| !is_flag(value)) {
+                if !exists(Path::new(path)) {
+                    tracing::warn!(
+                        path = %path,
+                        "dropping --settings from the resume command: the file is gone"
+                    );
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        kept.push(word.clone());
+        index += 1;
+    }
+    kept
+}
+
 /// `base` (the resume command) with every recorded launch flag whose group it
 /// does not already carry. The base wins: it holds what the session changed
 /// since launch.
@@ -284,6 +322,65 @@ mod tests {
 
     fn words(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    /// Fork issue 143: a `--settings` file that is gone must never reach the
+    /// resume command; one that is there stays.
+    #[test]
+    fn a_missing_settings_file_is_dropped_and_a_present_one_kept() {
+        let flags = words(&[
+            "--model",
+            "opus",
+            "--settings",
+            "/gone/s.json",
+            "--agent",
+            "x",
+        ]);
+        assert_eq!(
+            without_missing_settings("claude", &flags, |_| false),
+            words(&["--model", "opus", "--agent", "x"]),
+            "the flag and its value go together"
+        );
+        assert_eq!(
+            without_missing_settings("claude", &flags, |_| true),
+            flags,
+            "a present file is kept"
+        );
+        assert_eq!(
+            without_missing_settings("codex", &flags, |_| false),
+            flags,
+            "only Claude's --settings is checked"
+        );
+    }
+
+    #[test]
+    fn a_plan_built_over_a_missing_settings_file_still_resumes_without_it() {
+        let plan = crate::agent_resume::plan(
+            "herdr:claude",
+            "claude",
+            &crate::agent_resume::AgentSessionRef::id("s1").unwrap(),
+        )
+        .unwrap();
+        let gone =
+            std::env::temp_dir().join(format!("herdr-{}-never-written.json", std::process::id()));
+        let launch = AgentLaunchFlags {
+            agent: "claude".into(),
+            flags: words(&["--settings", &gone.display().to_string(), "--model", "opus"]),
+            started_at_ms: None,
+        };
+
+        let plan = plan.with_launch_flags(Some(&launch));
+
+        assert!(
+            !plan.argv.iter().any(|arg| arg == "--settings"),
+            "{:?}",
+            plan.argv
+        );
+        assert_eq!(&plan.argv[..3], ["claude", "--resume", "s1"]);
+        assert!(
+            plan.argv.iter().any(|arg| arg == "opus"),
+            "the rest is kept"
+        );
     }
 
     #[test]

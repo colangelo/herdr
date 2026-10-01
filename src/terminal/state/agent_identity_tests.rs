@@ -166,13 +166,14 @@ fn preview(terminal: &TerminalState) -> Option<Vec<String>> {
 
 #[test]
 fn the_preview_of_a_gpt_claude_pane_carries_its_settings_file() {
+    let settings = crate::agent_resume::test_settings_file("preview-gpt.json");
     let mut terminal = claude_pane();
     terminal.record_agent_launch(
         Agent::Claude,
         Some(&launch(&[
             "claude",
             "--settings",
-            "/u/gpt.json",
+            &settings,
             "--model",
             "gpt-6-astra",
         ])),
@@ -194,7 +195,7 @@ fn the_preview_of_a_gpt_claude_pane_carries_its_settings_file() {
             "--model",
             "gpt-6-astra",
             "--settings",
-            "/u/gpt.json"
+            &settings
         ]
     );
 }

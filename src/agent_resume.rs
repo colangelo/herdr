@@ -6,7 +6,9 @@ mod claude_transcript;
 mod launch_flags;
 
 pub use claude_transcript::claude_transcript_resume;
-pub use launch_flags::{compose_resume_argv, AgentLaunchArgv, AgentLaunchFlags};
+pub use launch_flags::{
+    compose_resume_argv, without_missing_settings, AgentLaunchArgv, AgentLaunchFlags,
+};
 
 const MAX_SESSION_ID_LEN: usize = 512;
 const MAX_SESSION_PATH_LEN: usize = 4096;
@@ -84,12 +86,22 @@ impl AgentResumePlan {
         let Some(launch) = launch.filter(|launch| launch.agent == self.agent) else {
             return self;
         };
-        let argv = compose_resume_argv(&self.agent, &self.argv, &launch.flags);
+        let flags = without_missing_settings(&self.agent, &launch.flags, Path::exists);
+        let argv = compose_resume_argv(&self.agent, &self.argv, &flags);
         if validate_resume_argv(&argv).is_ok() {
             self.argv = argv;
         }
         self
     }
+}
+
+/// An existing settings file for a test, so `--settings` survives the
+/// missing-file check; the path is unique to `name` and the process.
+#[cfg(test)]
+pub(crate) fn test_settings_file(name: &str) -> String {
+    let path = std::env::temp_dir().join(format!("herdr-{}-{name}", std::process::id()));
+    std::fs::write(&path, "{}").expect("write a test settings file");
+    path.display().to_string()
 }
 
 /// Restore types the command into the pane's shell, so the executable must be a
@@ -379,9 +391,10 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
+        let settings = test_settings_file("resume-g.json");
         let launch = AgentLaunchFlags {
             agent: "claude".into(),
-            flags: ["--model", "opus", "--settings", "/u/g.json"]
+            flags: ["--model", "opus", "--settings", &settings]
                 .map(String::from)
                 .to_vec(),
             started_at_ms: None,
@@ -402,7 +415,7 @@ mod tests {
                 "--effort",
                 "low",
                 "--settings",
-                "/u/g.json"
+                &settings
             ],
             "the transcript's model wins over the launch one; launch-only flags are added"
         );

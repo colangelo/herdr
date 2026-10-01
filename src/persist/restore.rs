@@ -1837,6 +1837,7 @@ mod tests {
 
     #[test]
     fn a_gpt_claude_pane_restores_with_its_settings_file() {
+        let settings = crate::agent_resume::test_settings_file("restore-gpt.json");
         let resume = PaneAgentResumeSnapshot {
             source: "herdr:claude".into(),
             agent: "claude".into(),
@@ -1850,12 +1851,7 @@ mod tests {
                 Some(&resume),
                 &[(
                     "claude",
-                    &[
-                        "--settings",
-                        "/u/gpt.settings.json",
-                        "--model",
-                        "gpt-6-astra"
-                    ]
+                    &["--settings", &settings, "--model", "gpt-6-astra"]
                 )],
             ),
             [
@@ -1865,7 +1861,7 @@ mod tests {
                 "--model",
                 "gpt-6-astra",
                 "--settings",
-                "/u/gpt.settings.json"
+                &settings
             ]
         );
     }
