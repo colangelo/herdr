@@ -238,7 +238,16 @@ impl App {
             return false;
         }
 
-        let argv = resume_argv(&plan, &self.codex_app_server, &cwd);
+        let session_name = self
+            .state
+            .terminals
+            .get(&terminal_id)
+            .and_then(|terminal| terminal.agent_name.clone());
+        let argv = with_session_name(
+            resume_argv(&plan, &self.codex_app_server, &cwd),
+            &plan.agent,
+            session_name.as_deref(),
+        );
         let codex_thread = (plan.agent == "codex")
             .then(|| codex_resume_thread_id(&plan.argv))
             .flatten();
@@ -461,6 +470,31 @@ fn without_missing_remote(
         index += 1;
     }
     kept
+}
+
+/// A Claude resume command with the pane's agent name as the session's display
+/// name (`--name`), so Claude Code shows it again after a restore (fork issue
+/// 136). Left alone when the command already names the session, and when the
+/// name is not a plain word restore can type safely.
+fn with_session_name(mut argv: Vec<String>, agent: &str, name: Option<&str>) -> Vec<String> {
+    let Some(name) = name.filter(|name| {
+        agent == "claude"
+            && !name.is_empty()
+            && name.len() <= 100
+            && name.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
+            })
+    }) else {
+        return argv;
+    };
+    let named = argv
+        .iter()
+        .any(|arg| arg == "-n" || arg == "--name" || arg.starts_with("--name="));
+    if !named {
+        argv.push("--name".to_string());
+        argv.push(name.to_string());
+    }
+    argv
 }
 
 /// The thread a `codex resume <id>` plan reopens: Codex thread ids are its
@@ -1095,6 +1129,27 @@ mod tests {
             ),
             ["codex", "resume", "t1", "--remote", "ws://host:1"]
         );
+    }
+
+    /// Fork issue 136: Claude Code shows the session name again after a restore.
+    #[test]
+    fn a_claude_resume_carries_the_pane_name_as_the_session_name() {
+        let base: Vec<String> = ["claude", "--resume", "s1"].map(String::from).to_vec();
+        assert_eq!(
+            with_session_name(base.clone(), "claude", Some("cchv-helper")),
+            ["claude", "--resume", "s1", "--name", "cchv-helper"]
+        );
+        assert_eq!(with_session_name(base.clone(), "claude", None), base);
+        assert_eq!(
+            with_session_name(base.clone(), "claude", Some("it's odd")),
+            base,
+            "a name restore cannot type safely is left out"
+        );
+        assert_eq!(with_session_name(base.clone(), "codex", Some("x")), base);
+        let named: Vec<String> = ["claude", "--resume", "s1", "--name", "mine"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(with_session_name(named.clone(), "claude", Some("x")), named);
     }
 
     #[cfg(unix)]
