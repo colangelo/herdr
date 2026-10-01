@@ -758,6 +758,13 @@ fn restore_tab(
                 (Some(agent_name), Some(agent)) => {
                     terminal.restore_managed_agent(agent_name, agent)
                 }
+                // A name given to an agent herdr did not launch (`agent
+                // rename`, a rename hook) survives a restore when the pane
+                // resumes the agent session that holds it (fork issue 136).
+                // The session owns the name, so it goes if the session does.
+                (Some(agent_name), None) if saved_agent_session.is_some() => {
+                    terminal.set_agent_name(agent_name)
+                }
                 (Some(_), None) => {}
                 (None, _) => {}
             }
@@ -2158,6 +2165,83 @@ mod tests {
         assert_eq!(session.source, "herdr:opencode");
         assert_eq!(session.agent, "opencode");
         assert_eq!(session.session_ref.value, "opencode-session");
+    }
+
+    #[tokio::test]
+    async fn a_hand_started_agents_name_survives_a_restore_that_resumes_its_session() {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout: LayoutSnapshot::Pane(0),
+                    panes: HashMap::from([(
+                        0,
+                        super::super::snapshot::PaneSnapshot {
+                            cwd,
+                            label: None,
+                            agent_name: Some("cchv-helper".into()),
+                            managed_agent_kind: None,
+                            agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                                source: "herdr:claude".into(),
+                                agent: "claude".into(),
+                                kind: crate::agent_resume::AgentSessionRefKind::Id,
+                                value: "d10d1698-e95a-45a1-a81b-c49313db53a9".into(),
+                            }),
+                            agent_resume: None,
+                            agent_launch: None,
+                            launch_argv: None,
+                            todos: Vec::new(),
+                            next_todo_id: 1,
+                            last_input_at_ms: None,
+                            former_public_ids: Vec::new(),
+                        },
+                    )]),
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+            last_client_size: None,
+        };
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        // Fork issue 136: the herdr name came back with the resumed session.
+        assert_eq!(terminal.agent_name.as_deref(), Some("cchv-helper"));
+        assert_eq!(terminal.managed_agent_kind(), None);
     }
 
     #[tokio::test]
