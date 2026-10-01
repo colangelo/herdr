@@ -449,10 +449,11 @@ mod tests {
         app
     }
 
-    /// Fork issue 142: the detail box sits above the list, below the search
-    /// row, and the list still starts right under it.
+    /// Fork issue 142 (ac picked it): title, box, search, list. The box sits
+    /// right under the title, the search row under the box, and the list
+    /// right under the search row's blank.
     #[test]
-    fn the_detail_box_sits_between_the_search_row_and_the_first_entry() {
+    fn the_detail_box_sits_under_the_title_above_the_search() {
         let mut open = app_with_todos(&[
             ("the plan\nstep one\nstep two", false, TodoPriority::High),
             ("one line", false, TodoPriority::Normal),
@@ -461,14 +462,12 @@ mod tests {
         test_support::layout(&mut open);
         let geometry = open.todo_board_geometry().expect("board");
         let detail = geometry.detail.expect("the box is there");
+        let title = geometry.header_row(0);
         let search = geometry.header_row(1);
 
-        assert!(detail.y > search.y, "the box is under the search row");
-        assert_eq!(
-            detail.y + detail.height,
-            geometry.list.y,
-            "the list starts right under the box"
-        );
+        assert_eq!(detail.y, title.y + 1, "the box is right under the title");
+        assert_eq!(search.y, detail.y + detail.height, "search under the box");
+        assert_eq!(geometry.list.y, search.y + 2, "a blank row, then the list");
         let buffer = test_support::draw_sized(
             &open,
             test_support::SNAPSHOT_WIDTH,
@@ -479,11 +478,9 @@ mod tests {
             rows.find(needle)
                 .unwrap_or_else(|| panic!("{needle}: {rows}"))
         };
-        assert!(at("search todos") < at("step two"));
-        assert!(
-            at("step two") < at("the plan ⏎"),
-            "the list is under the box"
-        );
+        assert!(at("todos/notes") < at("step two"));
+        assert!(at("step two") < at("search todos"));
+        assert!(at("search todos") < at("the plan ⏎"));
     }
 
     /// The group header takes the help pane's two styles, from the one helper

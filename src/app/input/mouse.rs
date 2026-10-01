@@ -6665,6 +6665,57 @@ mod tests {
         );
     }
 
+    /// Fork issue 142: with the detail box under the title the search row and
+    /// the list both sit lower than they used to; clicks follow them.
+    #[test]
+    fn board_clicks_land_on_the_search_row_and_the_first_row_below_the_box() {
+        let (mut app, owner) = app_for_todo_board();
+        app.state.close_todo_board();
+        leave_modal(&mut app.state);
+        add_pane_todo(&mut app, owner, "the plan\nstep one\nstep two");
+        app.state.open_todo_board(&app.terminal_runtimes);
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let geometry = app.state.todo_board_geometry().expect("board");
+        assert!(
+            geometry.detail.is_some(),
+            "a row hides text, so the box is up"
+        );
+
+        // The old search row (header row 1 without the box) is the box now.
+        let search = geometry.header_row(1);
+        assert!(search.y > geometry.header.y + 1);
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                search.x + 2,
+                search.y,
+            ),
+        );
+        assert!(
+            app.state.todo_board().expect("board").search.focused,
+            "a click on the search row focuses it"
+        );
+
+        let (list, _) = app.state.todo_board_list_window().expect("list");
+        assert_eq!(list.y, search.y + 2);
+        let idx = app
+            .state
+            .todo_board_row_at(list.x + 4, list.y + 1)
+            .expect("a row is drawn first under the list's top");
+        app.state.handle_mouse(
+            &mut app.terminal_runtimes,
+            crate::app::LOCAL_INPUT_SOURCE,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                list.x + 4,
+                list.y + 1,
+            ),
+        );
+        assert_eq!(app.state.todo_board().expect("board").list.selected, idx);
+    }
+
     /// The row's own meaning on the board is its owner, so a click travels
     /// there rather than opening the editor the way the panel's row click does.
     #[test]

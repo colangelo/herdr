@@ -25,12 +25,12 @@ pub(crate) enum DetailPlacement {
     /// Between the list and the footer.
     BelowList,
     /// Between the header block and the list: title, search, box, list.
+    // Not the todo layout any more (ac picked `BelowTitle`, fork issue 142);
+    // the alternative stays selectable and tested.
+    #[allow(dead_code)]
     AboveList,
     /// Directly under the header's first row: title, box, search, list. A
     /// panel with no header takes [`DetailPlacement::AboveList`].
-    // Selected by editing `TODO_DETAIL_PLACEMENT`; only tests construct it
-    // until ac picks that layout (fork issue 142).
-    #[allow(dead_code)]
     BelowTitle,
 }
 

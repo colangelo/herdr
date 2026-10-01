@@ -26,10 +26,10 @@ use crate::ui::widgets::render_panel_shell;
 pub(crate) const DETAIL_MAX_TEXT_ROWS: u16 = 6;
 
 /// Where the todo detail box sits, in the pane todos panel and on the session
-/// board alike (fork issue 142): `AboveList` is title, search, box, list;
-/// `BelowTitle` is title, box, search, list. One line to change.
+/// board alike (fork issue 142): `BelowTitle` is title, box, search, list;
+/// `AboveList` is title, search, box, list. One line to change.
 pub(crate) const TODO_DETAIL_PLACEMENT: crate::ui::overlay::DetailPlacement =
-    crate::ui::overlay::DetailPlacement::AboveList;
+    crate::ui::overlay::DetailPlacement::BelowTitle;
 
 /// What the box says for a selection that hides nothing, so a box kept open
 /// for the other rows reads as intentional rather than as a blank.
