@@ -48,6 +48,11 @@ impl CodexAppServer {
         }
     }
 
+    /// The daemon socket when layer A is on.
+    pub(crate) fn socket(&self) -> Option<&Path> {
+        self.socket.as_deref()
+    }
+
     /// The daemon socket when threads should be named (layers A and B on).
     pub(crate) fn naming_socket(&self) -> Option<&Path> {
         self.socket.as_deref().filter(|_| self.name_threads)

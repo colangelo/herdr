@@ -393,17 +393,74 @@ fn shell_quote(value: &str) -> String {
 
 /// The argv a deferred resume runs: the plan's, plus for Codex the
 /// shared-daemon arguments when enabled.
+///
+/// The daemon's socket does not survive a reboot (fork issue 134): a restore
+/// that typed `--remote unix://<socket>` for a socket that is not there made
+/// Codex fail with "failed to connect to remote app server". With the socket
+/// missing, the daemon arguments are left off, and a `--remote unix://` the
+/// plan itself carried to a missing socket is dropped, so Codex resumes
+/// locally.
 fn resume_argv(
     plan: &crate::agent_resume::AgentResumePlan,
     codex_app_server: &crate::codex_app_server::CodexAppServer,
     cwd: &std::path::Path,
 ) -> Vec<String> {
+    resume_argv_with(plan, codex_app_server, cwd, std::path::Path::exists)
+}
+
+fn resume_argv_with(
+    plan: &crate::agent_resume::AgentResumePlan,
+    codex_app_server: &crate::codex_app_server::CodexAppServer,
+    cwd: &std::path::Path,
+    socket_exists: impl Fn(&std::path::Path) -> bool,
+) -> Vec<String> {
     let mut argv = plan.argv.clone();
-    if plan.agent == "codex" {
+    if plan.agent != "codex" {
+        return argv;
+    }
+    argv = without_missing_remote(&argv, &socket_exists);
+    let daemon_up = codex_app_server.socket().is_some_and(&socket_exists);
+    if daemon_up {
         let extra = codex_app_server.launch_args(cwd, argv.get(1..).unwrap_or_default());
         argv.extend(extra);
+    } else if codex_app_server.socket().is_some() {
+        tracing::warn!("codex app-server socket is not there; resuming locally");
     }
     argv
+}
+
+/// `argv` without a `--remote unix://<path>` whose socket is gone, in either
+/// spelling. Another kind of remote (`ws://`) is left alone.
+fn without_missing_remote(
+    argv: &[String],
+    socket_exists: &impl Fn(&std::path::Path) -> bool,
+) -> Vec<String> {
+    let missing = |value: &str| {
+        value
+            .strip_prefix("unix://")
+            .is_some_and(|path| !socket_exists(std::path::Path::new(path)))
+    };
+    let mut kept = Vec::with_capacity(argv.len());
+    let mut index = 0;
+    while index < argv.len() {
+        let word = &argv[index];
+        if let Some(value) = word.strip_prefix("--remote=") {
+            if missing(value) {
+                index += 1;
+                continue;
+            }
+        } else if word == "--remote" {
+            if let Some(value) = argv.get(index + 1) {
+                if missing(value) {
+                    index += 2;
+                    continue;
+                }
+            }
+        }
+        kept.push(word.clone());
+        index += 1;
+    }
+    kept
 }
 
 /// The thread a `codex resume <id>` plan reopens: Codex thread ids are its
@@ -941,7 +998,7 @@ mod tests {
             },
         );
         assert_eq!(
-            super::resume_argv(&plan, &on, std::path::Path::new("/repo")),
+            super::resume_argv_with(&plan, &on, std::path::Path::new("/repo"), |_| true),
             [
                 "codex",
                 "resume",
@@ -959,6 +1016,84 @@ mod tests {
         assert_eq!(
             super::codex_resume_thread_id(&plan.argv).as_deref(),
             Some("thread-1")
+        );
+    }
+
+    /// Fork issue 134: the daemon socket is gone after a reboot, so the resume
+    /// must not type `--remote` for it.
+    #[cfg(unix)]
+    #[test]
+    fn codex_resume_drops_the_daemon_arguments_when_the_socket_is_gone() {
+        let on = crate::codex_app_server::CodexAppServer::from_config(
+            &crate::config::CodexAgentConfig {
+                app_server: true,
+                app_server_socket: "/run/codex.sock".into(),
+                name_threads: true,
+            },
+        );
+        let plan = |argv: &[&str]| crate::agent_resume::AgentResumePlan {
+            agent: "codex".into(),
+            argv: argv.iter().map(|word| word.to_string()).collect(),
+            dedupe_key: "k".into(),
+        };
+        let repo = std::path::Path::new("/repo");
+        let gone = |_: &std::path::Path| false;
+        let up = |path: &std::path::Path| path == std::path::Path::new("/run/codex.sock");
+
+        // The socket missing: a plain local resume.
+        assert_eq!(
+            super::resume_argv_with(&plan(&["codex", "resume", "t1"]), &on, repo, gone),
+            ["codex", "resume", "t1"]
+        );
+        // The socket there: the daemon arguments, as before.
+        assert_eq!(
+            super::resume_argv_with(&plan(&["codex", "resume", "t1"]), &on, repo, up),
+            [
+                "codex",
+                "resume",
+                "t1",
+                "--remote",
+                "unix:///run/codex.sock",
+                "-C",
+                "/repo"
+            ]
+        );
+        // A `--remote` the plan carried to a missing socket goes, in both
+        // spellings; a daemon-less remote and the rest of the flags stay.
+        assert_eq!(
+            super::resume_argv_with(
+                &plan(&[
+                    "codex",
+                    "resume",
+                    "t1",
+                    "--remote",
+                    "unix:///old.sock",
+                    "-m",
+                    "x"
+                ]),
+                &Default::default(),
+                repo,
+                gone
+            ),
+            ["codex", "resume", "t1", "-m", "x"]
+        );
+        assert_eq!(
+            super::resume_argv_with(
+                &plan(&["codex", "--remote=unix:///old.sock", "resume", "t1"]),
+                &Default::default(),
+                repo,
+                gone
+            ),
+            ["codex", "resume", "t1"]
+        );
+        assert_eq!(
+            super::resume_argv_with(
+                &plan(&["codex", "resume", "t1", "--remote", "ws://host:1"]),
+                &Default::default(),
+                repo,
+                gone
+            ),
+            ["codex", "resume", "t1", "--remote", "ws://host:1"]
         );
     }
 
