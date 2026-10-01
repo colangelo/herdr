@@ -378,12 +378,7 @@ impl AppState {
                         None => {}
                     }
                     let geometry = self.todo_board_geometry()?;
-                    let search_row = Rect::new(
-                        geometry.header.x,
-                        geometry.header.y + 1,
-                        geometry.header.width,
-                        1,
-                    );
+                    let search_row = geometry.header_row(1);
                     if rect_contains(search_row, mouse.column, mouse.row) {
                         if let Some(board) = self.todo_board_mut() {
                             board.search.focus();
@@ -1726,6 +1721,7 @@ impl AppState {
             // The notification list has no detail block: a notification is
             // already one line by construction.
             detail_rows: 0,
+            detail_placement: crate::ui::overlay::DetailPlacement::BelowList,
             header_rows: 0,
             vertical: match self.notification_center_position {
                 crate::config::NotificationCenterPositionConfig::TopRight => {
@@ -1833,6 +1829,7 @@ impl AppState {
             // dead end.
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
+            detail_placement: crate::ui::overlay::TODO_DETAIL_PLACEMENT,
             header_rows: 0,
             vertical: crate::ui::overlay::VerticalAnchor::InsideTop,
         };
@@ -1996,6 +1993,7 @@ impl AppState {
             max_rows: u16::MAX,
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
+            detail_placement: crate::ui::overlay::DetailPlacement::BelowList,
             header_rows: crate::ui::PANE_MOVE_TARGET_HEADER_ROWS,
             vertical: crate::ui::overlay::VerticalAnchor::Centered,
         }

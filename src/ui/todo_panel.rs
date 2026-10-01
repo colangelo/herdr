@@ -497,8 +497,8 @@ mod tests {
             .0;
         assert_eq!(list.height as usize, 2, "one row per todo, still");
         assert!(
-            detail.y >= list.y + list.height,
-            "the detail sits under the list, not inside it"
+            detail.y + detail.height <= list.y,
+            "the detail sits above the list, not inside it"
         );
     }
 
@@ -632,10 +632,10 @@ mod tests {
         );
         let text = detail_text(&app).expect("the box stays");
         assert!(!text.contains("one line"), "no text of the todo: {text}");
-        assert!(text.contains("full text shown above"), "{text}");
+        assert!(text.contains("full text in the row"), "{text}");
     }
 
-    /// The detail in its own inner box, between the list and the footer.
+    /// The detail in its own inner box, above the list (fork issue 142).
     #[test]
     fn snapshot_detail_box() {
         snapshot(
@@ -650,13 +650,13 @@ mod tests {
             Rect::new(50, 2, 30, 11),
             &[
                 "┌────────────────────────────┐",
-                "│ ▲ the plan ⏎             #1│",
-                "│ ● one line               #2│",
                 "│┌──────────────────────────┐│",
                 "││ the plan                 ││",
                 "││ step one                 ││",
                 "││ step two                 ││",
                 "│└──────────────────────────┘│",
+                "│ ▲ the plan ⏎             #1│",
+                "│ ● one line               #2│",
                 "│                            │",
                 "│     a add    esc close     │",
                 "└────────────────────────────┘",

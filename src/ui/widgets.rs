@@ -334,3 +334,20 @@ pub(super) fn centered_button_row(
         })
         .collect()
 }
+
+/// The look of a heading in a list-style overlay: the theme's accent, bold.
+/// Shared by the keybind help's group names and the todo board's space name
+/// (fork issue 142), so they cannot drift apart.
+pub(super) fn heading_style(p: &Palette) -> ratatui::style::Style {
+    ratatui::style::Style::default()
+        .fg(p.accent)
+        .add_modifier(ratatui::style::Modifier::BOLD)
+}
+
+/// The look of what sits under a heading: mauve, bold. The keybind help's key
+/// chords and the todo board's session part.
+pub(super) fn sub_heading_style(p: &Palette) -> ratatui::style::Style {
+    ratatui::style::Style::default()
+        .fg(p.mauve)
+        .add_modifier(ratatui::style::Modifier::BOLD)
+}

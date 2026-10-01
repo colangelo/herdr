@@ -296,6 +296,7 @@ impl AppState {
             max_rows: u16::MAX,
             footer_rows: 0,
             detail_rows: 0,
+            detail_placement: crate::ui::overlay::DetailPlacement::BelowList,
             header_rows: 0,
             vertical: crate::ui::overlay::VerticalAnchor::Centered,
         }

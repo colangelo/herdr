@@ -19,7 +19,22 @@ pub(crate) const LIST_DIALOG_MAX_WIDTH: u16 = 120;
 /// text. Less than that is a lone rule, not a box.
 pub(crate) const DETAIL_MIN_ROWS: u16 = 3;
 
-/// Where the panel's top edge comes from. Horizontal placement follows from
+/// Where a panel's detail box sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DetailPlacement {
+    /// Between the list and the footer.
+    BelowList,
+    /// Between the header block and the list: title, search, box, list.
+    AboveList,
+    /// Directly under the header's first row: title, box, search, list. A
+    /// panel with no header takes [`DetailPlacement::AboveList`].
+    // Selected by editing `TODO_DETAIL_PLACEMENT`; only tests construct it
+    // until ac picks that layout (fork issue 142).
+    #[allow(dead_code)]
+    BelowTitle,
+}
+
+/// Where a panel's top edge comes from. Horizontal placement follows from
 /// it: an anchored panel right-aligns to its anchor, and a centred one is
 /// centred on the screen in both directions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +82,8 @@ pub(crate) struct AnchoredPanelSpec {
     /// every panel whose rows have nothing more to say — the box appears only
     /// when it has something to hold.
     pub detail_rows: u16,
+    /// Where those rows go.
+    pub detail_placement: DetailPlacement,
     /// Rows above the list for the panel's own header — a title, a search
     /// row, the blank row under them. Zero for a panel whose list starts at
     /// its top border.
@@ -91,7 +108,27 @@ pub(crate) struct PanelGeometry {
     /// the panel asked for none or fewer than [`DETAIL_MIN_ROWS`] were free.
     pub detail: Option<Rect>,
     /// The header rows above the list; empty when the panel asked for none.
+    /// A detail box placed under the title sits inside it, between its first
+    /// row and the rest: read the rows through [`PanelGeometry::header_row`].
     pub header: Rect,
+    detail_in_header: bool,
+}
+
+impl PanelGeometry {
+    /// Header row `index` (0 is the title), stepping over a detail box that
+    /// sits under the title.
+    pub(crate) fn header_row(&self, index: u16) -> Rect {
+        let skipped = match self.detail {
+            Some(detail) if self.detail_in_header && index >= 1 => detail.height,
+            _ => 0,
+        };
+        Rect::new(
+            self.header.x,
+            self.header.y + index + skipped,
+            self.header.width,
+            1,
+        )
+    }
 }
 
 impl AnchoredPanelSpec {
@@ -161,21 +198,38 @@ impl AnchoredPanelSpec {
             list.height - header_rows,
         );
 
-        // The detail box is carved off the bottom of the list, directly above
-        // the footer. It yields to the list rather than the other way round: a
-        // panel squeezed to nothing shows its todos, not a detail of one of
-        // them, and a box with no room for a row of text is not drawn at all.
+        // The detail box is carved off the list. It yields to the list rather
+        // than the other way round: a panel squeezed to nothing shows its
+        // todos, not a detail of one of them, and a box with no room for a row
+        // of text is not drawn at all.
         let detail_rows = self.detail_rows.min(list.height.saturating_sub(1));
+        let mut header = header;
+        let mut detail_in_header = false;
         let (list, detail) = if detail_rows >= DETAIL_MIN_ROWS {
-            (
-                Rect::new(list.x, list.y, list.width, list.height - detail_rows),
-                Some(Rect::new(
-                    list.x,
-                    list.y + list.height - detail_rows,
-                    list.width,
-                    detail_rows,
-                )),
-            )
+            let placement = match self.detail_placement {
+                DetailPlacement::BelowTitle if header.height == 0 => DetailPlacement::AboveList,
+                placement => placement,
+            };
+            let shrunk = list.height - detail_rows;
+            match placement {
+                DetailPlacement::BelowList => (
+                    Rect::new(list.x, list.y, list.width, shrunk),
+                    Some(Rect::new(list.x, list.y + shrunk, list.width, detail_rows)),
+                ),
+                DetailPlacement::AboveList => (
+                    Rect::new(list.x, list.y + detail_rows, list.width, shrunk),
+                    Some(Rect::new(list.x, list.y, list.width, detail_rows)),
+                ),
+                DetailPlacement::BelowTitle => {
+                    detail_in_header = true;
+                    let detail = Rect::new(header.x, header.y + 1, header.width, detail_rows);
+                    header.height += detail_rows;
+                    (
+                        Rect::new(list.x, list.y + detail_rows, list.width, shrunk),
+                        Some(detail),
+                    )
+                }
+            }
         } else {
             (list, None)
         };
@@ -187,6 +241,7 @@ impl AnchoredPanelSpec {
             footer_row,
             detail,
             header,
+            detail_in_header,
         })
     }
 }
@@ -212,6 +267,7 @@ mod tests {
             max_rows: 12,
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
+            detail_placement: DetailPlacement::BelowList,
             header_rows: 0,
             vertical,
         }
@@ -229,6 +285,7 @@ mod tests {
             max_rows: 40,
             footer_rows: crate::ui::FOOTER_ROWS,
             detail_rows: 0,
+            detail_placement: DetailPlacement::BelowList,
             header_rows: 3,
             vertical: VerticalAnchor::Centered,
         };
@@ -256,6 +313,58 @@ mod tests {
         assert_eq!(small.header.y, small.inner.y);
         assert_eq!(small.list.y, small.inner.y + 3);
         assert_eq!(small.list.height, 10);
+    }
+
+    /// Fork issue 142: the same box can sit under the list, above it (title,
+    /// search, box, list) or under the title (title, box, search, list).
+    #[test]
+    fn the_detail_box_goes_where_the_spec_puts_it() {
+        let resolve = |detail_placement| {
+            AnchoredPanelSpec {
+                detail_rows: 5,
+                detail_placement,
+                header_rows: 3,
+                ..AnchoredPanelSpec {
+                    anchor: SCREEN,
+                    screen: SCREEN,
+                    content_width: 40,
+                    width_bounds: (20, 60),
+                    rows: 10,
+                    max_rows: 10,
+                    footer_rows: crate::ui::FOOTER_ROWS,
+                    detail_rows: 0,
+                    detail_placement: DetailPlacement::BelowList,
+                    header_rows: 0,
+                    vertical: VerticalAnchor::Centered,
+                }
+            }
+            .resolve()
+            .expect("resolves")
+        };
+
+        let below = resolve(DetailPlacement::BelowList);
+        let detail = below.detail.expect("box");
+        assert_eq!(detail.y, below.list.y + below.list.height);
+
+        let above = resolve(DetailPlacement::AboveList);
+        let detail = above.detail.expect("box");
+        assert_eq!(detail.y, above.header.y + above.header.height);
+        assert_eq!(detail.y + detail.height, above.list.y);
+        assert_eq!(above.header_row(1).y, above.header.y + 1);
+
+        let title = resolve(DetailPlacement::BelowTitle);
+        let detail = title.detail.expect("box");
+        assert_eq!(detail.y, title.header_row(0).y + 1, "right under the title");
+        assert_eq!(
+            title.header_row(1).y,
+            detail.y + detail.height,
+            "search under the box"
+        );
+        assert_eq!(title.header.y + title.header.height, title.list.y);
+        assert_eq!(
+            above.list.height, title.list.height,
+            "same room for the list"
+        );
     }
 
     #[test]

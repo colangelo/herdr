@@ -386,12 +386,8 @@ fn filter_keybind_help_groups(groups: Vec<HelpGroup>, query: &str) -> Vec<HelpGr
 }
 
 pub(crate) fn keybind_help_lines(app: &AppState) -> Vec<(usize, Line<'static>)> {
-    let heading_style = Style::default()
-        .fg(app.palette.accent)
-        .add_modifier(Modifier::BOLD);
-    let key_style = Style::default()
-        .fg(app.palette.mauve)
-        .add_modifier(Modifier::BOLD);
+    let heading_style = super::widgets::heading_style(&app.palette);
+    let key_style = super::widgets::sub_heading_style(&app.palette);
     let label_style = Style::default().fg(app.palette.text);
 
     let groups = filter_keybind_help_groups(keybind_help_groups(app), app.keybind_help_query());

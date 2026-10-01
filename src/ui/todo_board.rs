@@ -13,6 +13,7 @@
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
+    text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
@@ -24,8 +25,8 @@ use super::overlay::{
 use super::text::truncate_end;
 use super::todo_panel::{pane_todo_row_hides_text, render_pane_todo_row};
 use super::widgets::{
-    panel_contrast_fg, render_action_button, render_modal_header, render_panel_shell, FOOTER_ROWS,
-    HEADER_ROWS,
+    heading_style, panel_contrast_fg, render_action_button, render_modal_header,
+    render_panel_shell, sub_heading_style, FOOTER_ROWS, HEADER_ROWS,
 };
 use crate::app::state::{AppState, TodoBoardButton, TodoBoardItem};
 
@@ -135,6 +136,7 @@ pub(crate) fn todo_board_spec(
         max_rows: u16::MAX,
         footer_rows: FOOTER_ROWS,
         detail_rows: 0,
+        detail_placement: crate::ui::overlay::TODO_DETAIL_PLACEMENT,
         header_rows: TODO_BOARD_HEADER_ROWS,
         vertical: VerticalAnchor::Centered,
     }
@@ -172,6 +174,43 @@ pub(crate) fn todo_board_heading_text(space: &str, label: &str) -> String {
     }
 }
 
+/// A group heading as styled spans: the space in the help pane's heading
+/// style, ` · ` dim, the label in its sub-heading style, cut to `max_width`.
+pub(crate) fn todo_board_heading_line(
+    p: &crate::app::state::Palette,
+    space: &str,
+    label: &str,
+    max_width: usize,
+) -> Line<'static> {
+    let text = truncate_end(&todo_board_heading_text(space, label), max_width);
+    let space_len = if space.is_empty() {
+        0
+    } else {
+        space.chars().count() + 1
+    };
+    let sep_len = if !space.is_empty() && !label.is_empty() {
+        3
+    } else {
+        0
+    };
+    let mut chars = text.chars();
+    let mut take = |n: usize| chars.by_ref().take(n).collect::<String>();
+    let space_part = take(space_len);
+    let sep_part = take(sep_len);
+    let label_part: String = chars.collect();
+    let mut spans = Vec::new();
+    for (part, style) in [
+        (space_part, heading_style(p)),
+        (sep_part, Style::default().fg(p.overlay0)),
+        (label_part, sub_heading_style(p)),
+    ] {
+        if !part.is_empty() {
+            spans.push(Span::styled(part, style));
+        }
+    }
+    Line::from(spans)
+}
+
 pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
     let Some(board) = app.todo_board() else {
         return;
@@ -195,12 +234,7 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
         // config key, the socket method and the protocol are addresses, and
         // renaming those costs a protocol bump and a permanent divergence from
         // upstream's `todo` naming.
-        render_modal_header(
-            frame,
-            Rect::new(header.x, header.y, header.width, 1),
-            "todos/notes",
-            p,
-        );
+        render_modal_header(frame, geometry.header_row(0), "todos/notes", p);
         let count = board
             .all_items
             .iter()
@@ -208,7 +242,7 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
             .count();
         render_search_row(
             frame,
-            Rect::new(header.x, header.y + 1, header.width, 1),
+            geometry.header_row(1),
             &board.search,
             SearchRow {
                 placeholder: "search todos",
@@ -251,14 +285,15 @@ pub(super) fn render_todo_board(app: &AppState, frame: &mut Frame) {
             // nothing to draw into it.
             TodoBoardItem::GroupGap => {}
             TodoBoardItem::PaneHeading { space, label } => {
-                // The weight the move picker gives its space headings, so a
-                // group reads as a heading and never as a row.
+                // The help pane's heading colours (fork issue 142): the space
+                // like a group name, the pane's label like a key chord.
                 frame.render_widget(
-                    Paragraph::new(truncate_end(
-                        &todo_board_heading_text(space, label),
+                    Paragraph::new(todo_board_heading_line(
+                        p,
+                        space,
+                        label,
                         row_rect.width as usize,
-                    ))
-                    .style(Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)),
+                    )),
                     row_rect,
                 );
             }
@@ -412,6 +447,88 @@ mod tests {
         }
         test_support::layout(&mut app);
         app
+    }
+
+    /// Fork issue 142: the detail box sits above the list, below the search
+    /// row, and the list still starts right under it.
+    #[test]
+    fn the_detail_box_sits_between_the_search_row_and_the_first_entry() {
+        let mut open = app_with_todos(&[
+            ("the plan\nstep one\nstep two", false, TodoPriority::High),
+            ("one line", false, TodoPriority::Normal),
+        ]);
+        open.open_todo_board(&crate::terminal::TerminalRuntimeRegistry::new());
+        test_support::layout(&mut open);
+        let geometry = open.todo_board_geometry().expect("board");
+        let detail = geometry.detail.expect("the box is there");
+        let search = geometry.header_row(1);
+
+        assert!(detail.y > search.y, "the box is under the search row");
+        assert_eq!(
+            detail.y + detail.height,
+            geometry.list.y,
+            "the list starts right under the box"
+        );
+        let buffer = test_support::draw_sized(
+            &open,
+            test_support::SNAPSHOT_WIDTH,
+            test_support::SNAPSHOT_HEIGHT,
+        );
+        let rows = test_support::rect_rows(&buffer, geometry.outer).join("\n");
+        let at = |needle: &str| {
+            rows.find(needle)
+                .unwrap_or_else(|| panic!("{needle}: {rows}"))
+        };
+        assert!(at("search todos") < at("step two"));
+        assert!(
+            at("step two") < at("the plan ⏎"),
+            "the list is under the box"
+        );
+    }
+
+    /// The group header takes the help pane's two styles, from the one helper
+    /// both use.
+    #[test]
+    fn the_group_header_uses_the_help_panes_styles() {
+        let app = app_with_todos(&[("one", false, TodoPriority::Normal)]);
+        let p = &app.palette;
+        let line = todo_board_heading_line(p, "infra", "infra-helper", 80);
+        let styles: Vec<_> = line.spans.iter().map(|span| span.style).collect();
+        assert_eq!(
+            styles,
+            vec![
+                crate::ui::widgets::heading_style(p),
+                Style::default().fg(p.overlay0),
+                crate::ui::widgets::sub_heading_style(p),
+            ]
+        );
+        assert_eq!(line.to_string(), " infra · infra-helper");
+        assert_eq!(styles[0].fg, Some(p.accent));
+        assert_eq!(styles[2].fg, Some(p.mauve));
+
+        // And the help pane itself draws with the same two.
+        let help = crate::ui::keybind_help::keybind_help_lines(&app);
+        let group = &help[0].1.spans[0].style;
+        assert_eq!(*group, crate::ui::widgets::heading_style(p));
+        let chord = help
+            .iter()
+            .find_map(|(_, line)| (line.spans.len() == 2).then(|| line.spans[0].style))
+            .expect("a key chord");
+        assert_eq!(chord, crate::ui::widgets::sub_heading_style(p));
+    }
+
+    /// A heading cut short keeps the split between its parts.
+    #[test]
+    fn a_cut_group_header_keeps_its_styles() {
+        let app = app_with_todos(&[]);
+        let line = todo_board_heading_line(&app.palette, "infra", "infra-helper", 12);
+        assert_eq!(line.to_string().chars().count(), 12);
+        assert_eq!(line.spans[0].content, " infra");
+        assert_eq!(line.spans[0].style.fg, Some(app.palette.accent));
+        assert_eq!(
+            line.spans.last().expect("a span").style.fg,
+            Some(app.palette.mauve)
+        );
     }
 
     #[test]

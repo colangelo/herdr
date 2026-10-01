@@ -16,9 +16,11 @@ mod list_cursor;
 mod search;
 
 pub(crate) use button_row::{ButtonRow, ButtonRowHit, ButtonSpec};
-pub(crate) use detail::{detail_box_rows, render_detail_box, DETAIL_MAX_TEXT_ROWS};
+pub(crate) use detail::{
+    detail_box_rows, render_detail_box, DETAIL_MAX_TEXT_ROWS, TODO_DETAIL_PLACEMENT,
+};
 pub(crate) use geometry::{
-    AnchoredPanelSpec, PanelGeometry, VerticalAnchor, LIST_DIALOG_MAX_WIDTH,
+    AnchoredPanelSpec, DetailPlacement, PanelGeometry, VerticalAnchor, LIST_DIALOG_MAX_WIDTH,
 };
 pub(crate) use list_cursor::{reveal_scroll, ListCursor};
 pub(crate) use search::{
