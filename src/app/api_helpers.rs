@@ -168,7 +168,18 @@ fn without_dim_text(styled: &str, format: crate::api::schema::ReadFormat) -> Str
     if ansi {
         text
     } else {
-        text.replace("\r\n", "\n")
+        // The plain read also trims each line's trailing blanks and ends on a
+        // line break; the styled snapshot does not (measured side by side).
+        let mut text = text
+            .replace("\r\n", "\n")
+            .split('\n')
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text
     }
 }
 
@@ -198,8 +209,19 @@ mod strip_dim_text_tests {
     fn a_strip_dim_text_read_ends_lines_with_lf_and_an_ansi_read_is_left_alone() {
         let styled = "one \x1b[2mgrey\x1b[0m\r\ntwo\r\n";
         let text = without_dim_text(styled, ReadFormat::Text);
-        assert_eq!(text, "one \ntwo\n");
+        assert_eq!(text, "one\ntwo\n");
         assert!(!text.contains('\r'));
+        // A dropped suggestion leaves no trailing blank, so `❯` equals `❯`.
+        assert_eq!(
+            without_dim_text(
+                "❯ \x1b[2mcontinue\x1b[0m\r\n\r\n  x  \r\n",
+                ReadFormat::Text
+            ),
+            "❯\n\n  x\n"
+        );
+        // The snapshot has no final line break; the plain read does.
+        assert_eq!(without_dim_text("a  \r\nb", ReadFormat::Text), "a\nb\n");
+        assert_eq!(without_dim_text("", ReadFormat::Text), "");
         assert_eq!(
             without_dim_text(styled, ReadFormat::Ansi),
             "one \x1b[2m\x1b[0m\r\ntwo\r\n"
