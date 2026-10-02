@@ -14,6 +14,9 @@ pub struct AgentReadParams {
     pub format: ReadFormat,
     #[serde(default = "super::common::default_true")]
     pub strip_ansi: bool,
+    /// Leave out faint (SGR 2) cells, for every source (fork issue 146).
+    #[serde(default)]
+    pub strip_dim: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

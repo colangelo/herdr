@@ -415,7 +415,8 @@ fn agent_command() -> Command {
                 .arg(read_source_option(true))
                 .arg(option("lines", "N"))
                 .arg(text_ansi_format_option())
-                .arg(flag("ansi")),
+                .arg(flag("ansi"))
+                .arg(flag("strip-dim").help("Leave out faint (dim) text, such as a grey suggestion")),
         )
         .subcommand(
             Command::new("send-keys")
@@ -608,7 +609,8 @@ fn pane_command() -> Command {
                 .arg(option("lines", "N"))
                 .arg(text_ansi_format_option())
                 .arg(flag("ansi"))
-                .arg(flag("raw")),
+                .arg(flag("raw"))
+                .arg(flag("strip-dim").help("Leave out faint (dim) text, such as a grey suggestion")),
         )
         .subcommand(
             Command::new("rename")

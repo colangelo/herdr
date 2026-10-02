@@ -491,6 +491,11 @@ impl PaneTerminal {
         self.ghostty.detection_text()
     }
 
+    /// The detection buffer with its styling, for a read that drops faint cells.
+    pub fn detection_ansi(&self) -> String {
+        self.ghostty.detection_ansi()
+    }
+
     pub(crate) fn try_compression_activity(&self) -> Result<Option<u64>, crate::ghostty::Error> {
         self.ghostty.try_compression_activity()
     }
@@ -2102,6 +2107,22 @@ impl GhosttyPaneTerminal {
             .lock()
             .ok()
             .and_then(|mut core| ghostty_detection_text(&mut core).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn detection_ansi(&self) -> String {
+        self.core
+            .lock()
+            .ok()
+            .and_then(|mut core| {
+                let lines = core
+                    .terminal
+                    .rows()
+                    .ok()
+                    .map(|rows| usize::from(rows).max(1))
+                    .unwrap_or(DEFAULT_DETECTION_ROWS);
+                ghostty_recent_ansi(&mut core, lines, false).ok()
+            })
             .unwrap_or_default()
     }
 
@@ -5508,6 +5529,31 @@ mod tests {
         assert!(ansi.contains("red"));
         assert!(ansi.contains("plain"));
         assert!(ansi.contains("\x1b["));
+    }
+
+    /// Fork issue 146: a real faint cell (Claude Code's grey suggestion) is
+    /// dropped from every source, detection included, and typed text stays.
+    #[test]
+    fn dim_runs_are_dropped_from_the_real_snapshots_of_every_source() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(30, 3, 100).unwrap();
+        terminal.write(b"\x1b[1m\xe2\x9d\xaf\x1b[0m typed \x1b[2mA/B as is\x1b[0m");
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        let drop = |ansi: String| crate::api::dim::drop_dim_runs(&ansi, false);
+
+        for text in [
+            drop(pane.visible_ansi()),
+            drop(pane.recent_ansi_snapshot(3).text),
+            drop(pane.detection_ansi()),
+        ] {
+            assert!(text.contains("typed"), "{text:?}");
+            assert!(!text.contains("A/B"), "{text:?}");
+            assert!(!text.contains('\x1b'), "{text:?}");
+        }
+        assert!(
+            pane.detection_text().contains("A/B as is"),
+            "plain keeps it"
+        );
     }
 
     #[test]

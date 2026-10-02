@@ -101,9 +101,13 @@ pub(super) fn read_terminal_snapshot(
     source: crate::api::schema::ReadSource,
     format: crate::api::schema::ReadFormat,
     lines: Option<u32>,
+    strip_dim: bool,
 ) -> crate::pane::TerminalReadSnapshot {
     use crate::api::schema::{ReadFormat, ReadSource};
 
+    if strip_dim {
+        return read_terminal_snapshot_without_dim(terminal, source, format, lines);
+    }
     let line_limit = lines.map(|lines| lines.min(1000) as usize);
     let recent_lines = line_limit.unwrap_or(80);
     match (format, source) {
@@ -127,6 +131,32 @@ pub(super) fn read_terminal_snapshot(
         (ReadFormat::Ansi, ReadSource::Detection) => {
             limit_snapshot_lines(terminal.detection_text(), line_limit)
         }
+    }
+}
+
+/// The read with faint cells left out (fork issue 146): the styled snapshot of
+/// the same source, with its faint runs dropped, then plain text for a text
+/// read. Every source, so a detection read works too.
+fn read_terminal_snapshot_without_dim(
+    terminal: &crate::terminal::TerminalRuntime,
+    source: crate::api::schema::ReadSource,
+    format: crate::api::schema::ReadFormat,
+    lines: Option<u32>,
+) -> crate::pane::TerminalReadSnapshot {
+    use crate::api::schema::ReadSource;
+
+    let line_limit = lines.map(|lines| lines.min(1000) as usize);
+    let recent_lines = line_limit.unwrap_or(80);
+    let styled = match source {
+        ReadSource::Visible => limit_snapshot_lines(terminal.visible_ansi(), line_limit),
+        ReadSource::Recent => terminal.recent_ansi_snapshot(recent_lines),
+        ReadSource::RecentUnwrapped => terminal.recent_unwrapped_ansi_snapshot(recent_lines),
+        ReadSource::Detection => limit_snapshot_lines(terminal.detection_ansi(), line_limit),
+    };
+    let keep_sequences = format == crate::api::schema::ReadFormat::Ansi;
+    crate::pane::TerminalReadSnapshot {
+        text: crate::api::dim::drop_dim_runs(&styled.text, keep_sequences),
+        truncated: styled.truncated,
     }
 }
 

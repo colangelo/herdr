@@ -3662,6 +3662,10 @@ impl PaneRuntime {
         self.terminal.detection_text()
     }
 
+    pub fn detection_ansi(&self) -> String {
+        self.terminal.detection_ansi()
+    }
+
     pub fn terminal_title(&self) -> Option<String> {
         self.terminal.terminal_title()
     }

@@ -860,7 +860,7 @@ fn agent_send_keys(args: &[String]) -> std::io::Result<i32> {
 
 fn agent_read(args: &[String]) -> std::io::Result<i32> {
     let Some(target) = args.first() else {
-        eprintln!("usage: herdr agent read <target> [--source visible|recent|recent-unwrapped] [--lines N] [--format text|ansi] [--ansi]");
+        eprintln!("usage: herdr agent read <target> [--source visible|recent|recent-unwrapped] [--lines N] [--format text|ansi] [--ansi] [--strip-dim]");
         return Ok(2);
     };
 
@@ -868,6 +868,7 @@ fn agent_read(args: &[String]) -> std::io::Result<i32> {
     let mut lines = None;
     let mut format = ReadFormat::Text;
     let mut strip_ansi = true;
+    let mut strip_dim = false;
 
     let mut index = 1;
     while index < args.len() {
@@ -902,6 +903,10 @@ fn agent_read(args: &[String]) -> std::io::Result<i32> {
                 strip_ansi = false;
                 index += 1;
             }
+            "--strip-dim" => {
+                strip_dim = true;
+                index += 1;
+            }
             other => {
                 eprintln!("unknown option: {other}");
                 return Ok(2);
@@ -917,6 +922,7 @@ fn agent_read(args: &[String]) -> std::io::Result<i32> {
             lines,
             format,
             strip_ansi,
+            strip_dim,
         }),
     })?;
     super::print_read_response(&response, lines)
@@ -926,7 +932,7 @@ fn print_agent_help() {
     eprintln!("herdr agent commands:");
     eprintln!("  herdr agent list");
     eprintln!("  herdr agent get <target>");
-    eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]");
+    eprintln!("  herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--strip-dim]");
     eprintln!("  herdr agent send-keys <target> <key> [key ...]");
     eprintln!("  herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]");
     eprintln!("  herdr agent rename <target> <name>|--clear");

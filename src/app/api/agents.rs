@@ -148,6 +148,7 @@ impl App {
             params.source,
             params.format,
             params.lines,
+            params.strip_dim,
         );
 
         encode_success(

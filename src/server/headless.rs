@@ -7043,6 +7043,7 @@ next_tab = ""
                         lines: Some(200),
                         format: api::schema::ReadFormat::Text,
                         strip_ansi: true,
+                        strip_dim: false,
                     }),
                 };
 

@@ -532,7 +532,7 @@ fn pane_read(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn parse_pane_read_args(args: &[String]) -> Result<PaneReadParams, String> {
-    const USAGE: &str = "usage: herdr pane read <pane_id> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--raw]";
+    const USAGE: &str = "usage: herdr pane read <pane_id> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--raw] [--strip-dim]";
 
     let args = super::expand_equals_args(args, &["--source", "--lines", "--format"]);
     let mut pane_id = None;
@@ -540,6 +540,7 @@ fn parse_pane_read_args(args: &[String]) -> Result<PaneReadParams, String> {
     let mut lines = None;
     let mut format = ReadFormat::Text;
     let mut strip_ansi = true;
+    let mut strip_dim = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -575,6 +576,10 @@ fn parse_pane_read_args(args: &[String]) -> Result<PaneReadParams, String> {
                 strip_ansi = false;
                 index += 1;
             }
+            "--strip-dim" => {
+                strip_dim = true;
+                index += 1;
+            }
             option if option.starts_with('-') => {
                 return Err(format!("unknown option: {option}"));
             }
@@ -598,6 +603,7 @@ fn parse_pane_read_args(args: &[String]) -> Result<PaneReadParams, String> {
         lines,
         format,
         strip_ansi,
+        strip_dim,
         intent: crate::api::schema::ReadIntent::Interactive,
     })
 }
@@ -1960,7 +1966,7 @@ fn print_pane_help() {
     );
     eprintln!("  herdr pane zoom [<pane_id>|--pane ID|--current] [--toggle|--on|--off]");
     eprintln!("  herdr pane rename <pane_id> <label>|--clear");
-    eprintln!("  herdr pane read <pane_id> [--source visible|recent|recent-unwrapped] [--lines N] [--format text|ansi] [--ansi]");
+    eprintln!("  herdr pane read <pane_id> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--strip-dim]");
     eprintln!("  herdr pane input [<pane_id>|--pane ID|--current] --right-click herdr|pane");
     eprintln!(
         "  herdr pane split [<pane_id>|--pane ID|--current] --direction right|down [--ratio FLOAT] [--cwd PATH] [--env KEY=VALUE] [--right-click herdr|pane] [--focus] [--no-focus]"
@@ -2417,6 +2423,14 @@ mod tests {
         assert_eq!(params.pane_id, Some("issue-2".into()));
         assert_eq!(params.direction, PaneDirection::Left);
         assert_eq!(params.amount, Some(0.125));
+    }
+
+    #[test]
+    fn parse_pane_read_args_takes_strip_dim() {
+        let params = parse_pane_read_args(&args(&["p", "--strip-dim"])).unwrap();
+        assert!(params.strip_dim);
+        let params = parse_pane_read_args(&args(&["p"])).unwrap();
+        assert!(!params.strip_dim, "off by default");
     }
 
     #[test]

@@ -1228,6 +1228,7 @@ impl App {
             params.source,
             params.format,
             params.lines,
+            params.strip_dim,
         );
 
         encode_success(
@@ -2595,6 +2596,7 @@ mod tests {
                 lines: Some(2),
                 format: crate::api::schema::ReadFormat::Text,
                 strip_ansi: true,
+                strip_dim: false,
                 intent: crate::api::schema::ReadIntent::Interactive,
             },
         );

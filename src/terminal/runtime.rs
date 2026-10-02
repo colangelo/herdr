@@ -388,6 +388,10 @@ impl TerminalRuntime {
         self.0.detection_text()
     }
 
+    pub fn detection_ansi(&self) -> String {
+        self.0.detection_ansi()
+    }
+
     pub fn terminal_title(&self) -> Option<String> {
         self.0.terminal_title()
     }

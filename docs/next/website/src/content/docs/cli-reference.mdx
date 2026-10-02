@@ -250,12 +250,12 @@ After `pane move`, use `.result.move_result.pane.pane_id` for later commands. A 
 Read output:
 
 ```bash
-herdr pane read <pane_id> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--raw]
+herdr pane read <pane_id> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--raw] [--strip-dim]
 herdr pane read <pane_id> --source visible --ansi
 herdr pane read <pane_id> --source recent-unwrapped --lines 120
 ```
 
-`pane read` prints UTF-8 terminal text directly. ANSI escapes are stripped by default; use `--format ansi` or `--ansi` to preserve them where the source exposes styling. The `detection` source is always plain text. For recent sources, `--lines N` selects the last N rendered terminal rows before optional unwrapping; without it, reads default to 80 rows. For `visible` and `detection`, omitting `--lines` returns the full snapshot, while specifying it keeps the last N newline-delimited lines. `agent read` uses the same output and line behavior. A read of an agent that draws its own full-screen history (such as Claude Code) scrolls that history to collect it and then scrolls back. When that stops before the top and returns fewer lines than `--lines` asked for, the command prints `herdr: partial read: N of M requested lines …` on stderr; stdout and the exit status are unchanged, and a retry usually returns more.
+`pane read` prints UTF-8 terminal text directly. ANSI escapes are stripped by default; use `--format ansi` or `--ansi` to preserve them where the source exposes styling. The `detection` source is always plain text. For recent sources, `--lines N` selects the last N rendered terminal rows before optional unwrapping; without it, reads default to 80 rows. For `visible` and `detection`, omitting `--lines` returns the full snapshot, while specifying it keeps the last N newline-delimited lines. `agent read` uses the same output and line behavior. `--strip-dim` leaves out faint (dim) text, for every source including `detection`: Claude Code draws its grey reply suggestion and the argument hint of `/compact` faint, so without the flag a text read shows them as if they were typed. With `--format ansi` the other styling stays. A read of an agent that draws its own full-screen history (such as Claude Code) scrolls that history to collect it and then scrolls back. When that stops before the top and returns fewer lines than `--lines` asked for, the command prints `herdr: partial read: N of M requested lines …` on stderr; stdout and the exit status are unchanged, and a retry usually returns more.
 
 Send input:
 
@@ -347,7 +347,7 @@ For the pane-versus-agent model and complete orchestration examples, see [Agent 
 ```bash
 herdr agent list
 herdr agent get <target>
-herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]
+herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--strip-dim]
 herdr agent send-keys <target> <key> [key ...]
 herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear

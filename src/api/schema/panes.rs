@@ -315,6 +315,9 @@ pub struct PaneReadParams {
     pub format: ReadFormat,
     #[serde(default = "super::default_true")]
     pub strip_ansi: bool,
+    /// Leave out faint (SGR 2) cells, for every source (fork issue 146).
+    #[serde(default)]
+    pub strip_dim: bool,
     #[serde(skip)]
     #[schemars(skip)]
     pub(crate) intent: super::common::ReadIntent,
