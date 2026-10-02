@@ -476,6 +476,12 @@ fn agent_command() -> Command {
                 ),
         )
         .subcommand(id_command("focus", "target", "Focus an agent"))
+        .subcommand(id_command(
+            "pin",
+            "target",
+            "Pin an agent to the top of the agent panel",
+        ))
+        .subcommand(id_command("unpin", "target", "Unpin an agent"))
         .subcommand(
             Command::new("wait")
                 .about("Wait until an agent reaches one of the requested states")

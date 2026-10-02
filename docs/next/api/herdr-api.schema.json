@@ -961,6 +961,10 @@
             "pane_id": {
               "type": "string"
             },
+            "pinned": {
+              "description": "Pinned agents sit at the top of the agent panel in pin order.",
+              "type": "boolean"
+            },
             "revision": {
               "format": "uint64",
               "minimum": 0,
@@ -5709,6 +5713,38 @@
         {
           "properties": {
             "method": {
+              "const": "agent.pin",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.unpin",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.start",
               "type": "string"
             },
@@ -6926,6 +6962,10 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "pinned": {
+              "description": "Pinned agents sit at the top of the agent panel in pin order.",
+              "type": "boolean"
             },
             "revision": {
               "format": "uint64",
@@ -8396,6 +8436,10 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "pinned": {
+              "description": "Pinned agents sit at the top of the agent panel in pin order.",
+              "type": "boolean"
             },
             "revision": {
               "format": "uint64",

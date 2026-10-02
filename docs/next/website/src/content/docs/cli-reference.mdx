@@ -358,12 +358,16 @@ herdr agent send-keys <target> <key> [key ...]
 herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear
 herdr agent focus <target>
+herdr agent pin <target>
+herdr agent unpin <target>
 herdr agent wait <target> [--until STATUS]... [--timeout MS]
 herdr agent attach <target> [--takeover]
 herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
+
+Pinned agents sit at the top of the agent panel in pin order, under every sort and any agent view. `agent pin` is idempotent, `agent unpin` returns the row to where the sort puts it, and `.result.agent.pinned` and `.result.pane.pinned` report the state. The pin belongs to the agent's terminal and is saved with the session, so it survives a restart, a live handoff and a resumed agent.
 
 Agent targets are either a unique live agent name or the pane ID that currently hosts the agent. Terminal IDs and bare agent-kind labels are not agent targets. Agents started through `agent start` require a name; manually launched agents remain unnamed and use their pane ID.
 

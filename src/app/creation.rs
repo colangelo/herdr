@@ -492,6 +492,7 @@ impl App {
             terminal_title_stripped: terminal.terminal_title_stripped(),
             display_agent: presentation.display_agent,
             agent_status: pane_agent_status(terminal.state, pane.seen),
+            pinned: terminal.pin_order.is_some(),
             blocked_reason: terminal.blocked_reason(),
             blocked_since: terminal.blocked_since_unix_ms(),
             state_labels: presentation.state_labels,

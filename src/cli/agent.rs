@@ -23,6 +23,8 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "prompt" => agent_prompt(&args[1..]),
         "rename" => agent_rename(&args[1..]),
         "focus" => agent_focus(&args[1..]),
+        "pin" => agent_pin(&args[1..], true),
+        "unpin" => agent_pin(&args[1..], false),
         "wait" => agent_wait(&args[1..]),
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
@@ -487,6 +489,26 @@ fn agent_focus(args: &[String]) -> std::io::Result<i32> {
     })?)
 }
 
+fn agent_pin(args: &[String], pin: bool) -> std::io::Result<i32> {
+    let verb = if pin { "pin" } else { "unpin" };
+    let [target] = args else {
+        eprintln!("usage: herdr agent {verb} <target>");
+        return Ok(2);
+    };
+    let target = AgentTarget {
+        target: target.clone(),
+    };
+
+    super::print_response(&super::send_request(&Request {
+        id: format!("cli:agent:{verb}"),
+        method: if pin {
+            Method::AgentPin(target)
+        } else {
+            Method::AgentUnpin(target)
+        },
+    })?)
+}
+
 fn agent_attach(args: &[String]) -> std::io::Result<i32> {
     let (target, takeover) =
         match super::parse_attach_target(args, "usage: herdr agent attach <target> [--takeover]") {
@@ -938,6 +960,8 @@ fn print_agent_help() {
     eprintln!("  herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]");
     eprintln!("  herdr agent rename <target> <name>|--clear");
     eprintln!("  herdr agent focus <target>");
+    eprintln!("  herdr agent pin <target>");
+    eprintln!("  herdr agent unpin <target>");
     eprintln!("  herdr agent wait <target> [--until STATUS]... [--timeout MS]");
     eprintln!("  herdr agent attach <target> [--takeover]");
     eprintln!(

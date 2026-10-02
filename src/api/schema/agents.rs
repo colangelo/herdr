@@ -249,6 +249,9 @@ pub struct AgentInfo {
     pub input_box: Option<AgentInputBox>,
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub screen_detection_skipped: bool,
+    /// Pinned agents sit at the top of the agent panel in pin order.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub pinned: bool,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub state_labels: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

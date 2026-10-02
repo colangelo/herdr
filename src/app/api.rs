@@ -1279,6 +1279,8 @@ impl App {
             Method::AgentList(params) => return self.handle_agent_list(request.id, params),
             Method::AgentGet(target) => return self.handle_agent_get(request.id, target),
             Method::AgentFocus(target) => return self.handle_agent_focus(request.id, target),
+            Method::AgentPin(target) => return self.handle_agent_pin(request.id, target, true),
+            Method::AgentUnpin(target) => return self.handle_agent_pin(request.id, target, false),
             Method::AgentRename(params) => return self.handle_agent_rename(request.id, params),
             Method::AgentViewSet(params) => return self.handle_agent_view_set(request.id, params),
             Method::AgentViewClear(params) => {

@@ -512,6 +512,9 @@ pub struct PaneInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_agent: Option<String>,
     pub agent_status: AgentStatus,
+    /// Pinned agents sit at the top of the agent panel in pin order.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub pinned: bool,
     /// Why the agent is blocked: `question`, `permission`, `form` or
     /// `other`. Present only while `agent_status` is `blocked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

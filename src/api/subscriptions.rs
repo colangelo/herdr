@@ -632,6 +632,7 @@ mod tests {
             terminal_title_stripped: None,
             display_agent: None,
             agent_status: AgentStatus::Unknown,
+            pinned: false,
             blocked_reason: None,
             blocked_since: None,
             state_labels: HashMap::new(),

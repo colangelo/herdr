@@ -91,6 +91,24 @@ impl App {
             })
     }
 
+    /// Pin or unpin the agent a target names; pinned agents lead the panel.
+    pub(super) fn pin_agent_target(
+        &mut self,
+        target: &str,
+        pin: bool,
+    ) -> Result<crate::api::schema::AgentInfo, TerminalTargetError> {
+        let resolved = self.resolve_agent_target(target)?;
+        if pin {
+            self.state.pin_agent(resolved.pane_id);
+        } else {
+            self.state.unpin_agent(resolved.pane_id);
+        }
+        self.agent_info(resolved.ws_idx, resolved.pane_id)
+            .ok_or_else(|| TerminalTargetError::NotFound {
+                target: target.to_string(),
+            })
+    }
+
     pub(super) fn rename_agent_target(
         &mut self,
         target: &str,
@@ -463,6 +481,7 @@ impl App {
             blocked_since: pane.blocked_since,
             input_box: None,
             screen_detection_skipped: terminal.full_lifecycle_hook_authority_active(),
+            pinned: pane.pinned,
             state_labels: pane.state_labels,
             tokens: pane.tokens,
             agent_session: pane.agent_session,

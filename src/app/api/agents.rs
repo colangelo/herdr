@@ -75,6 +75,20 @@ impl App {
         encode_success(id, ResponseResult::AgentInfo { agent })
     }
 
+    pub(super) fn handle_agent_pin(
+        &mut self,
+        id: String,
+        target: AgentTarget,
+        pin: bool,
+    ) -> String {
+        let agent = match self.pin_agent_target(&target.target, pin) {
+            Ok(agent) => agent,
+            Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
+        };
+
+        encode_success(id, ResponseResult::AgentInfo { agent })
+    }
+
     pub(super) fn handle_agent_rename(&mut self, id: String, params: AgentRenameParams) -> String {
         let agent = match self.rename_agent_target(&params.target, params.name) {
             Ok(agent) => agent,
@@ -752,6 +766,47 @@ mod tests {
         };
         assert_eq!(agent.name.as_deref(), Some("reviewer"));
         assert_eq!(agent.name_source, None);
+    }
+
+    // Fork issue 148: agent.pin / agent.unpin report `pinned` and keep it
+    // on the terminal.
+    #[test]
+    fn agent_pin_and_unpin_set_pinned_on_the_agent_and_its_pane() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let target = || AgentTarget {
+            target: app.public_pane_id(0, pane_id).unwrap(),
+        };
+        let pin_target = target();
+        let unpin_target = target();
+        let info = |response: String| {
+            let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+            let ResponseResult::AgentInfo { agent } = success.result else {
+                panic!("expected agent info");
+            };
+            agent
+        };
+
+        let pinned = info(app.handle_agent_pin("req".into(), pin_target, true));
+        assert!(pinned.pinned);
+        let json = serde_json::to_value(&pinned).unwrap();
+        assert_eq!(json["pinned"], true);
+        assert!(app.pane_info(0, pane_id).unwrap().pinned);
+
+        let unpinned = info(app.handle_agent_pin("req".into(), unpin_target, false));
+        assert!(!unpinned.pinned);
+        assert!(serde_json::to_value(&unpinned)
+            .unwrap()
+            .get("pinned")
+            .is_none());
     }
 
     // Fork issue 137: a watcher reads why and since when an agent is blocked

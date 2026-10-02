@@ -145,6 +145,10 @@ pub enum Method {
     AgentViewClear(AgentViewClearParams),
     #[serde(rename = "agent.focus")]
     AgentFocus(AgentTarget),
+    #[serde(rename = "agent.pin")]
+    AgentPin(AgentTarget),
+    #[serde(rename = "agent.unpin")]
+    AgentUnpin(AgentTarget),
     #[serde(rename = "agent.start")]
     AgentStart(AgentStartParams),
     #[serde(rename = "agent.prompt")]

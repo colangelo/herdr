@@ -53,6 +53,8 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::AgentViewSet(_)
             | Method::AgentViewClear(_)
             | Method::AgentFocus(_)
+            | Method::AgentPin(_)
+            | Method::AgentUnpin(_)
             | Method::AgentStart(_)
             | Method::AgentPrompt(_)
             | Method::AgentSendKeys(_)
