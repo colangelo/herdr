@@ -19,7 +19,7 @@
 
 ---
 
-I love Herdr. I live in Herdr the whole day. I'm deeply thankful to the maintainer, to the whole team, and to everyone who has contributed to it — but I need my own version. In the deep OSS spirit, I hope Herdr Max gets forked in turn, as I've been so lucky to be able to do with theirs.
+I love Herdr. I live in Herdr the whole day. I'm deeply thankful to Can Celik ([@ogulcancelik](https://github.com/ogulcancelik)), who started Herdr, to the whole team, and to everyone who has contributed to it — but I need my own version. In the deep OSS spirit, I hope Herdr Max gets forked in turn, as I've been so lucky to be able to do with theirs.
 
 — Alfredo Colangelo
 
