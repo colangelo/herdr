@@ -216,21 +216,18 @@ fn apply_agent_panel_motion(app: &AppState, entries: Vec<AgentPanelEntry>) -> Ve
     if !agent_panel_motion_active(app) {
         return entries;
     }
-    // Pinned entries stay put at the top; only the rows below them bubble.
-    let pinned = entries
-        .iter()
-        .take_while(|entry| entry.pin_order.is_some())
-        .count();
-    let mut entries = entries;
-    let rest = entries.split_off(pinned);
-    let target: Vec<crate::layout::PaneId> = rest.iter().map(|entry| entry.pane_id).collect();
+    // Pinned entries are in the target, first and in pin order: they move
+    // only when a pin changes, never for a priority change.
+    let target: Vec<crate::layout::PaneId> = entries.iter().map(|entry| entry.pane_id).collect();
     let order = app.agent_panel_motion.project(&target);
-    let mut by_key: std::collections::HashMap<crate::layout::PaneId, AgentPanelEntry> = rest
+    let mut by_key: std::collections::HashMap<crate::layout::PaneId, AgentPanelEntry> = entries
         .into_iter()
         .map(|entry| (entry.pane_id, entry))
         .collect();
-    entries.extend(order.into_iter().filter_map(|key| by_key.remove(&key)));
-    entries
+    order
+        .into_iter()
+        .filter_map(|key| by_key.remove(&key))
+        .collect()
 }
 
 pub(crate) fn agent_panel_motion_active(app: &AppState) -> bool {
@@ -240,21 +237,32 @@ pub(crate) fn agent_panel_motion_active(app: &AppState) -> bool {
 /// Target order for the agent panel's bubble motion: the live priority-sorted
 /// pane ids, before motion is applied.
 pub(crate) fn agent_panel_target_keys(app: &AppState) -> Vec<crate::layout::PaneId> {
-    let mut keyed: Vec<(u8, Option<u64>, crate::layout::PaneId)> = app
+    let mut keyed: Vec<(Option<u64>, u8, Option<u64>, crate::layout::PaneId)> = app
         .workspaces
         .iter()
         .flat_map(|ws| ws.pane_details(&app.terminals))
-        .filter(|detail| detail.pin_order.is_none())
         .map(|detail| {
             (
+                detail.pin_order,
                 attention_priority(detail.state, detail.seen),
                 detail.last_agent_state_change_seq,
                 detail.pane_id,
             )
         })
         .collect();
-    keyed.sort_by_key(|(priority, seq, _)| (std::cmp::Reverse(*priority), std::cmp::Reverse(*seq)));
-    keyed.into_iter().map(|(_, _, pane_id)| pane_id).collect()
+    // Pinned first in pin order (`None` last), then the priority order.
+    keyed.sort_by_key(|(pin, priority, seq, _)| {
+        (
+            pin.is_none(),
+            *pin,
+            std::cmp::Reverse(*priority),
+            std::cmp::Reverse(*seq),
+        )
+    });
+    keyed
+        .into_iter()
+        .map(|(_, _, _, pane_id)| pane_id)
+        .collect()
 }
 
 pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static str {
@@ -454,18 +462,19 @@ fn apply_workspace_motion(app: &AppState, units: Vec<WorkspaceUnit>) -> Vec<Work
     if !workspace_motion_active(app) {
         return units;
     }
-    // Pinned units stay put; only the rows below them bubble.
-    let pinned = units.iter().take_while(|u| u.pin_order.is_some()).count();
-    let mut units = units;
-    let rest = units.split_off(pinned);
-    let target: Vec<String> = rest.iter().map(|unit| unit.key.clone()).collect();
+    // Pinned units are part of the target, first and in pin order, so they
+    // move only when a pin changes: pinning bubbles a row up into the block,
+    // unpinning bubbles it back down. A priority change never reorders them.
+    let target: Vec<String> = units.iter().map(|unit| unit.key.clone()).collect();
     let order = app.workspace_list_motion.project(&target);
-    let mut by_key: std::collections::HashMap<String, WorkspaceUnit> = rest
+    let mut by_key: std::collections::HashMap<String, WorkspaceUnit> = units
         .into_iter()
         .map(|unit| (unit.key.clone(), unit))
         .collect();
-    units.extend(order.into_iter().filter_map(|key| by_key.remove(&key)));
-    units
+    order
+        .into_iter()
+        .filter_map(|key| by_key.remove(&key))
+        .collect()
 }
 
 pub(crate) fn workspace_motion_active(app: &AppState) -> bool {
@@ -477,7 +486,6 @@ pub(crate) fn workspace_motion_active(app: &AppState) -> bool {
 pub(crate) fn workspace_unit_target_keys(app: &AppState) -> Vec<String> {
     workspace_sorted_units(app, false)
         .into_iter()
-        .filter(|unit| unit.pin_order.is_none())
         .map(|unit| unit.key)
         .collect()
 }
@@ -2733,13 +2741,15 @@ mod tests {
     }
 
     #[test]
-    fn pinned_spaces_are_left_out_of_the_motion_target() {
+    fn pinned_spaces_head_the_motion_target_in_pin_order() {
         let mut app = mixed_state_workspaces();
         app.workspace_sort = WorkspaceSort::Priority;
         app.pin_workspace(0);
+        app.pin_workspace(2);
         let keys = workspace_unit_target_keys(&app);
-        assert_eq!(keys.len(), 4);
-        assert!(!keys.contains(&format!("ws:{}", app.workspaces[0].id)));
+        assert_eq!(keys.len(), 5);
+        assert_eq!(keys[0], format!("ws:{}", app.workspaces[0].id));
+        assert_eq!(keys[1], format!("ws:{}", app.workspaces[2].id));
     }
 
     #[test]
@@ -2828,6 +2838,145 @@ mod tests {
             .collect()
     }
 
+    fn motion_timing() -> crate::ui::list_motion::ListMotionTiming {
+        crate::ui::list_motion::ListMotionTiming {
+            settle: std::time::Duration::ZERO,
+            step: std::time::Duration::from_millis(100),
+            easing: crate::ui::list_motion::ListMotionEasing::Linear,
+        }
+    }
+
+    /// One motion tick, the way the runtime does it.
+    fn tick_workspace_motion(app: &mut crate::app::state::AppState, now: std::time::Instant) {
+        let target = workspace_unit_target_keys(app);
+        app.workspace_list_motion
+            .tick(now, &target, motion_timing());
+    }
+
+    #[test]
+    fn pinning_a_space_bubbles_it_up_through_the_frames_between() {
+        let mut app = mixed_state_workspaces();
+        app.workspace_sort = WorkspaceSort::Priority;
+        app.sort_motion_bubble = true;
+        let t0 = std::time::Instant::now();
+        tick_workspace_motion(&mut app, t0);
+        assert_eq!(workspace_order(&app), vec![3, 4, 1, 0, 2]);
+
+        // ws 2 sits last; pinning aims it at the top.
+        app.pin_workspace(2);
+        assert_eq!(workspace_order(&app), vec![3, 4, 1, 0, 2], "no jump");
+        let mut frames = Vec::new();
+        for step in 1..=8u32 {
+            tick_workspace_motion(&mut app, t0 + std::time::Duration::from_millis(100) * step);
+            let order = workspace_order(&app);
+            // Jump numbers and hit-testing read this same order.
+            assert_eq!(
+                workspace_list_entries(&app).len(),
+                order.len(),
+                "the rendered order is the one entries report"
+            );
+            frames.push(order);
+        }
+        assert!(
+            frames
+                .iter()
+                .any(|f| f != &vec![3, 4, 1, 0, 2] && f != &vec![2, 3, 4, 1, 0]),
+            "a frame between the old and the new place: {frames:?}"
+        );
+        assert_eq!(frames.last().unwrap(), &vec![2, 3, 4, 1, 0]);
+
+        // Unpinning bubbles it back down to where priority puts it.
+        app.unpin_workspace(2);
+        let mut last = Vec::new();
+        for step in 9..=24u32 {
+            tick_workspace_motion(&mut app, t0 + std::time::Duration::from_millis(100) * step);
+            last = workspace_order(&app);
+        }
+        assert_eq!(last, vec![3, 4, 1, 0, 2]);
+    }
+
+    #[test]
+    fn a_priority_change_never_moves_a_pinned_space() {
+        let mut app = mixed_state_workspaces();
+        app.workspace_sort = WorkspaceSort::Priority;
+        app.sort_motion_bubble = true;
+        app.pin_workspace(0);
+        let t0 = std::time::Instant::now();
+        for step in 0..8u32 {
+            tick_workspace_motion(&mut app, t0 + std::time::Duration::from_millis(100) * step);
+        }
+        assert_eq!(workspace_order(&app)[0], 0);
+
+        // Make ws 4 the most urgent: it climbs, ws 0 keeps the top slot in
+        // every frame.
+        let terminal_id = {
+            let ws = &app.workspaces[1];
+            let pane = ws.tabs[0].root_pane;
+            ws.tabs[0].panes[&pane].attached_terminal_id.clone()
+        };
+        app.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Blocked;
+        for step in 8..24u32 {
+            tick_workspace_motion(&mut app, t0 + std::time::Duration::from_millis(100) * step);
+            assert_eq!(workspace_order(&app)[0], 0, "pinned row held its place");
+        }
+        assert!(
+            workspace_order(&app)[1..3].contains(&1),
+            "the urgent row climbed to just under the pin"
+        );
+    }
+
+    fn tick_agent_motion(app: &mut crate::app::state::AppState, now: std::time::Instant) {
+        let target = agent_panel_target_keys(app);
+        app.agent_panel_motion.tick(now, &target, motion_timing());
+    }
+
+    #[test]
+    fn pinning_an_agent_bubbles_it_up_and_a_priority_change_never_moves_a_pin() {
+        let mut app = three_agent_app(AgentPanelSort::Priority);
+        app.sort_motion_bubble = true;
+        let t0 = std::time::Instant::now();
+        let at = |step: u32| t0 + std::time::Duration::from_millis(100) * step;
+        tick_agent_motion(&mut app, t0);
+        let before = agent_panel_order(&app);
+        assert_eq!(before, vec![2, 1, 0]);
+
+        // The last-ranked agent is pinned: it climbs frame by frame.
+        let pane = agent_pane(&app, 0);
+        app.pin_agent(pane);
+        assert_eq!(agent_panel_order(&app), before, "no jump");
+        let mut frames = Vec::new();
+        for step in 1..=6 {
+            tick_agent_motion(&mut app, at(step));
+            frames.push(agent_panel_order(&app));
+        }
+        assert!(
+            frames.iter().any(|f| f != &before && f[0] != 0),
+            "a frame between: {frames:?}"
+        );
+        assert_eq!(frames.last().unwrap(), &vec![0, 2, 1]);
+
+        // A priority change underneath leaves the pinned agent on top.
+        let terminal_id = app.workspaces[1].tabs[0].panes[&app.workspaces[1].tabs[0].root_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Blocked;
+        app.terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .last_agent_state_change_seq = Some(99);
+        for step in 7..20 {
+            tick_agent_motion(&mut app, at(step));
+            assert_eq!(agent_panel_order(&app)[0], 0, "pinned agent held its place");
+        }
+
+        // Unpinned, it bubbles back down to where priority puts it.
+        app.unpin_agent(pane);
+        for step in 20..40 {
+            tick_agent_motion(&mut app, at(step));
+        }
+        assert_eq!(agent_panel_order(&app)[2], 0);
+    }
+
     #[test]
     fn pinned_agents_lead_in_pin_order_under_spaces_and_priority() {
         for sort in [AgentPanelSort::Spaces, AgentPanelSort::Priority] {
@@ -2892,13 +3041,18 @@ mod tests {
     }
 
     #[test]
-    fn pinned_agents_are_left_out_of_the_agent_motion_target() {
+    fn pinned_agents_head_the_agent_motion_target_and_match_the_entries() {
         let mut app = three_agent_app(AgentPanelSort::Priority);
-        let pane = agent_pane(&app, 0);
-        app.pin_agent(pane);
+        let (a, b) = (agent_pane(&app, 0), agent_pane(&app, 1));
+        app.pin_agent(b);
+        app.pin_agent(a);
         let keys = agent_panel_target_keys(&app);
-        assert_eq!(keys.len(), 2);
-        assert!(!keys.contains(&pane));
+        assert_eq!(&keys[..2], &[b, a]);
+        let entry_ids: Vec<_> = agent_panel_entries(&app)
+            .into_iter()
+            .map(|entry| entry.pane_id)
+            .collect();
+        assert_eq!(keys, entry_ids);
     }
 
     #[test]
