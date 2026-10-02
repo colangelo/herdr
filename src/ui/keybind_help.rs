@@ -222,6 +222,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
     workspace_tab.extend([
         help_entry(keybind_label(&kb.rename_workspace), "rename workspace"),
         help_entry(keybind_label(&kb.toggle_pin_workspace), "pin workspace"),
+        help_entry(keybind_label(&kb.toggle_pin_agent), "pin agent"),
         help_entry(keybind_label(&kb.close_workspace), "close workspace"),
         help_entry(keybind_label(&kb.previous_workspace), "previous workspace"),
         help_entry(keybind_label(&kb.next_workspace), "next workspace"),

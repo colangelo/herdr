@@ -530,6 +530,12 @@
           "description": "Pin or unpin the selected workspace to the top of the list."
         },
         {
+          "key": "keys.toggle_pin_agent",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Pin or unpin the focused pane's agent to the top of the agent panel."
+        },
+        {
           "key": "keys.close_workspace",
           "type": "keybinding",
           "default": "\"prefix+shift+d\"",

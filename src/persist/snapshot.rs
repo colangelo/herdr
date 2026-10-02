@@ -996,6 +996,18 @@ mod tests {
     }
 
     #[test]
+    fn pane_pin_is_saved_and_an_old_pane_without_it_is_not_pinned() {
+        let old = serde_json::json!({ "cwd": "/tmp/a" });
+        let restored: PaneSnapshot = serde_json::from_value(old).unwrap();
+        assert_eq!(restored.pin_order, None);
+
+        let pinned: PaneSnapshot =
+            serde_json::from_value(serde_json::json!({ "cwd": "/tmp/a", "pin_order": 2 })).unwrap();
+        assert_eq!(pinned.pin_order, Some(2));
+        assert_eq!(serde_json::to_value(&pinned).unwrap()["pin_order"], 2);
+    }
+
+    #[test]
     fn snapshot_round_trips_last_client_size() {
         let mut state = state_with_workspaces(&["one"]);
         state.last_client_size = Some((310, 56));

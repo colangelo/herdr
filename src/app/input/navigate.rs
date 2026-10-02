@@ -205,6 +205,12 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::TogglePinAgent => {
+                if let Some(pane_id) = focused_pane_for_action(&self.state, context) {
+                    self.state.toggle_pin_agent(pane_id);
+                    leave_navigate_mode(&mut self.state);
+                }
+            }
             NavigateAction::RenameWorkspace => {
                 if let Some(ws_idx) = workspace_action_target(&self.state, context) {
                     super::modal::open_rename_workspace(
@@ -2099,6 +2105,7 @@ pub(crate) enum NavigateAction {
     RemoveWorktree,
     RenameWorkspace,
     TogglePinWorkspace,
+    TogglePinAgent,
     CloseWorkspace,
     SwitchWorkspace(usize),
     SwitchTab(usize),
@@ -2276,6 +2283,7 @@ fn non_indexed_action_for_key(
         (&kb.remove_worktree, NavigateAction::RemoveWorktree),
         (&kb.rename_workspace, NavigateAction::RenameWorkspace),
         (&kb.toggle_pin_workspace, NavigateAction::TogglePinWorkspace),
+        (&kb.toggle_pin_agent, NavigateAction::TogglePinAgent),
         (&kb.close_workspace, NavigateAction::CloseWorkspace),
         (&kb.previous_workspace, NavigateAction::PreviousWorkspace),
         (&kb.next_workspace, NavigateAction::NextWorkspace),
@@ -2451,6 +2459,12 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::TogglePinWorkspace => {
             if let Some(ws_idx) = workspace_action_target(state, context) {
                 state.toggle_pin_workspace(ws_idx);
+                leave_navigate_mode(state);
+            }
+        }
+        NavigateAction::TogglePinAgent => {
+            if let Some(pane_id) = focused_pane_for_action(state, context) {
+                state.toggle_pin_agent(pane_id);
                 leave_navigate_mode(state);
             }
         }
@@ -2752,6 +2766,16 @@ pub(super) fn execute_navigate_action_in_context(
     }
 
     finish_action_context(state, context, previous_mode);
+}
+
+/// The pane an agent action acts on: the focused pane of the same workspace
+/// `workspace_action_target` picks.
+fn focused_pane_for_action(
+    state: &AppState,
+    context: ActionContext,
+) -> Option<crate::layout::PaneId> {
+    let ws_idx = workspace_action_target(state, context)?;
+    state.workspaces.get(ws_idx)?.focused_pane_id()
 }
 
 fn workspace_action_target(state: &AppState, context: ActionContext) -> Option<usize> {

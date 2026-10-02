@@ -203,6 +203,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_worktree = ""    # optional, unset by default
 # remove_worktree = ""  # optional, unset by default; opens confirmation
 # rename_workspace = "prefix+shift+w"
+# toggle_pin_agent = ""      # optional, unset by default; pin or unpin the focused pane's agent to the top of the agent panel
 # toggle_pin_workspace = ""  # optional, unset by default; pin or unpin the selected space to the top of the list
 # close_workspace = "prefix+shift+d"
 # previous_workspace = "" # optional, unset by default

@@ -2189,6 +2189,10 @@ fn render_agent_detail(
                     Style::default().fg(app.agent_number_color.unwrap_or(p.overlay0)),
                 ));
                 spans.push(Span::raw(" "));
+            } else if row_index == 0 && detail.pin_order.is_some() {
+                // The pin marker takes the one-cell lead of the name row, so
+                // pinning moves no text and changes no row height.
+                spans.push(Span::styled(PIN_MARKER, Style::default().fg(p.accent)));
             } else {
                 spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
             }
@@ -2860,6 +2864,31 @@ mod tests {
         let pane = agent_pane(&app, 2);
         app.pin_agent(pane);
         assert_eq!(agent_panel_order(&app)[0], 2);
+    }
+
+    #[test]
+    fn pinned_agent_row_leads_with_the_marker_in_its_one_cell_lead() {
+        let mut app = three_agent_app(AgentPanelSort::Spaces);
+        let pane = agent_pane(&app, 1);
+        app.pin_agent(pane);
+
+        let area = Rect::new(0, 0, 30, 20);
+        let body = agent_panel_body_rect(area, false);
+        let mut terminal = Terminal::new(TestBackend::new(30, 20)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        // The pinned agent is the first entry, so its name row is the first.
+        assert_eq!(agent_panel_order(&app)[0], 1);
+        let lead = (0..body.width)
+            .map(|dx| buffer[(body.x + dx, body.y)].symbol().to_string())
+            .collect::<String>();
+        assert!(lead.contains(PIN_MARKER), "pinned name row: {lead:?}");
+        let marks = (body.y..body.y + body.height)
+            .filter(|y| (0..body.width).any(|dx| buffer[(body.x + dx, *y)].symbol() == PIN_MARKER))
+            .count();
+        assert_eq!(marks, 1, "only the pinned agent carries the marker");
     }
 
     #[test]
