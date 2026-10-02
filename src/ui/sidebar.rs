@@ -278,6 +278,49 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
 /// Drawn in the one-cell lead of a pinned row's name line. One cell, no emoji.
 pub(crate) const PIN_MARKER: &str = "↑";
 
+/// The marker of the top pinned row, and the darkest it ever gets (fork issue
+/// 151). Each rung below the top keeps 90% of every channel, so the arrows get
+/// darker down the block, and the floor keeps a long block readable on a dark
+/// background and clearly green.
+const PIN_MARKER_TOP: (u8, u8, u8) = (0xb5, 0xf0, 0xb0);
+const PIN_MARKER_FLOOR: (u8, u8, u8) = (0x4f, 0x8a, 0x4a);
+const PIN_MARKER_STEP_PERCENT: u32 = 90;
+
+/// How many spaces are pinned ahead of `ws`: its rank in the pinned block.
+fn workspace_pin_rank(app: &AppState, ws: &crate::workspace::Workspace) -> usize {
+    let Some(own) = ws.pin_order else { return 0 };
+    app.workspaces
+        .iter()
+        .filter(|other| other.pin_order.is_some_and(|order| order < own))
+        .count()
+}
+
+/// How many agents are pinned ahead of `entry` in the panel.
+fn agent_pin_rank(entries: &[AgentPanelEntry], entry: &AgentPanelEntry) -> usize {
+    let Some(own) = entry.pin_order else { return 0 };
+    entries
+        .iter()
+        .filter(|other| other.pin_order.is_some_and(|order| order < own))
+        .count()
+}
+
+/// The marker colour for the pinned row at `rank` (0 is the top pin of its own
+/// list: the spaces list and the agent panel each count from their own top).
+pub(crate) fn pin_marker_color(rank: usize) -> Color {
+    let channel = |top: u8, floor: u8| {
+        let mut value = u32::from(top);
+        for _ in 0..rank.min(32) {
+            value = value * PIN_MARKER_STEP_PERCENT / 100;
+        }
+        u8::try_from(value.max(u32::from(floor))).unwrap_or(floor)
+    };
+    Color::Rgb(
+        channel(PIN_MARKER_TOP.0, PIN_MARKER_FLOOR.0),
+        channel(PIN_MARKER_TOP.1, PIN_MARKER_FLOOR.1),
+        channel(PIN_MARKER_TOP.2, PIN_MARKER_FLOOR.2),
+    )
+}
+
 fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {
     // The stored-cwd name, not the live one the row draws: sidebar geometry
     // is measured without the runtime registry, and the name only matters
@@ -1878,7 +1921,10 @@ fn render_workspace_list(
                 // moves no text and changes no row height.
                 let lead_mark = |pinned: bool| {
                     if pinned {
-                        Span::styled(PIN_MARKER, Style::default().fg(p.accent))
+                        Span::styled(
+                            PIN_MARKER,
+                            Style::default().fg(pin_marker_color(workspace_pin_rank(app, ws))),
+                        )
                     } else {
                         Span::raw(" ")
                     }
@@ -2199,7 +2245,10 @@ fn render_agent_detail(
             } else if row_index == 0 && detail.pin_order.is_some() {
                 // The pin marker takes the one-cell lead of the name row, so
                 // pinning moves no text and changes no row height.
-                spans.push(Span::styled(PIN_MARKER, Style::default().fg(p.accent)));
+                spans.push(Span::styled(
+                    PIN_MARKER,
+                    Style::default().fg(pin_marker_color(agent_pin_rank(&details, detail))),
+                ));
             } else {
                 spans.push(Span::raw(if row_index == 0 { " " } else { "   " }));
             }
@@ -3012,6 +3061,103 @@ mod tests {
         let pane = agent_pane(&app, 2);
         app.pin_agent(pane);
         assert_eq!(agent_panel_order(&app)[0], 2);
+    }
+
+    fn channels(color: Color) -> (u8, u8, u8) {
+        match color {
+            Color::Rgb(r, g, b) => (r, g, b),
+            other => panic!("an rgb colour expected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_pin_marker_is_light_green_and_darker_at_every_rung_down_to_a_floor() {
+        let sum = |rank| {
+            let (r, g, b) = channels(pin_marker_color(rank));
+            u32::from(r) + u32::from(g) + u32::from(b)
+        };
+        assert_eq!(
+            channels(pin_marker_color(0)),
+            (0xb5, 0xf0, 0xb0),
+            "the top is the start"
+        );
+        assert!(
+            sum(0) > sum(1) && sum(1) > sum(2) && sum(2) > sum(3),
+            "strictly darker in turn"
+        );
+        for rank in [0, 1, 2, 5, 12, 40, 1000] {
+            let (r, g, b) = channels(pin_marker_color(rank));
+            assert!(g > r && g > b, "rank {rank} is clearly green: {r},{g},{b}");
+            assert!(
+                r >= 0x4f && g >= 0x8a && b >= 0x4a,
+                "rank {rank} holds the floor: {r},{g},{b}"
+            );
+        }
+        assert_eq!(
+            channels(pin_marker_color(1000)),
+            (0x4f, 0x8a, 0x4a),
+            "the floor is reached"
+        );
+        assert_eq!(pin_marker_color(40), pin_marker_color(1000), "and held");
+    }
+
+    #[test]
+    fn pinned_space_markers_get_darker_down_the_block_and_agents_count_from_their_own_top() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("a"),
+            Workspace::test_new("b"),
+            Workspace::test_new("c"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.mode = Mode::Terminal;
+        app.pin_workspace(2);
+        app.pin_workspace(0);
+        app.pin_workspace(1);
+        // One pinned agent: the agent panel starts at its own top, rank 0.
+        let pane = agent_pane(&app, 1);
+        let terminal_id = app.workspaces[1].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        app.pin_agent(pane);
+
+        let area = Rect::new(0, 0, 30, 30);
+        app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
+        let list_area = workspace_list_rect(area, app.sidebar_section_split);
+        let mut terminal = Terminal::new(TestBackend::new(30, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_list(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    list_area,
+                    false,
+                );
+                render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let space_colors: Vec<Color> = app
+            .view
+            .workspace_card_areas
+            .iter()
+            .map(|card| buffer[(card.rect.x, card.rect.y)].style().fg.unwrap())
+            .collect();
+        assert_eq!(space_colors[0], pin_marker_color(0));
+        assert_eq!(space_colors[1], pin_marker_color(1));
+        assert_eq!(space_colors[2], pin_marker_color(2));
+        let body = agent_panel_body_rect(area, false);
+        assert_eq!(buffer[(body.x, body.y)].symbol(), PIN_MARKER);
+        assert_eq!(
+            buffer[(body.x, body.y)].style().fg,
+            Some(pin_marker_color(0))
+        );
     }
 
     #[test]
