@@ -638,6 +638,8 @@ pub struct KeysConfig {
     pub remove_worktree: BindingConfig,
     /// Rename the selected workspace. Default: "prefix+shift+w"
     pub rename_workspace: BindingConfig,
+    /// Pin or unpin the selected workspace to the top of the list. Default: unset
+    pub toggle_pin_workspace: BindingConfig,
     /// Close the selected workspace. Default: "prefix+shift+d"
     pub close_workspace: BindingConfig,
     /// Open the workspace navigation surface. Default: "prefix+w"
@@ -811,6 +813,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     rename_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_pin_workspace: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     close_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_picker: Option<BindingConfig>,
@@ -980,6 +984,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(open_worktree);
         apply_field!(remove_worktree);
         apply_field!(rename_workspace);
+        apply_field!(toggle_pin_workspace);
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
         apply_field!(goto);
@@ -1103,6 +1108,7 @@ impl KeysConfig {
         copy_effective_action_field!(open_worktree, keybinds.open_worktree);
         copy_effective_action_field!(remove_worktree, keybinds.remove_worktree);
         copy_effective_action_field!(rename_workspace, keybinds.rename_workspace);
+        copy_effective_action_field!(toggle_pin_workspace, keybinds.toggle_pin_workspace);
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
@@ -1584,6 +1590,7 @@ impl Default for KeysConfig {
             open_worktree: BindingConfig::empty(),
             remove_worktree: BindingConfig::empty(),
             rename_workspace: BindingConfig::one("prefix+shift+w"),
+            toggle_pin_workspace: BindingConfig::empty(),
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),

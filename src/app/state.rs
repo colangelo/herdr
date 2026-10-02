@@ -4092,6 +4092,18 @@ impl AppState {
             panic!("mode {:?} names {kind:?} but no overlay is open", self.mode);
         }
 
+        // A pin order names one place in the pinned block: no two spaces share it.
+        let mut pin_orders: Vec<u64> = self
+            .workspaces
+            .iter()
+            .filter_map(|ws| ws.pin_order)
+            .collect();
+        pin_orders.sort_unstable();
+        assert!(
+            pin_orders.windows(2).all(|pair| pair[0] != pair[1]),
+            "two workspaces share a pin order: {pin_orders:?}"
+        );
+
         if self.workspaces.is_empty() {
             assert!(
                 self.active.is_none(),

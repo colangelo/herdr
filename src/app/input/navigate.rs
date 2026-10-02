@@ -199,6 +199,12 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::TogglePinWorkspace => {
+                if let Some(ws_idx) = workspace_action_target(&self.state, context) {
+                    self.state.toggle_pin_workspace(ws_idx);
+                    leave_navigate_mode(&mut self.state);
+                }
+            }
             NavigateAction::RenameWorkspace => {
                 if let Some(ws_idx) = workspace_action_target(&self.state, context) {
                     super::modal::open_rename_workspace(
@@ -2092,6 +2098,7 @@ pub(crate) enum NavigateAction {
     OpenWorktree,
     RemoveWorktree,
     RenameWorkspace,
+    TogglePinWorkspace,
     CloseWorkspace,
     SwitchWorkspace(usize),
     SwitchTab(usize),
@@ -2268,6 +2275,7 @@ fn non_indexed_action_for_key(
         (&kb.open_worktree, NavigateAction::OpenWorktree),
         (&kb.remove_worktree, NavigateAction::RemoveWorktree),
         (&kb.rename_workspace, NavigateAction::RenameWorkspace),
+        (&kb.toggle_pin_workspace, NavigateAction::TogglePinWorkspace),
         (&kb.close_workspace, NavigateAction::CloseWorkspace),
         (&kb.previous_workspace, NavigateAction::PreviousWorkspace),
         (&kb.next_workspace, NavigateAction::NextWorkspace),
@@ -2437,6 +2445,12 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::RemoveWorktree => {
             if let Some(ws_idx) = workspace_action_target(state, context) {
                 state.request_remove_linked_worktree = Some(ws_idx);
+                leave_navigate_mode(state);
+            }
+        }
+        NavigateAction::TogglePinWorkspace => {
+            if let Some(ws_idx) = workspace_action_target(state, context) {
+                state.toggle_pin_workspace(ws_idx);
                 leave_navigate_mode(state);
             }
         }

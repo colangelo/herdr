@@ -962,6 +962,33 @@ mod tests {
     }
 
     #[test]
+    fn workspace_pin_is_saved_and_an_old_file_without_it_is_not_pinned() {
+        let old = serde_json::json!({
+            "identity_cwd": "/tmp/a",
+            "tabs": [],
+            "active_tab": 0
+        });
+        let restored: WorkspaceSnapshot = serde_json::from_value(old).unwrap();
+        assert_eq!(restored.pin_order, None);
+
+        let pinned = serde_json::json!({
+            "identity_cwd": "/tmp/a",
+            "tabs": [],
+            "active_tab": 0,
+            "pin_order": 3
+        });
+        let restored: WorkspaceSnapshot = serde_json::from_value(pinned).unwrap();
+        assert_eq!(restored.pin_order, Some(3));
+        let saved = serde_json::to_value(&restored).unwrap();
+        assert_eq!(saved["pin_order"], 3);
+
+        let mut unpinned = restored;
+        unpinned.pin_order = None;
+        let saved = serde_json::to_value(&unpinned).unwrap();
+        assert!(saved.get("pin_order").is_none());
+    }
+
+    #[test]
     fn snapshot_round_trips_last_client_size() {
         let mut state = state_with_workspaces(&["one"]);
         state.last_client_size = Some((310, 56));

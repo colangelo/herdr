@@ -258,6 +258,19 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
     }
 }
 
+/// Drawn before the name of a pinned space. One cell, no emoji.
+pub(crate) const PIN_MARKER: &str = "↑";
+
+/// The name a row shows: the label, led by [`PIN_MARKER`] when the space is
+/// pinned. Row height and drawing both go through it so they wrap alike.
+fn pin_marked_label(ws: &crate::workspace::Workspace, label: String) -> String {
+    if ws.pin_order.is_some() {
+        format!("{PIN_MARKER} {label}")
+    } else {
+        label
+    }
+}
+
 fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {
     // The stored-cwd name, not the live one the row draws: sidebar geometry
     // is measured without the runtime registry, and the name only matters
@@ -272,6 +285,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
     } else {
         ws.display_name_from_terminals(&app.terminals)
     };
+    let label = pin_marked_label(ws, label);
     let token_values = ws.metadata_tokens.values();
     tokens::space_rows(
         &app.sidebar_spaces,
@@ -1784,6 +1798,7 @@ fn render_workspace_list(
         } else {
             label
         };
+        let display_label = pin_marked_label(ws, display_label);
         let parent_group = (!card.indented)
             .then(|| workspace_parent_group_state(app, i))
             .flatten();
@@ -4154,6 +4169,42 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .expect("workspace list should render");
     }
 
+    #[test]
+    fn pinned_space_row_leads_with_the_marker_and_unpinned_rows_do_not() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("alpha"), Workspace::test_new("beta")];
+        app.active = Some(0);
+        app.mode = Mode::Terminal;
+        app.pin_workspace(1);
+
+        let area = Rect::new(0, 0, 30, 30);
+        app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
+        let list_area = workspace_list_rect(area, app.sidebar_section_split);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_list(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    list_area,
+                    false,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = app
+            .view
+            .workspace_card_areas
+            .iter()
+            .map(|card| row_text(buffer, card.rect.y, card.rect.width))
+            .collect();
+        // beta is pinned, so it is the first card.
+        assert_eq!(app.view.workspace_card_areas[0].ws_idx, 1);
+        assert!(rows[0].contains("↑ beta"), "pinned row: {:?}", rows[0]);
+        assert!(!rows[1].contains(PIN_MARKER), "unpinned row: {:?}", rows[1]);
+    }
+
     /// A detached checkout used to lose its whole second row (branch `None`
     /// resolved to no token, and an empty row is dropped). It now says where
     /// it is instead, and names the operation holding it there.
@@ -4547,6 +4598,20 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_group_is_pinned_when_any_member_is_and_moves_whole() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            workspace_with_git_space("plain", "other-key"),
+            workspace_with_worktree_space("main", Some("repo-key"), "/repo/herdr"),
+            workspace_with_worktree_space("issue", Some("repo-key"), "/repo/herdr-issue"),
+        ];
+        // Pin the linked child only: the whole group still moves up together.
+        app.pin_workspace(2);
+
+        assert_eq!(workspace_order(&app), vec![1, 2, 0]);
     }
 
     #[test]

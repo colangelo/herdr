@@ -96,4 +96,17 @@ mod tests {
         assert_eq!(state.workspaces[1].pin_order, None);
         assert!(!state.toggle_pin_workspace(9), "no such space");
     }
+
+    #[test]
+    fn pinned_spaces_hold_the_state_invariants_even_on_adversarial_state() {
+        let mut state = AppState::test_with_adversarial_identity_state();
+        state.workspaces.push(Workspace::test_new("extra"));
+        state.ensure_test_terminals();
+        state.pin_workspace(1);
+        state.pin_workspace(0);
+        state.assert_invariants_for_test();
+        state.unpin_workspace(1);
+        state.pin_workspace(1);
+        state.assert_invariants_for_test();
+    }
 }

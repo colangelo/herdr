@@ -524,6 +524,12 @@
           "description": "Rename the selected workspace."
         },
         {
+          "key": "keys.toggle_pin_workspace",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Pin or unpin the selected workspace to the top of the list."
+        },
+        {
           "key": "keys.close_workspace",
           "type": "keybinding",
           "default": "\"prefix+shift+d\"",
