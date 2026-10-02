@@ -493,6 +493,8 @@ fn api_method_name(method: &Method) -> &'static str {
         Method::WorkspaceList(_) => "workspace.list",
         Method::WorkspaceGet(_) => "workspace.get",
         Method::WorkspaceFocus(_) => "workspace.focus",
+        Method::WorkspacePin(_) => "workspace.pin",
+        Method::WorkspaceUnpin(_) => "workspace.unpin",
         Method::WorkspaceRename(_) => "workspace.rename",
         Method::WorkspaceMove(_) => "workspace.move",
         Method::WorkspaceMoveBlock(_) => "workspace.move_block",

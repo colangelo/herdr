@@ -91,6 +91,10 @@ pub enum Method {
     WorkspaceGet(WorkspaceTarget),
     #[serde(rename = "workspace.focus")]
     WorkspaceFocus(WorkspaceTarget),
+    #[serde(rename = "workspace.pin")]
+    WorkspacePin(WorkspaceTarget),
+    #[serde(rename = "workspace.unpin")]
+    WorkspaceUnpin(WorkspaceTarget),
     #[serde(rename = "workspace.rename")]
     WorkspaceRename(WorkspaceRenameParams),
     #[serde(rename = "workspace.move")]

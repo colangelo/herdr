@@ -214,6 +214,12 @@ fn workspace_command() -> Command {
         )
         .subcommand(id_command("get", "workspace_id", "Show a workspace"))
         .subcommand(id_command("focus", "workspace_id", "Focus a workspace"))
+        .subcommand(id_command(
+            "pin",
+            "workspace_id",
+            "Pin a workspace to the top of the list",
+        ))
+        .subcommand(id_command("unpin", "workspace_id", "Unpin a workspace"))
         .subcommand(
             Command::new("rename")
                 .about("Rename a workspace")

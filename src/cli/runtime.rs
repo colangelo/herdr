@@ -39,6 +39,15 @@ pub(super) fn workspace_focus(workspace_id: String) -> std::io::Result<i32> {
     )
 }
 
+pub(super) fn workspace_pin(workspace_id: String, pin: bool) -> std::io::Result<i32> {
+    let target = WorkspaceTarget { workspace_id };
+    if pin {
+        print_method_response("cli:workspace:pin", Method::WorkspacePin(target))
+    } else {
+        print_method_response("cli:workspace:unpin", Method::WorkspaceUnpin(target))
+    }
+}
+
 pub(super) fn workspace_rename(params: WorkspaceRenameParams) -> std::io::Result<i32> {
     print_method_response("cli:workspace:rename", Method::WorkspaceRename(params))
 }

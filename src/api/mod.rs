@@ -30,6 +30,8 @@ pub(crate) fn request_changes_ui(request: &Request) -> bool {
             | Method::NotificationClear(_)
             | Method::WorkspaceCreate(_)
             | Method::WorkspaceFocus(_)
+            | Method::WorkspacePin(_)
+            | Method::WorkspaceUnpin(_)
             | Method::WorkspaceRename(_)
             | Method::WorkspaceMove(_)
             | Method::WorkspaceMoveBlock(_)

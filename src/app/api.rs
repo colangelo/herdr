@@ -1230,6 +1230,12 @@ impl App {
             Method::WorkspaceFocus(target) => {
                 return self.handle_workspace_focus(request.id, target)
             }
+            Method::WorkspacePin(target) => {
+                return self.handle_workspace_pin(request.id, target, true);
+            }
+            Method::WorkspaceUnpin(target) => {
+                return self.handle_workspace_pin(request.id, target, false);
+            }
             Method::WorkspaceRename(params) => {
                 return self.handle_workspace_rename(request.id, params);
             }

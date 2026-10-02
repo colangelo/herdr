@@ -88,6 +88,32 @@ impl App {
         )
     }
 
+    pub(super) fn handle_workspace_pin(
+        &mut self,
+        id: String,
+        target: WorkspaceTarget,
+        pin: bool,
+    ) -> String {
+        let Some(index) = self.parse_workspace_id(&target.workspace_id) else {
+            return workspace_not_found(id, &target.workspace_id);
+        };
+        if self.state.workspaces.get(index).is_none() {
+            return workspace_not_found(id, &target.workspace_id);
+        }
+        if pin {
+            self.state.pin_workspace(index);
+        } else {
+            self.state.unpin_workspace(index);
+        }
+
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(index),
+            },
+        )
+    }
+
     pub(super) fn handle_workspace_rename(
         &mut self,
         id: String,

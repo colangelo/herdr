@@ -1247,6 +1247,10 @@
               "minimum": 0,
               "type": "integer"
             },
+            "pinned": {
+              "description": "Pinned workspaces sit at the top of the workspace list in pin order.",
+              "type": "boolean"
+            },
             "tab_count": {
               "format": "uint",
               "minimum": 0,
@@ -5258,6 +5262,38 @@
           "properties": {
             "method": {
               "const": "workspace.focus",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.pin",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.unpin",
               "type": "string"
             },
             "params": {
@@ -11187,6 +11223,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "pinned": {
+              "description": "Pinned workspaces sit at the top of the workspace list in pin order.",
+              "type": "boolean"
             },
             "tab_count": {
               "format": "uint",
