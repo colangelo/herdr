@@ -104,8 +104,8 @@ Raw socket method names use dot notation:
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.pin`, `workspace.unpin`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
-| Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
-| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.clear`, `pane.close`, `pane.respawn`, `pane.wait_for_output` |
+| Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.sync`, `tab.move`, `tab.close` |
+| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.sync`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.clear`, `pane.close`, `pane.respawn`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio`, `layout.balance`, `layout.set_preset` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.pin`, `agent.unpin`, `agent.start`, `agent.view.set`, `agent.view.clear` |
@@ -376,6 +376,22 @@ Omitting `pane_id` targets the server's active focused pane. The response is
 `reason`, `pane_id`, `focused_pane_id`, `zoomed`, and `layout`. `changed` is
 true when either zoom state or focus changed. Reason values are `single_pane`,
 `already_zoomed`, and `already_unzoomed`.
+
+`tab.sync` turns input sync on or off for a tab, and `pane.sync` puts one pane
+in or out of the synced set. While a tab syncs, keys, text and pastes typed
+into one synced pane go to the others too:
+
+```json
+{"id":"req_sync_on","method":"tab.sync","params":{"tab_id":"w1:1","mode":"on"}}
+{"id":"req_sync_out","method":"pane.sync","params":{"pane_id":"w1:p2","mode":"off"}}
+```
+
+`mode` is `toggle` (the default), `on` or `off`. Omitting `tab_id` or `pane_id`
+targets the tab or focused pane on screen. Both return the updated record
+(`type: "tab_info"` with `sync`, or `type: "pane_info"` with `synced`).
+`pane.sync` fails with `sync_not_active` when the pane's tab is not syncing.
+Turning a tab on again while it syncs keeps the excluded panes. Sync is runtime
+state: it is not saved, and it is off after a restart or a live handoff.
 
 `pane.clear` purges the target pane's saved scrollback with tmux
 `clear-history` semantics. The visible screen contents and the running process
