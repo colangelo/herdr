@@ -1,0 +1,6 @@
+{
+  "name": "herdr-attention",
+  "version": "0.1.0",
+  "description": "Tells herdr when Claude Code is waiting on an AskUserQuestion dialog, and when it stopped waiting (spike for fork issue 137 part C)",
+  "author": { "name": "AC-forks/herdr" }
+}
