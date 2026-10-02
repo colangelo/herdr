@@ -668,6 +668,7 @@ fn restore_tab(
             saved_pane.map(|p| p.todos.as_slice()).unwrap_or_default();
         let saved_next_todo_id = saved_pane.map(|p| p.next_todo_id).unwrap_or(1);
         let saved_last_input_at_ms = saved_pane.and_then(|p| p.last_input_at_ms);
+        let saved_pin_order = saved_pane.and_then(|p| p.pin_order);
         let saved_agent_resume = saved_pane.and_then(saved_reported_resume);
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
@@ -782,6 +783,7 @@ fn restore_tab(
             }
             restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
             terminal.restored_last_input_at_ms = saved_last_input_at_ms;
+            terminal.pin_order = saved_pin_order;
             panes.insert(*id, PaneState::new(terminal_id));
             terminals.push(terminal);
             continue;
@@ -891,6 +893,7 @@ fn restore_tab(
                 }
                 restore_pane_todos(&mut terminal, saved_todos, saved_next_todo_id, todo_links);
                 terminal.restored_last_input_at_ms = saved_last_input_at_ms;
+                terminal.pin_order = saved_pin_order;
                 #[cfg(unix)]
                 if let Some(agent_state) = handoff_agent_state {
                     terminal.restore_handoff_agent_state(agent_state);
@@ -1386,6 +1389,7 @@ mod tests {
             ],
             next_todo_id: 7,
             last_input_at_ms: Some(1_790_000_000_123),
+            pin_order: None,
             former_public_ids: Vec::new(),
         };
         let target_pane = super::super::snapshot::PaneSnapshot {
@@ -1400,6 +1404,7 @@ mod tests {
             todos: Vec::new(),
             next_todo_id: 1,
             last_input_at_ms: None,
+            pin_order: None,
             former_public_ids: Vec::new(),
         };
         let snapshot = SessionSnapshot {
@@ -2119,6 +2124,7 @@ mod tests {
                             todos: Vec::new(),
                             next_todo_id: 1,
                             last_input_at_ms: None,
+                            pin_order: None,
                             former_public_ids: Vec::new(),
                         },
                     )]),
@@ -2207,6 +2213,7 @@ mod tests {
                             todos: Vec::new(),
                             next_todo_id: 1,
                             last_input_at_ms: None,
+                            pin_order: None,
                             former_public_ids: Vec::new(),
                         },
                     )]),
@@ -2286,6 +2293,7 @@ mod tests {
                                 todos: Vec::new(),
                                 next_todo_id: 1,
                                 last_input_at_ms: None,
+                                pin_order: None,
                                 former_public_ids: Vec::new(),
                             },
                         ),
@@ -2303,6 +2311,7 @@ mod tests {
                                 todos: Vec::new(),
                                 next_todo_id: 1,
                                 last_input_at_ms: None,
+                                pin_order: None,
                                 former_public_ids: Vec::new(),
                             },
                         ),
@@ -2383,6 +2392,7 @@ mod tests {
                                 todos: Vec::new(),
                                 next_todo_id: 1,
                                 last_input_at_ms: None,
+                                pin_order: None,
                                 former_public_ids: Vec::new(),
                             },
                         ),
@@ -2400,6 +2410,7 @@ mod tests {
                                 todos: Vec::new(),
                                 next_todo_id: 1,
                                 last_input_at_ms: None,
+                                pin_order: None,
                                 former_public_ids: vec!["w1:p1".into(), "w9:p7".into()],
                             },
                         ),
@@ -2462,6 +2473,7 @@ mod tests {
                     todos: Vec::new(),
                     next_todo_id: 1,
                     last_input_at_ms: None,
+                    pin_order: None,
                     former_public_ids: Vec::new(),
                 },
             )
@@ -2483,6 +2495,7 @@ mod tests {
             todos: Vec::new(),
             next_todo_id: 1,
             last_input_at_ms: None,
+            pin_order: None,
             former_public_ids: Vec::new(),
         };
         let snapshot = SessionSnapshot {
@@ -2644,6 +2657,7 @@ mod tests {
                             todos: Vec::new(),
                             next_todo_id: 1,
                             last_input_at_ms: None,
+                            pin_order: None,
                             former_public_ids: Vec::new(),
                         },
                     )]),
@@ -3020,6 +3034,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                pin_order: None,
                 former_public_ids: Vec::new(),
             },
         );

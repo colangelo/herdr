@@ -209,6 +209,10 @@ pub struct TerminalState {
     /// The pane's last-input time carried over a restore, in unix ms. The live
     /// time is on the pane runtime; `pane_last_input_at_ms` reads the newer.
     pub(crate) restored_last_input_at_ms: Option<i64>,
+    /// Where this agent sits in the pinned block at the top of the agent
+    /// panel (fork issue 148): `Some` is pinned, a lower number is higher up.
+    /// Session state, saved with the pane and carried through a handoff.
+    pub pin_order: Option<u64>,
     pub respawn_shell_on_exit: bool,
     recent_agent_process_exit: Option<RecentAgentProcessExit>,
     /// An agent process exit observed since detection last saw an agent
@@ -264,6 +268,7 @@ impl TerminalState {
             todos: Vec::new(),
             next_todo_id: 1,
             restored_last_input_at_ms: None,
+            pin_order: None,
             respawn_shell_on_exit: false,
             recent_agent_process_exit: None,
             last_observed_agent_exit: None,

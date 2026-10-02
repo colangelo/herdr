@@ -41,6 +41,8 @@ pub(crate) struct AgentPanelEntry {
     pub state: AgentState,
     pub seen: bool,
     pub last_agent_state_change_seq: Option<u64>,
+    /// See `TerminalState::pin_order`.
+    pub pin_order: Option<u64>,
     pub state_labels: std::collections::HashMap<String, String>,
     pub tokens: std::collections::HashMap<String, String>,
 }
@@ -198,6 +200,7 @@ fn collect_agent_panel_entries_with_runtimes(
                         state: detail.state,
                         seen: detail.seen,
                         last_agent_state_change_seq: detail.last_agent_state_change_seq,
+                        pin_order: detail.pin_order,
                         state_labels: detail.state_labels,
                         tokens: detail.tokens,
                     }
@@ -213,16 +216,21 @@ fn apply_agent_panel_motion(app: &AppState, entries: Vec<AgentPanelEntry>) -> Ve
     if !agent_panel_motion_active(app) {
         return entries;
     }
-    let target: Vec<crate::layout::PaneId> = entries.iter().map(|entry| entry.pane_id).collect();
+    // Pinned entries stay put at the top; only the rows below them bubble.
+    let pinned = entries
+        .iter()
+        .take_while(|entry| entry.pin_order.is_some())
+        .count();
+    let mut entries = entries;
+    let rest = entries.split_off(pinned);
+    let target: Vec<crate::layout::PaneId> = rest.iter().map(|entry| entry.pane_id).collect();
     let order = app.agent_panel_motion.project(&target);
-    let mut by_key: std::collections::HashMap<crate::layout::PaneId, AgentPanelEntry> = entries
+    let mut by_key: std::collections::HashMap<crate::layout::PaneId, AgentPanelEntry> = rest
         .into_iter()
         .map(|entry| (entry.pane_id, entry))
         .collect();
-    order
-        .into_iter()
-        .filter_map(|key| by_key.remove(&key))
-        .collect()
+    entries.extend(order.into_iter().filter_map(|key| by_key.remove(&key)));
+    entries
 }
 
 pub(crate) fn agent_panel_motion_active(app: &AppState) -> bool {
@@ -236,6 +244,7 @@ pub(crate) fn agent_panel_target_keys(app: &AppState) -> Vec<crate::layout::Pane
         .workspaces
         .iter()
         .flat_map(|ws| ws.pane_details(&app.terminals))
+        .filter(|detail| detail.pin_order.is_none())
         .map(|detail| {
             (
                 attention_priority(detail.state, detail.seen),
@@ -2773,6 +2782,94 @@ mod tests {
             .map(|entry| entry.pane_id)
             .collect();
         assert_eq!(agent_panel_target_keys(&app), entry_ids);
+    }
+
+    fn three_agent_app(sort: AgentPanelSort) -> crate::app::state::AppState {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("one"),
+            Workspace::test_new("two"),
+            Workspace::test_new("three"),
+        ];
+        app.ensure_test_terminals();
+        app.agent_panel_sort = sort;
+        app.sort_motion_bubble = false;
+        let states = [
+            (AgentState::Idle, true, Some(3)),
+            (AgentState::Working, true, Some(9)),
+            (AgentState::Blocked, false, Some(5)),
+        ];
+        for (workspace, (state, seen, seq)) in app.workspaces.iter_mut().zip(states) {
+            let pane_id = workspace.tabs[0].root_pane;
+            let terminal_id = workspace.tabs[0].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            workspace.tabs[0].panes.get_mut(&pane_id).unwrap().seen = seen;
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Pi);
+            terminal.state = state;
+            terminal.last_agent_state_change_seq = seq;
+        }
+        app
+    }
+
+    fn agent_pane(app: &crate::app::state::AppState, ws_idx: usize) -> crate::layout::PaneId {
+        app.workspaces[ws_idx].tabs[0].root_pane
+    }
+
+    fn agent_panel_order(app: &crate::app::state::AppState) -> Vec<usize> {
+        agent_panel_entries(app)
+            .iter()
+            .map(|entry| entry.ws_idx)
+            .collect()
+    }
+
+    #[test]
+    fn pinned_agents_lead_in_pin_order_under_spaces_and_priority() {
+        for sort in [AgentPanelSort::Spaces, AgentPanelSort::Priority] {
+            let mut app = three_agent_app(sort);
+            let unpinned = agent_panel_order(&app);
+            // Pin the lowest-ranked agents first and second.
+            let (a, b) = (agent_pane(&app, 0), agent_pane(&app, 1));
+            app.pin_agent(b);
+            app.pin_agent(a);
+            let order = agent_panel_order(&app);
+            assert_eq!(&order[..2], &[1, 0], "pinned lead in pin order");
+            assert_eq!(order[2], 2);
+
+            app.unpin_agent(b);
+            app.unpin_agent(a);
+            assert_eq!(agent_panel_order(&app), unpinned, "unpin returns the rows");
+        }
+    }
+
+    #[test]
+    fn pinned_agents_lead_over_a_view_sort_too() {
+        let mut app = three_agent_app(AgentPanelSort::Spaces);
+        app.agent_view_override = Some(crate::api::schema::AgentViewSetParams {
+            source: "test".into(),
+            label: None,
+            filter: None,
+            sort: vec![crate::api::schema::AgentViewSort {
+                field: crate::api::schema::AgentViewSortField::Builtin(
+                    crate::api::schema::AgentViewBuiltinSortField::Status,
+                ),
+                order: crate::api::schema::AgentViewSortOrder::Desc,
+            }],
+        });
+        let pane = agent_pane(&app, 2);
+        app.pin_agent(pane);
+        assert_eq!(agent_panel_order(&app)[0], 2);
+    }
+
+    #[test]
+    fn pinned_agents_are_left_out_of_the_agent_motion_target() {
+        let mut app = three_agent_app(AgentPanelSort::Priority);
+        let pane = agent_pane(&app, 0);
+        app.pin_agent(pane);
+        let keys = agent_panel_target_keys(&app);
+        assert_eq!(keys.len(), 2);
+        assert!(!keys.contains(&pane));
     }
 
     #[test]

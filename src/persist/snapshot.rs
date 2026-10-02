@@ -143,6 +143,9 @@ pub struct PaneSnapshot {
     /// this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_input_at_ms: Option<i64>,
+    /// The agent's pin (fork issue 148); absent in older files: not pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<u64>,
     /// Public ids the pane had before it moved to another space. A shell in
     /// the pane still exports the id it started under, so its hooks report
     /// with it; keeping these across a restart or a handoff keeps those
@@ -475,6 +478,7 @@ fn capture_tab(
         let last_input_at_ms = terminal.and_then(|terminal| {
             crate::terminal::pane_last_input_at_ms(terminal, terminal_runtimes.get(&terminal.id))
         });
+        let pin_order = terminal.and_then(|terminal| terminal.pin_order);
         // A Claude pane's footer shows the model and effort it runs now; a hook
         // record older than that must not win (fork issue 144). Read from the
         // bottom of the buffer once per capture, only for a Claude record.
@@ -516,6 +520,7 @@ fn capture_tab(
                 todos,
                 next_todo_id,
                 last_input_at_ms,
+                pin_order,
                 former_public_ids: Vec::new(),
             },
         );
@@ -838,6 +843,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                pin_order: None,
                 former_public_ids: Vec::new(),
             },
         );
@@ -855,6 +861,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                pin_order: None,
                 former_public_ids: Vec::new(),
             },
         );
@@ -1586,6 +1593,7 @@ mod tests {
             }],
             next_todo_id: 4,
             last_input_at_ms: None,
+            pin_order: None,
             former_public_ids: Vec::new(),
         };
 
@@ -1618,6 +1626,7 @@ mod tests {
             todos: Vec::new(),
             next_todo_id: 1,
             last_input_at_ms: None,
+            pin_order: None,
             former_public_ids: Vec::new(),
         };
 
@@ -1707,6 +1716,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                pin_order: None,
                 former_public_ids: Vec::new(),
             },
         );
@@ -1726,6 +1736,7 @@ mod tests {
                 todos: Vec::new(),
                 next_todo_id: 1,
                 last_input_at_ms: None,
+                pin_order: None,
                 former_public_ids: Vec::new(),
             },
         );

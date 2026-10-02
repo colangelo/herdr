@@ -7,6 +7,7 @@
 //! off. State only: the order itself is applied where the lists are built.
 
 use super::state::AppState;
+use crate::layout::PaneId;
 
 impl AppState {
     /// Pin the space at `ws_idx` below the spaces pinned before it. A space
@@ -47,6 +48,61 @@ impl AppState {
             return false;
         }
         self.pin_workspace(ws_idx)
+    }
+
+    /// The terminal behind a pane, mutably. The pin lives on the terminal, so
+    /// it follows the agent when the pane moves between tabs and spaces.
+    fn pane_terminal_mut(
+        &mut self,
+        pane_id: PaneId,
+    ) -> Option<&mut crate::terminal::TerminalState> {
+        let terminal_id = self
+            .workspaces
+            .iter()
+            .find_map(|ws| ws.pane_state(pane_id))?
+            .attached_terminal_id
+            .clone();
+        self.terminals.get_mut(&terminal_id)
+    }
+
+    /// Pin the agent in `pane_id` below the agents pinned before it. Already
+    /// pinned keeps its place. `true` when something changed.
+    pub(crate) fn pin_agent(&mut self, pane_id: PaneId) -> bool {
+        let next = self
+            .terminals
+            .values()
+            .filter_map(|terminal| terminal.pin_order)
+            .max()
+            .map_or(1, |max| max + 1);
+        let Some(terminal) = self.pane_terminal_mut(pane_id) else {
+            return false;
+        };
+        if terminal.pin_order.is_some() {
+            return false;
+        }
+        terminal.pin_order = Some(next);
+        self.mark_session_dirty();
+        true
+    }
+
+    /// Unpin the agent in `pane_id`; it goes back where the sort puts it.
+    pub(crate) fn unpin_agent(&mut self, pane_id: PaneId) -> bool {
+        let Some(terminal) = self.pane_terminal_mut(pane_id) else {
+            return false;
+        };
+        if terminal.pin_order.take().is_none() {
+            return false;
+        }
+        self.mark_session_dirty();
+        true
+    }
+
+    /// Pin an unpinned agent, unpin a pinned one. `true` when pinned now.
+    pub(crate) fn toggle_pin_agent(&mut self, pane_id: PaneId) -> bool {
+        if self.unpin_agent(pane_id) {
+            return false;
+        }
+        self.pin_agent(pane_id)
     }
 }
 
