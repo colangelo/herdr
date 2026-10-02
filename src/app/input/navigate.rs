@@ -459,6 +459,10 @@ impl App {
                 );
                 self.dispatch_pending_app_scroll_sends();
             }
+            NavigateAction::ToggleSyncPanes => {
+                self.state.toggle_sync_panes();
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::Zoom => {
                 self.zoom_focused_pane_via_api();
                 leave_navigate_mode(&mut self.state);
@@ -2109,6 +2113,7 @@ pub(crate) enum NavigateAction {
     RemoveWorktree,
     RenameWorkspace,
     TogglePinWorkspace,
+    ToggleSyncPanes,
     TogglePinAgent,
     CloseWorkspace,
     SwitchWorkspace(usize),
@@ -2287,6 +2292,7 @@ fn non_indexed_action_for_key(
         (&kb.remove_worktree, NavigateAction::RemoveWorktree),
         (&kb.rename_workspace, NavigateAction::RenameWorkspace),
         (&kb.toggle_pin_workspace, NavigateAction::TogglePinWorkspace),
+        (&kb.toggle_sync_panes, NavigateAction::ToggleSyncPanes),
         (&kb.toggle_pin_agent, NavigateAction::TogglePinAgent),
         (&kb.close_workspace, NavigateAction::CloseWorkspace),
         (&kb.previous_workspace, NavigateAction::PreviousWorkspace),
@@ -2667,6 +2673,10 @@ pub(super) fn execute_navigate_action_in_context(
             CopyModeEntryScroll::Line,
             CopyModeEntryDirection::Down,
         ),
+        NavigateAction::ToggleSyncPanes => {
+            state.toggle_sync_panes();
+            leave_navigate_mode(state);
+        }
         NavigateAction::Zoom => {
             state.toggle_zoom();
             leave_navigate_mode(state);

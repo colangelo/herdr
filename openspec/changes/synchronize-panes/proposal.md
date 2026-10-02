@@ -26,7 +26,7 @@ has no synchronized-input or broadcast mode; the nearest thing is scripting
 - **API and CLI.** `tab.sync` (`herdr tab sync on|off|toggle`) and `pane.sync`
   (`herdr pane sync on|off|toggle`) set the mode and a pane's membership;
   `sync` on tab info and `synced` on pane info (optional fields).
-- **Key.** Action `toggle_sync_panes`, unbound by default, with a help entry.
+- **Key.** Action `toggle_sync_panes`, default `prefix+shift+s`, with a help entry.
 
 ## Capabilities
 
@@ -45,8 +45,8 @@ not bumped: only new methods and optional response fields.
 
 ## Open points for ac (each is one constant or one default)
 
-1. The sync key: default none, or one. Suggested: none, like the pin keys.
-2. Whether the mode survives a restart or a live handoff. Default: **no**. A
-   mode that types into several panes must not come back on its own.
+1. The sync key: `prefix+shift+s` (decided by ac, comment 18977).
+2. Whether the mode survives a restart or a live handoff: **no** (decided by
+   ac). A mode that types into several panes must not come back on its own.
 3. Whether an agent pane that is working is skipped by default. Default: **no**
    (ac said all panes), but see Risks.

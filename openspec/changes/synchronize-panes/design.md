@@ -56,8 +56,8 @@ work. Pane borders are drawn in `ui::panes::render_pane_borders` from
   `PaneInfo.synced: bool`, both optional with `skip_serializing_if`, so no
   `PROTOCOL_VERSION` bump. CLI `herdr tab sync on|off|toggle [tab]` and
   `herdr pane sync on|off|toggle [pane]`.
-- **Keys.** `toggle_sync_panes`, unbound by default, with a `help_entry` in
-  `ui/keybind_help.rs`.
+- **Keys.** `toggle_sync_panes`, default `prefix+shift+s` (ac, issue comment
+  18977), with a `help_entry` in `ui/keybind_help.rs`.
 
 ## Risks
 

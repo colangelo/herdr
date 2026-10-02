@@ -23,7 +23,7 @@ https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/141
 ## 5. API, CLI, key
 
 - [ ] 5.1 `tab.sync`, `pane.sync`, `sync` and `synced` fields, CLI, schema artifact
-- [ ] 5.2 `toggle_sync_panes` action, unbound, help entry; docs, `just check`
+- [ ] 5.2 `toggle_sync_panes` action, default prefix+shift+s, help entry; docs, `just check`
 
 ## 6. Verify
 

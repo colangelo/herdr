@@ -640,6 +640,8 @@ pub struct KeysConfig {
     pub rename_workspace: BindingConfig,
     /// Pin or unpin the selected workspace to the top of the list. Default: unset
     pub toggle_pin_workspace: BindingConfig,
+    /// Type into every pane of the current tab at once. Default: "prefix+shift+s"
+    pub toggle_sync_panes: BindingConfig,
     /// Pin or unpin the focused pane's agent to the top of the agent panel. Default: unset
     pub toggle_pin_agent: BindingConfig,
     /// Close the selected workspace. Default: "prefix+shift+d"
@@ -817,6 +819,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     toggle_pin_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_sync_panes: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     toggle_pin_agent: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     close_workspace: Option<BindingConfig>,
@@ -989,6 +993,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(remove_worktree);
         apply_field!(rename_workspace);
         apply_field!(toggle_pin_workspace);
+        apply_field!(toggle_sync_panes);
         apply_field!(toggle_pin_agent);
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
@@ -1114,6 +1119,7 @@ impl KeysConfig {
         copy_effective_action_field!(remove_worktree, keybinds.remove_worktree);
         copy_effective_action_field!(rename_workspace, keybinds.rename_workspace);
         copy_effective_action_field!(toggle_pin_workspace, keybinds.toggle_pin_workspace);
+        copy_effective_action_field!(toggle_sync_panes, keybinds.toggle_sync_panes);
         copy_effective_action_field!(toggle_pin_agent, keybinds.toggle_pin_agent);
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
@@ -1597,6 +1603,7 @@ impl Default for KeysConfig {
             remove_worktree: BindingConfig::empty(),
             rename_workspace: BindingConfig::one("prefix+shift+w"),
             toggle_pin_workspace: BindingConfig::empty(),
+            toggle_sync_panes: BindingConfig::one("prefix+shift+s"),
             toggle_pin_agent: BindingConfig::empty(),
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
