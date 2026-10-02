@@ -24,6 +24,7 @@ pub(crate) use input::pane_move_target_picker_for_state;
 /// The shared list chords and text editing set, for the overlay kit's search.
 pub(crate) use input::{list_keys, text_keys};
 pub(crate) mod pane_graphics;
+mod pins;
 mod popup;
 mod runtime;
 mod runtime_mutations;
