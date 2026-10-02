@@ -50,6 +50,7 @@ impl AppState {
     /// The panes that also get what is typed into the focused pane of the
     /// workspace on screen. Empty unless its tab syncs and the focused pane
     /// is in the set.
+    #[cfg(test)]
     pub(crate) fn sync_peer_panes(&self, ws_idx: usize) -> Vec<PaneId> {
         let Some(ws) = self.workspaces.get(ws_idx) else {
             return Vec::new();
