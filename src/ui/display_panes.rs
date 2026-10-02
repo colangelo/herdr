@@ -533,17 +533,18 @@ mod tests {
         }
     }
 
-    /// A pane-divider drag keeps showing the pane labels only.
+    /// A pane resize shows the same summary bar as a window resize (fork
+    /// issue 150): the panes, the window size and the version.
     #[test]
-    fn a_pane_drag_shows_no_summary_bar() {
+    fn a_pane_resize_shows_the_full_window_view_summary_bar() {
         let mut app = two_pane_app();
-        app.show_resize_labels(Instant::now());
+        app.show_window_resize_labels(Instant::now());
         layout_sized(&mut app, WIDTH, HEIGHT);
 
         let (row, _) = mode_bar_row(&app, WIDTH, HEIGHT);
-        assert!(!row.contains("PANES"), "{row:?}");
-        assert!(!row.contains("VERSION"), "{row:?}");
-        assert!(!row.contains("window"), "{row:?}");
+        assert!(row.contains("PANES"), "{row:?}");
+        assert!(row.contains(&format!("window {WIDTH}x{HEIGHT}")), "{row:?}");
+        assert!(row.contains("VERSION"), "{row:?}");
     }
 
     /// The window bar is as narrow-safe as the `prefix+i` one: the version

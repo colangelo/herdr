@@ -508,7 +508,8 @@ impl App {
                     } => self.move_tab_via_api(ws_idx, source_tab_idx, insert_idx),
                     MouseAction::SetSplitRatio { path, ratio } => {
                         self.set_split_ratio_via_api(path, ratio);
-                        self.state.show_resize_labels(std::time::Instant::now());
+                        self.state
+                            .show_window_resize_labels(std::time::Instant::now());
                     }
                     MouseAction::RenameModal(action) => {
                         self.apply_rename_mouse_action_via_api(action)

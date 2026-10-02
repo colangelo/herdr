@@ -51,29 +51,26 @@ impl AppState {
             || self.resize_labels_until.is_some()
     }
 
-    /// A pane resize step happened: keep the pane labels for the linger
-    /// time. A window view already showing stays (the window view wins).
-    pub(crate) fn show_resize_labels(&mut self, now: Instant) {
-        self.resize_labels_until = Some(now + self.display_panes_duration);
-    }
-
-    /// The herdr window was resized (fork issue 138): the pane labels plus
-    /// the window summary bar and the sidebar section sizes, for the linger
-    /// time counted from this event.
+    /// The herdr window, a sidebar edge or a pane was resized (fork issues
+    /// 138, 145, 150): the pane labels plus the window summary bar and the
+    /// sidebar section sizes, for the linger time counted from this event.
     pub(crate) fn show_window_resize_labels(&mut self, now: Instant) {
         self.resize_labels_until = Some(now + self.display_panes_duration);
         self.resize_labels_window = true;
     }
 
     /// Whether the labels are the window-resize view: lingering after a window
-    /// resize or a sidebar drag, or while a sidebar edge is held (fork issue
-    /// 145).
+    /// resize, a sidebar drag or a pane resize, or while a sidebar or pane
+    /// edge is held or resize mode is on (fork issues 145, 150). A pane
+    /// resize shows the same full view as `prefix+i`.
     pub(crate) fn resize_labels_window_visible(&self) -> bool {
         (self.resize_labels_window && self.resize_labels_until.is_some())
+            || self.mode == super::state::Mode::Resize
             || matches!(
                 self.drag.as_ref().map(|drag| &drag.target),
                 Some(
-                    super::state::DragTarget::SidebarDivider
+                    super::state::DragTarget::PaneSplit { .. }
+                        | super::state::DragTarget::SidebarDivider
                         | super::state::DragTarget::SidebarSectionDivider
                 )
             )
@@ -260,6 +257,7 @@ mod tests {
             state.drag = Some(split_drag());
 
             assert!(state.resize_labels_visible());
+            assert!(state.resize_labels_window_visible(), "the full view");
             assert_eq!(state.mode, Mode::Terminal, "not a mode: input is untouched");
         }
 
@@ -267,7 +265,7 @@ mod tests {
         fn they_stay_a_second_after_the_last_resize_then_go() {
             let (mut state, _, _) = two_pane_state();
             let now = Instant::now();
-            state.show_resize_labels(now);
+            state.show_window_resize_labels(now);
 
             assert!(state.resize_labels_visible());
             assert_eq!(
@@ -294,7 +292,7 @@ mod tests {
                 state.display_panes_deadline(),
                 Some(now + Duration::from_millis(7000))
             );
-            state.show_resize_labels(now);
+            state.show_window_resize_labels(now);
             assert_eq!(
                 state.resize_labels_deadline(),
                 Some(now + Duration::from_millis(7000))
@@ -320,21 +318,18 @@ mod tests {
         fn a_window_resize_arms_the_window_view_and_a_drag_step_keeps_it() {
             let (mut state, _, _) = two_pane_state();
             let now = Instant::now();
-            state.show_resize_labels(now);
+            state.show_window_resize_labels(now);
             assert!(
-                !state.resize_labels_window_visible(),
-                "a drag is panes only"
+                state.resize_labels_window_visible(),
+                "a pane resize shows the full view (fork issue 150)"
             );
 
-            state.show_window_resize_labels(now);
+            state.show_window_resize_labels(now + Duration::from_secs(1));
             assert!(state.resize_labels_window_visible());
-            state.show_resize_labels(now + Duration::from_secs(1));
-            assert!(state.resize_labels_window_visible(), "the window view wins");
 
             assert!(state
                 .expire_resize_labels(now + Duration::from_secs(1) + state.display_panes_duration));
             assert!(!state.resize_labels_window_visible());
-            state.show_resize_labels(now);
             assert!(
                 !state.resize_labels_window_visible(),
                 "expiry cleared the flag"
@@ -346,6 +341,7 @@ mod tests {
             let (mut state, _, _) = two_pane_state();
             state.mode = Mode::Resize;
             assert!(state.resize_labels_visible());
+            assert!(state.resize_labels_window_visible(), "the full view");
             state.mode = Mode::Terminal;
             assert!(!state.resize_labels_visible());
         }
@@ -353,7 +349,7 @@ mod tests {
         #[test]
         fn another_key_or_click_hides_them_at_once() {
             let (mut state, _, _) = two_pane_state();
-            state.show_resize_labels(Instant::now());
+            state.show_window_resize_labels(Instant::now());
 
             state.hide_resize_labels();
 

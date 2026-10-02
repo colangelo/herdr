@@ -5244,6 +5244,10 @@ mod tests {
             drag_row,
         ));
         assert!(app.state.resize_labels_visible(), "held border");
+        assert!(
+            app.state.resize_labels_window_visible(),
+            "held border: the full prefix+i view (fork issue 150)"
+        );
         app.handle_mouse(mouse(
             MouseEventKind::Drag(MouseButton::Left),
             border.pos.saturating_add(6),
@@ -5257,9 +5261,14 @@ mod tests {
 
         assert!(app.state.drag.is_none());
         assert!(app.state.resize_labels_visible(), "lingers after release");
+        assert!(
+            app.state.resize_labels_window_visible(),
+            "the linger is the full view too"
+        );
         let until = app.state.resize_labels_deadline().expect("linger deadline");
         assert!(app.state.expire_resize_labels(until));
         assert!(!app.state.resize_labels_visible());
+        assert!(!app.state.resize_labels_window_visible());
     }
 
     #[test]
