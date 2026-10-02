@@ -148,6 +148,12 @@ pub(crate) struct AgentManifest {
     _updated_at: Option<String>,
     #[serde(default)]
     aliases: Vec<String>,
+    /// Set on a bundled manifest that carries this fork's own rules (fork
+    /// issue 139): a downloaded manifest for the same agent never shadows it,
+    /// however new its version. Read from the bundled manifest only; a remote
+    /// file that sets it changes nothing.
+    #[serde(default)]
+    fork: bool,
     #[serde(default)]
     rules: Vec<ManifestRule>,
 }
@@ -760,6 +766,13 @@ fn bundled_loaded_manifest(
     })
 }
 
+/// Whether the bundled manifest for `agent` carries fork rules, so no
+/// downloaded one may replace it.
+#[cfg(test)]
+pub(crate) fn bundled_manifest_is_fork_owned(agent: Agent) -> bool {
+    bundled_manifest(agent).is_some_and(|manifest| manifest.fork)
+}
+
 fn bundled_manifest(agent: Agent) -> Option<AgentManifest> {
     let id = agent_label(agent);
     BUNDLED_MANIFESTS
@@ -792,6 +805,18 @@ fn read_remote_manifest(agent: Agent, bundled: &AgentManifest) -> Option<LoadedM
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_else(|| "unknown".to_string());
+            if bundled.fork {
+                return Some(bundled_loaded_manifest(
+                    agent,
+                    bundled.clone(),
+                    Some(format!(
+                        "fork-owned bundled manifest wins: cached remote manifest {} (version {version}) is not used because the bundled one carries fork rules",
+                        path.display()
+                    )),
+                    Some(version),
+                    false,
+                ));
+            }
             if let (Some(remote_version), Some(bundled_version)) =
                 (manifest.version.as_ref(), bundled.version.as_ref())
             {

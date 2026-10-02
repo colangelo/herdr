@@ -3,6 +3,9 @@ version = "2026.09.30.1"
 min_engine_version = 4
 updated_at = "2026-09-30T00:00:00Z"
 aliases = ["claude-code"]
+# This fork's rules (ask_user_question_dialog, blocked_reason, named-session fix)
+# live only here: a downloaded claude manifest never replaces it.
+fork = true
 
 [[rules]]
 id = "osc_title_working"
