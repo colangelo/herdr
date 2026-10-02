@@ -1799,7 +1799,7 @@ impl ContextMenuState {
                 if source_pane_id.is_some() {
                     items.push("Swap with focused pane");
                 }
-                items.extend(["Split right", "Split down", "Zoom"]);
+                items.extend(["Split right", "Split down", "Zoom", "Sync input"]);
                 items.push(if right_click_passthrough {
                     "Use Herdr right-click menu"
                 } else {

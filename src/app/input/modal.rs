@@ -1014,6 +1014,18 @@ pub(super) fn apply_context_menu_action(
         }
         (
             ContextMenuKind::Pane {
+                ws_idx, tab_idx, ..
+            },
+            Some("Sync input"),
+        ) => {
+            state.selected = ws_idx;
+            state.active = Some(ws_idx);
+            state.switch_tab(tab_idx);
+            state.toggle_sync_panes();
+            state.mode = Mode::Terminal;
+        }
+        (
+            ContextMenuKind::Pane {
                 ws_idx,
                 tab_idx,
                 pane_id,
@@ -2060,6 +2072,16 @@ impl App {
             ) => {
                 self.focus_pane_internal_via_api(ws_idx, pane_id);
                 self.zoom_focused_pane_via_api();
+                self.state.mode = Mode::Terminal;
+            }
+            (
+                ContextMenuKind::Pane {
+                    ws_idx, pane_id, ..
+                },
+                Some("Sync input"),
+            ) => {
+                self.focus_pane_internal_via_api(ws_idx, pane_id);
+                self.state.toggle_sync_panes();
                 self.state.mode = Mode::Terminal;
             }
             (

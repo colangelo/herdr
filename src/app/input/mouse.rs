@@ -1567,6 +1567,11 @@ impl AppState {
                         .workspaces
                         .get(ws_idx)
                         .map(|ws| ws.active_tab_index())?;
+                    // Sync mode (fork issue 141): the click picks which panes
+                    // type together instead of opening the menu.
+                    if self.toggle_pane_sync(ws_idx, info.id).is_some() {
+                        return None;
+                    }
                     let previous_focused_pane_id = self
                         .workspaces
                         .get(ws_idx)
@@ -3183,6 +3188,46 @@ mod tests {
         ));
         app.apply_context_menu_action_via_api(menu, 0);
         assert!(app.state.terminals[&terminal_id].pin_order.is_some());
+    }
+
+    // Fork issue 141: while the tab syncs, a right click on a pane takes it
+    // out of the set (and back in); with sync off it opens the pane menu.
+    #[test]
+    fn right_click_on_a_pane_toggles_its_sync_membership_while_the_tab_syncs() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("one")];
+        let right = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 120, 30));
+        let info = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == right)
+            .cloned()
+            .unwrap();
+        let click = |app: &mut crate::app::App| {
+            app.handle_mouse(mouse(
+                MouseEventKind::Down(MouseButton::Right),
+                info.inner_rect.x + 2,
+                info.inner_rect.y + 2,
+            ));
+        };
+
+        // Sync off: the pane menu opens as before.
+        click(&mut app);
+        assert!(app.state.take_context_menu().is_some());
+        app.state.mode = Mode::Terminal;
+
+        app.state.toggle_sync_panes();
+        click(&mut app);
+        assert!(app.state.context_menu().is_none());
+        assert!(!app.state.workspaces[0].tabs[0].pane_synced(right));
+        click(&mut app);
+        assert!(app.state.workspaces[0].tabs[0].pane_synced(right));
     }
 
     #[test]
