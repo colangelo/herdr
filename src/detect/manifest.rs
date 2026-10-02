@@ -1509,6 +1509,11 @@ fn prompt_box_body(content: &str) -> Option<&str> {
     Some(&content[start.min(content.len())..end.min(content.len())])
 }
 
+/// The grey Claude Code draws a command's argument hint in (`/compact
+/// <optional custom summarization instructions>`): a fixed true-colour
+/// foreground, not SGR 2 (measured on a real pane, fork issue 146).
+const CLAUDE_HINT_FG: [u8; 3] = [153, 153, 153];
+
 /// What is typed in a Claude Code input box (fork issue 146), from the
 /// detection buffer with its styling: the faint runs (the grey reply
 /// suggestion, the `/compact` argument hint) are not text, `[Pasted text #N]`
@@ -1518,7 +1523,10 @@ fn prompt_box_body(content: &str) -> Option<&str> {
 /// multi-line. `None` when the screen has no prompt box; `Some("")` for an
 /// empty one.
 pub(crate) fn claude_input_box_text(detection_ansi: &str) -> Option<String> {
-    let text = crate::api::dim::drop_dim_runs(detection_ansi, false);
+    // The styled snapshot ends its rows with CRLF; the region helpers count one
+    // byte per line break, so work on LF text.
+    let text = crate::api::dim::drop_runs(detection_ansi, false, Some(CLAUDE_HINT_FG))
+        .replace("\r\n", "\n");
     let body = prompt_box_body(&text)?;
     let lines: Vec<&str> = body.lines().collect();
     let mut draft = Vec::with_capacity(lines.len());

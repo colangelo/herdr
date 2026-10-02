@@ -1450,6 +1450,21 @@ mod input_box {
         assert_eq!(claude_input_box_text(&hint).as_deref(), Some(""));
     }
 
+    /// The `/compact` hint as a real pane draws it: NBSP after the marker, the
+    /// command in its own colour, the hint in the fixed grey (not faint).
+    #[test]
+    fn the_compact_argument_hint_in_its_grey_is_dropped() {
+        let real = screen(&[
+            "❯\u{a0}\x1b[0m\x1b[38;2;177;185;249m/compact\x1b[0m  \x1b[0m\x1b[38;2;153;153;153m<optional custom summarization instructions>\x1b[0m",
+        ]);
+        assert_eq!(claude_input_box_text(&real).as_deref(), Some("/compact"));
+        let typed = screen(&["❯\u{a0}\x1b[0m\x1b[38;2;177;185;249m/compact\x1b[0m keep the plan"]);
+        assert_eq!(
+            claude_input_box_text(&typed).as_deref(),
+            Some("/compact keep the plan")
+        );
+    }
+
     #[test]
     fn a_multi_line_draft_stays_multi_line() {
         assert_eq!(
@@ -1457,6 +1472,23 @@ mod input_box {
                 .as_deref(),
             Some("first line\nsecond line\n  indented")
         );
+    }
+
+    /// The real styled snapshot ends rows with CRLF and has wide characters
+    /// above the box: neither may move the region or panic.
+    #[test]
+    fn crlf_rows_and_wide_characters_read_the_same() {
+        let lf = screen(&["❯ fix the build"]);
+        let crlf = format!("三四 output ✻\r\n{}", lf.replace('\n', "\r\n"));
+        assert_eq!(
+            claude_input_box_text(&crlf).as_deref(),
+            Some("fix the build")
+        );
+        let suggestion = format!(
+            "三\r\n{}",
+            screen(&["❯ \x1b[2mA/B as is\x1b[0m"]).replace('\n', "\r\n")
+        );
+        assert_eq!(claude_input_box_text(&suggestion).as_deref(), Some(""));
     }
 
     #[test]
