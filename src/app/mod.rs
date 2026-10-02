@@ -2204,7 +2204,10 @@ impl App {
                                         ws_idx,
                                         focused,
                                     ) {
-                                        let _ = runtime.try_send_paste(text);
+                                        let _ = runtime.try_send_paste(text.clone());
+                                    }
+                                    for peer in self.sync_peer_runtimes_of_pane(ws_idx, focused) {
+                                        let _ = peer.try_send_paste(text.clone());
                                     }
                                 }
                             }

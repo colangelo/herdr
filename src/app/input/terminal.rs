@@ -53,10 +53,17 @@ impl App {
             }
         }
 
-        let input = self.prepare_terminal_key_forward(source_id, key)?;
+        let input = self.prepare_terminal_key_forward(source_id, key.clone())?;
         let sent = self
             .lookup_runtime_sender(input.ws_idx, input.pane_id)
             .is_some_and(|runtime| runtime.try_send_bytes(input.bytes).is_ok());
+        for peer in self.sync_peer_runtimes_of_pane(input.ws_idx, input.pane_id) {
+            peer.scroll_reset();
+            let bytes = peer.encode_terminal_key(key.clone());
+            if !bytes.is_empty() {
+                let _ = peer.try_send_bytes(Bytes::from(bytes));
+            }
+        }
         sent.then_some(input.target)
     }
 
@@ -318,7 +325,14 @@ impl App {
             return false;
         };
         let bytes = runtime.encode_terminal_key(key.clone());
-        bytes.is_empty() || runtime.try_send_bytes(Bytes::from(bytes)).is_ok()
+        let sent = bytes.is_empty() || runtime.try_send_bytes(Bytes::from(bytes)).is_ok();
+        for peer in self.sync_peer_runtimes_of_terminal(target) {
+            let bytes = peer.encode_terminal_key(key.clone());
+            if !bytes.is_empty() {
+                let _ = peer.try_send_bytes(Bytes::from(bytes));
+            }
+        }
+        sent
     }
 
     pub(crate) async fn forward_terminal_key_to_target(
@@ -330,7 +344,60 @@ impl App {
             return false;
         };
         let bytes = runtime.encode_terminal_key(key.clone());
-        bytes.is_empty() || runtime.send_bytes(Bytes::from(bytes)).await.is_ok()
+        let sent = bytes.is_empty() || runtime.send_bytes(Bytes::from(bytes)).await.is_ok();
+        for peer in self.sync_peer_runtimes_of_terminal(target) {
+            let bytes = peer.encode_terminal_key(key.clone());
+            if !bytes.is_empty() {
+                let _ = peer.send_bytes(Bytes::from(bytes)).await;
+            }
+        }
+        sent
+    }
+
+    /// The runtimes that also get what is typed into `pane_id` of the
+    /// workspace on screen (fork issue 141): the rest of its tab's synced set.
+    /// Empty when the tab does not sync or the pane was taken out.
+    pub(crate) fn sync_peer_runtimes_of_pane(
+        &self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> Vec<&crate::terminal::TerminalRuntime> {
+        let Some(tab) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.tabs.iter().find(|tab| tab.panes.contains_key(&pane_id)))
+        else {
+            return Vec::new();
+        };
+        tab.sync_peers(pane_id)
+            .into_iter()
+            .filter_map(|peer| {
+                self.state
+                    .runtime_for_pane_in_workspace(&self.terminal_runtimes, ws_idx, peer)
+            })
+            .collect()
+    }
+
+    /// [`Self::sync_peer_runtimes_of_pane`] for the pane that hosts a terminal.
+    fn sync_peer_runtimes_of_terminal(
+        &self,
+        target: &TerminalInputTarget,
+    ) -> Vec<&crate::terminal::TerminalRuntime> {
+        let Some(ws_idx) = self.state.active else {
+            return Vec::new();
+        };
+        let Some(pane_id) = self.state.workspaces.get(ws_idx).and_then(|ws| {
+            ws.tabs.iter().find_map(|tab| {
+                tab.panes
+                    .iter()
+                    .find(|(_, pane)| pane.attached_terminal_id == target.terminal_id)
+                    .map(|(id, _)| *id)
+            })
+        }) else {
+            return Vec::new();
+        };
+        self.sync_peer_runtimes_of_pane(ws_idx, pane_id)
     }
 
     fn take_pressed_keys_for_source(
@@ -389,12 +456,20 @@ impl App {
             }
         }
 
-        let input = self.prepare_terminal_key_forward(crate::app::LOCAL_INPUT_SOURCE, key)?;
+        let input =
+            self.prepare_terminal_key_forward(crate::app::LOCAL_INPUT_SOURCE, key.clone())?;
         let sent = if let Some(runtime) = self.lookup_runtime_sender(input.ws_idx, input.pane_id) {
             runtime.send_bytes(input.bytes).await.is_ok()
         } else {
             false
         };
+        for peer in self.sync_peer_runtimes_of_pane(input.ws_idx, input.pane_id) {
+            peer.scroll_reset();
+            let bytes = peer.encode_terminal_key(key.clone());
+            if !bytes.is_empty() {
+                let _ = peer.send_bytes(Bytes::from(bytes)).await;
+            }
+        }
         sent.then_some(input.target)
     }
 }
@@ -2179,5 +2254,144 @@ mod tests {
             pane_scroll_offset(&app, pane_id),
             info.inner_rect.height as usize
         );
+    }
+
+    // Fork issue 141: sync mode fans typed input out to the synced panes.
+    mod sync_fanout {
+        use super::*;
+        use ratatui::layout::Direction;
+
+        /// Three panes in one tab, each with a capturing runtime; `a` focused.
+        fn synced_app() -> (
+            App,
+            [crate::layout::PaneId; 3],
+            Vec<tokio::sync::mpsc::Receiver<Bytes>>,
+        ) {
+            let mut app = app_for_mouse_test();
+            let mut ws = Workspace::test_new("one");
+            let a = ws.tabs[0].root_pane;
+            let b = ws.test_split(Direction::Horizontal);
+            let c = ws.test_split(Direction::Vertical);
+            ws.tabs[0].layout.focus_pane(a);
+            app.state.workspaces = vec![ws];
+            app.state.active = Some(0);
+            app.state.selected = 0;
+            app.state.mode = Mode::Terminal;
+            app.state.ensure_test_terminals();
+            let mut receivers = Vec::new();
+            for pane in [a, b, c] {
+                let (runtime, rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+                app.state.insert_test_runtime(pane, runtime);
+                receivers.push(rx);
+            }
+            (app, [a, b, c], receivers)
+        }
+
+        fn drain(rx: &mut tokio::sync::mpsc::Receiver<Bytes>) -> Vec<u8> {
+            let mut out = Vec::new();
+            while let Ok(bytes) = rx.try_recv() {
+                out.extend_from_slice(&bytes);
+            }
+            out
+        }
+
+        fn key(ch: char) -> TerminalKey {
+            TerminalKey::new(KeyCode::Char(ch), KeyModifiers::NONE)
+        }
+
+        #[tokio::test]
+        async fn a_typed_key_reaches_every_synced_pane() {
+            let (mut app, _, mut rx) = synced_app();
+            app.handle_terminal_key(key('x')).await;
+            assert_eq!(drain(&mut rx[0]), b"x", "unsynced: focused pane only");
+            assert!(drain(&mut rx[1]).is_empty() && drain(&mut rx[2]).is_empty());
+
+            app.state.toggle_sync_panes();
+            app.handle_terminal_key(key('l')).await;
+            app.handle_terminal_key(key('s')).await;
+            for pane in &mut rx {
+                assert_eq!(drain(pane), b"ls", "every pane of the tab got the keys");
+            }
+        }
+
+        #[tokio::test]
+        async fn an_excluded_pane_gets_nothing_and_an_excluded_focused_pane_types_alone() {
+            let (mut app, [a, b, _], mut rx) = synced_app();
+            app.state.toggle_sync_panes();
+            app.state.toggle_pane_sync(0, b);
+            app.handle_terminal_key(key('x')).await;
+            assert_eq!(drain(&mut rx[0]), b"x");
+            assert!(
+                drain(&mut rx[1]).is_empty(),
+                "the excluded pane gets nothing"
+            );
+            assert_eq!(drain(&mut rx[2]), b"x");
+
+            app.state.toggle_pane_sync(0, a);
+            app.handle_terminal_key(key('y')).await;
+            assert_eq!(
+                drain(&mut rx[0]),
+                b"y",
+                "the excluded focused pane is typed into"
+            );
+            assert!(drain(&mut rx[1]).is_empty() && drain(&mut rx[2]).is_empty());
+        }
+
+        #[tokio::test]
+        async fn text_commit_and_paste_fan_out_too() {
+            let (mut app, _, mut rx) = synced_app();
+            app.state.toggle_sync_panes();
+            app.handle_text_commit("é".into()).await;
+            for pane in &mut rx {
+                assert_eq!(drain(pane), "é".as_bytes());
+            }
+            app.handle_paste("pasted".into()).await;
+            for pane in &mut rx {
+                assert!(
+                    String::from_utf8_lossy(&drain(pane)).contains("pasted"),
+                    "paste reaches every synced pane"
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn the_headless_paths_fan_out_too() {
+            let (mut app, _, mut rx) = synced_app();
+            app.state.toggle_sync_panes();
+            app.handle_terminal_key_headless(key('h'));
+            app.handle_text_commit_headless("i");
+            for pane in &mut rx {
+                assert_eq!(drain(pane), b"hi");
+            }
+        }
+
+        #[tokio::test]
+        async fn herdr_keys_are_not_sent_to_any_pane() {
+            let (mut app, _, mut rx) = synced_app();
+            app.state.toggle_sync_panes();
+            let prefix = TerminalKey::new(app.state.prefix_code, app.state.prefix_mods);
+            app.handle_terminal_key(prefix).await;
+            assert_eq!(app.state.mode, Mode::Prefix);
+            for pane in &mut rx {
+                assert!(drain(pane).is_empty(), "the prefix chord stays in herdr");
+            }
+        }
+
+        #[tokio::test]
+        async fn another_tab_is_untouched() {
+            let (mut app, _, mut rx) = synced_app();
+            app.state.toggle_sync_panes();
+            app.state.workspaces[0].test_add_tab(Some("two"));
+            app.state.ensure_test_terminals();
+            let tab_pane = app.state.workspaces[0].tabs[1].root_pane;
+            let (runtime, mut tab_rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+            app.state.insert_test_runtime(tab_pane, runtime);
+            app.state.workspaces[0].switch_tab(1);
+            app.handle_terminal_key(key('z')).await;
+            assert_eq!(drain(&mut tab_rx), b"z");
+            for pane in &mut rx {
+                assert!(drain(pane).is_empty(), "tab 1's panes did not hear tab 2");
+            }
+        }
     }
 }

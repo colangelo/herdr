@@ -169,6 +169,11 @@ impl App {
             {
                 let _ = runtime.try_send_bytes(Bytes::copy_from_slice(text.as_bytes()));
             }
+            if let Some(focused) = self.focused_pane_of(ws_idx) {
+                for peer in self.sync_peer_runtimes_of_pane(ws_idx, focused) {
+                    let _ = peer.try_send_bytes(Bytes::copy_from_slice(text.as_bytes()));
+                }
+            }
         }
     }
 
@@ -197,7 +202,12 @@ impl App {
                 .state
                 .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
             {
-                let _ = runtime.send_bytes(Bytes::from(text)).await;
+                let _ = runtime.send_bytes(Bytes::from(text.clone())).await;
+            }
+            if let Some(focused) = self.focused_pane_of(ws_idx) {
+                for peer in self.sync_peer_runtimes_of_pane(ws_idx, focused) {
+                    let _ = peer.send_bytes(Bytes::from(text.clone())).await;
+                }
             }
         }
     }
@@ -221,9 +231,18 @@ impl App {
                 .state
                 .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
             {
-                let _ = rt.send_paste(text).await;
+                let _ = rt.send_paste(text.clone()).await;
+            }
+            if let Some(focused) = self.focused_pane_of(ws_idx) {
+                for peer in self.sync_peer_runtimes_of_pane(ws_idx, focused) {
+                    let _ = peer.send_paste(text.clone()).await;
+                }
             }
         }
+    }
+
+    fn focused_pane_of(&self, ws_idx: usize) -> Option<crate::layout::PaneId> {
+        self.state.workspaces.get(ws_idx)?.focused_pane_id()
     }
 
     pub(crate) fn paste_into_active_text_input(&mut self, text: &str) -> bool {
