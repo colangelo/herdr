@@ -1,11 +1,13 @@
-# herdr — colangelo fork
+# Herdr Max
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
 </p>
 
+<p align="center"><b>A maximalist version of Herdr.</b></p>
+
 <p align="center">
-  <a href="#install">install</a> · <a href="#what-this-fork-adds">what this fork adds</a> · <a href="#release-channels">channels</a> · <a href="./CHANGELOG.md">changelog</a> · <a href="https://herdr.dev/docs/">upstream docs</a>
+  <a href="#install">install</a> · <a href="#what-herdr-max-adds">what Herdr Max adds</a> · <a href="#release-channels">channels</a> · <a href="./CHANGELOG.md">changelog</a> · <a href="https://herdr.dev/docs/">upstream docs</a>
 </p>
 
 <p align="center">
@@ -17,11 +19,48 @@
 
 ---
 
+I love Herdr. I live in Herdr the whole day. I'm deeply thankful to the maintainer, to the whole team, and to everyone who has contributed to it — but I need my own version. In the deep OSS spirit, I hope Herdr Max gets forked in turn, as I've been so lucky to be able to do with theirs.
+
+— Alfredo Colangelo
+
+---
+
 **agent multiplexer that lives in your terminal** — every agent at a glance (blocked, working, done), real terminal views, detach and reattach from anywhere, a pure socket api agents can drive themselves, keyboard and mouse both first-class, one rust binary.
 
-This is a **hard-tracking fork** of [herdrdev/herdr](https://github.com/herdrdev/herdr). It rebases onto upstream `master` regularly and carries ~190 commits of extra work on top: per-pane todos, a notification center, a heavily configurable sidebar, layout and pane-styling controls, copy-mode ergonomics, and its own release, update, and Homebrew pipeline. Everything upstream ships is here; the list below is what upstream does *not* have.
+Herdr Max is built on [herdrdev/herdr](https://github.com/herdrdev/herdr) and keeps tracking it: it rebases onto upstream `master` regularly, so everything upstream ships is here too, and its own work stays shaped so it can go back upstream. On top it carries a lot of extra work — per-pane todos, a notification center, pinned and live-sorted sidebars, agent restore that brings every session back as it was, a richer socket API for agents driving agents, layout and pane-styling controls, and its own release, update, and Homebrew pipeline. The list below is what upstream does *not* have, and it grows with every batch.
 
-## what this fork adds
+## what Herdr Max adds
+
+### pins
+
+- **Pin a space or an agent** to the top of its list. Pinned rows sit in the order you pinned them, under every sort, and never move for state changes; the rest sort below.
+- **Mouse first** — `Pin` / `Unpin` is the first item of the right-click menu on a space and on an agent row; a click on the `↑` unpins.
+- **Bubble motion** — a row you pin climbs into the pinned block one rung at a time, and slides back down when unpinned.
+- **Graded marker** — the `↑` is light green on the top pin and a touch darker on every pin below it.
+- Saved with the session, kept across restarts and live handoffs. `herdr workspace pin|unpin`, `herdr agent pin|unpin`, `toggle_pin_workspace` / `toggle_pin_agent` keys.
+
+### agents: restore, detection, and the API
+
+- **Restore that brings sessions back as they were** — a pane comes back as the same agent, the same session, and the same launch flags: Claude's model, effort, permission mode and session name (the live footer wins over an older record), Codex threads on a shared app-server daemon, and a hand-started agent keeps its herdr name.
+- **Agents report their own resume command** through the Claude integration hooks, kept current on every prompt and stop.
+- **Blocked means blocked** — a Claude question dialog reads as `blocked`, with *why* and *since when* in the agent info.
+- **What's really typed** — `agent get` reports `input_box.text`, the draft in a Claude Code prompt box with the grey suggestion and argument hints left out; `pane read --strip-dim` drops faint text from any read.
+- **Fork-owned detection rules** — a bundled agent manifest that carries Herdr Max's own rules is never replaced by a downloaded upstream one.
+- **Agents driving agents** — `pane send-text --chunk` for long text, closes and respawns from outside the TUI that answer instead of opening a modal, `--force` on close, each pane's last input time, and a look behind pty wrappers in `pane process-info`.
+
+### seeing the layout
+
+- **`prefix+i` shows everything** — every pane's number, address, name and size, the sidebar sections' sizes, the window size and the server's version, in red.
+- **The same view pops up while you resize** — the herdr window, a pane split, or the sidebar edges — and stays for `ui.display_panes_ms`.
+
+### config that forgives
+
+- **One bad value no longer costs you the config** — an unknown value drops only that key to its default, with a warning and its line; the rest applies.
+- **Unbound-key warning** — your bindings leaving an action with no key is reported, not silent.
+
+### todo board
+
+- A board for every pane's todos, searchable, built on the shared overlay kit, with the selected todo's full text in its own box under the title, above the search, and headers in the help pane's colours.
 
 ### pane todos
 
@@ -129,8 +168,8 @@ If you are an AI agent working on this repository, read [`AGENTS.md`](./AGENTS.m
 
 ## upstream
 
-Herdr is built full-time and in the open by [@ogulcancelik](https://github.com/ogulcancelik). If this fork is useful to you, the upstream project is the thing worth supporting: [**→ sponsor herdr**](https://github.com/sponsors/ogulcancelik) · [SPONSORS.md](./SPONSORS.md).
+Herdr is built full-time and in the open by [@ogulcancelik](https://github.com/ogulcancelik). If Herdr Max is useful to you, the upstream project is the thing worth supporting: [**→ sponsor herdr**](https://github.com/sponsors/ogulcancelik) · [SPONSORS.md](./SPONSORS.md).
 
 ## license
 
-Herdr is licensed under the [Apache License 2.0](LICENSE). Fork changes are released under the same license.
+Herdr is licensed under the [Apache License 2.0](LICENSE). Herdr Max's changes are released under the same license.
