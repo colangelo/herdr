@@ -275,18 +275,8 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
     }
 }
 
-/// Drawn before the name of a pinned space. One cell, no emoji.
+/// Drawn in the one-cell lead of a pinned row's name line. One cell, no emoji.
 pub(crate) const PIN_MARKER: &str = "↑";
-
-/// The name a row shows: the label, led by [`PIN_MARKER`] when the space is
-/// pinned. Row height and drawing both go through it so they wrap alike.
-fn pin_marked_label(ws: &crate::workspace::Workspace, label: String) -> String {
-    if ws.pin_order.is_some() {
-        format!("{PIN_MARKER} {label}")
-    } else {
-        label
-    }
-}
 
 fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {
     // The stored-cwd name, not the live one the row draws: sidebar geometry
@@ -302,7 +292,6 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
     } else {
         ws.display_name_from_terminals(&app.terminals)
     };
-    let label = pin_marked_label(ws, label);
     let token_values = ws.metadata_tokens.values();
     tokens::space_rows(
         &app.sidebar_spaces,
@@ -1815,7 +1804,6 @@ fn render_workspace_list(
         } else {
             label
         };
-        let display_label = pin_marked_label(ws, display_label);
         let parent_group = (!card.indented)
             .then(|| workspace_parent_group_state(app, i))
             .flatten();
@@ -1886,16 +1874,27 @@ fn render_workspace_list(
                 spans.push(Span::raw(" "));
             }
             if row_index == 0 {
+                // The pin marker takes the last cell of the lead, so pinning
+                // moves no text and changes no row height.
+                let lead_mark = |pinned: bool| {
+                    if pinned {
+                        Span::styled(PIN_MARKER, Style::default().fg(p.accent))
+                    } else {
+                        Span::raw(" ")
+                    }
+                };
+                let pinned = ws.pin_order.is_some();
                 if card.indented {
-                    spans.push(Span::raw("   "));
+                    spans.push(Span::raw("  "));
+                    spans.push(lead_mark(pinned));
                 } else if let Some((_, collapsed)) = parent_group.as_ref() {
                     spans.push(Span::styled(
                         if *collapsed { "▸" } else { "▾" },
                         Style::default().fg(p.accent),
                     ));
-                    spans.push(Span::raw(" "));
+                    spans.push(lead_mark(pinned));
                 } else {
-                    spans.push(Span::raw(" "));
+                    spans.push(lead_mark(pinned));
                 }
             } else if !editorial && row_index == 1 && has_second_row && jump_number.is_some() {
                 // Jump number in the dot column of the second row (under the dot).
@@ -4481,7 +4480,12 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .collect();
         // beta is pinned, so it is the first card.
         assert_eq!(app.view.workspace_card_areas[0].ws_idx, 1);
-        assert!(rows[0].contains("↑ beta"), "pinned row: {:?}", rows[0]);
+        assert!(
+            rows[0].contains("↑") && rows[0].contains("beta"),
+            "pinned row: {:?}",
+            rows[0]
+        );
+        assert_eq!(rows[0].chars().next(), Some('↑'), "marker is in the lead");
         assert!(!rows[1].contains(PIN_MARKER), "unpinned row: {:?}", rows[1]);
     }
 
