@@ -582,6 +582,10 @@ pub fn render_with_runtime_registry(
         display_panes::render_window_resize_summary(app, frame, mode_bar_area);
     }
 
+    if app.mode == Mode::Terminal {
+        render_sync_chip(app, frame, mode_bar_area);
+    }
+
     match app.mode {
         Mode::Onboarding => render_onboarding_overlay(app, frame, frame.area()),
         Mode::ReleaseNotes => render_release_notes_overlay(app, frame, frame.area()),
@@ -622,6 +626,33 @@ pub fn render_with_runtime_registry(
         Mode::DisplayPanes => display_panes::render_display_panes(app, frame, mode_bar_area),
         Mode::Terminal => {}
     }
+}
+
+/// ` SYNC 3 panes ` at the bottom-left while the tab on screen syncs input
+/// (fork issue 141). The window-resize view owns the bar, so it hides the chip.
+fn render_sync_chip(app: &AppState, frame: &mut Frame, area: Rect) {
+    if app.resize_labels_window_visible() || area.width == 0 || area.height == 0 {
+        return;
+    }
+    let Some(tab) = app
+        .active
+        .and_then(|idx| app.workspaces.get(idx))
+        .and_then(|ws| ws.active_tab())
+        .filter(|tab| tab.is_syncing())
+    else {
+        return;
+    };
+    let count = tab.synced_panes().len();
+    let noun = if count == 1 { "pane" } else { "panes" };
+    let text = format!(" SYNC {count} {noun} ");
+    let style = Style::default()
+        .fg(app.palette.panel_bg)
+        .bg(app.palette.yellow)
+        .add_modifier(Modifier::BOLD);
+    let y = area.y + area.height - 1;
+    frame
+        .buffer_mut()
+        .set_stringn(area.x, y, &text, usize::from(area.width), style);
 }
 
 fn render_navigation_chrome(
@@ -1238,6 +1269,55 @@ mod tests {
         app.mode = Mode::Terminal;
         compute_view(&mut app, Rect::new(0, 0, 120, 30));
         (app, right)
+    }
+
+    fn border_fgs(
+        buffer: &ratatui::buffer::Buffer,
+        rect: Rect,
+    ) -> std::collections::HashSet<Option<ratatui::style::Color>> {
+        (rect.y..rect.y + rect.height)
+            .flat_map(|y| (rect.x..rect.x + rect.width).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                matches!(
+                    buffer[(*x, *y)].symbol(),
+                    "│" | "─" | "┌" | "┐" | "└" | "┘" | "├" | "┤" | "┬" | "┴" | "┼"
+                )
+            })
+            .map(|(x, y)| buffer[(x, y)].style().fg)
+            .collect()
+    }
+
+    // Fork issue 141: a syncing tab draws yellow borders and a SYNC chip.
+    #[test]
+    fn a_syncing_tab_draws_yellow_borders_and_a_sync_chip() {
+        let (mut app, right) = two_pane_app();
+        let draw = |app: &crate::app::state::AppState| {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            terminal.backend().buffer().clone()
+        };
+        let area = Rect::new(0, 0, 120, 30);
+        let yellow = Some(app.palette.yellow);
+
+        let off = draw(&app);
+        assert!(find_text(&off, "SYNC").is_none());
+        assert!(!border_fgs(&off, area).contains(&yellow));
+
+        app.toggle_sync_panes();
+        compute_view(&mut app, area);
+        let on = draw(&app);
+        assert!(find_text(&on, "SYNC 2 panes").is_some());
+        assert!(border_fgs(&on, area).contains(&yellow));
+
+        // An excluded pane keeps its normal border: some border cells are
+        // no longer yellow, and the chip counts one pane.
+        app.toggle_pane_sync(0, right);
+        compute_view(&mut app, area);
+        let one = draw(&app);
+        assert!(find_text(&one, "SYNC 1 pane ").is_some());
+        let fgs = border_fgs(&one, area);
+        assert!(fgs.contains(&yellow));
+        assert!(fgs.len() > 1, "the excluded pane's border is not yellow");
     }
 
     // Fork issue 129: feedback about a pane drawn in that pane.

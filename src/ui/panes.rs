@@ -514,6 +514,9 @@ fn render_pane_borders(
     }
     add_split_border_cells(app.pane_gaps, split_borders, &mut cells);
 
+    let sync_tab = ws
+        .active_tab()
+        .filter(|tab| tab.is_syncing() && app.display_panes().is_none());
     let buf = frame.buffer_mut();
     let area = buf.area;
     for ((x, y), line) in cells {
@@ -536,9 +539,21 @@ fn render_pane_borders(
         if symbol.is_empty() {
             continue;
         }
+        // Sync mode (fork issue 141): a line any synced pane touches is
+        // yellow. The labels view stays red over it.
+        let synced = sync_tab.is_some_and(|tab| {
+            pane_infos.iter().any(|info| {
+                tab.pane_synced(info.id) && line_touches_pane(x, y, info, app.pane_gaps)
+            })
+        });
+        let color = if synced {
+            app.palette.yellow
+        } else {
+            app.pane_border_color(focused)
+        };
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
-        cell.set_style(Style::default().fg(app.pane_border_color(focused)));
+        cell.set_style(Style::default().fg(color));
     }
 
     render_pane_border_titles(app, ws, pane_infos, frame);
