@@ -431,16 +431,18 @@ fn apply_workspace_motion(app: &AppState, units: Vec<WorkspaceUnit>) -> Vec<Work
     if !workspace_motion_active(app) {
         return units;
     }
-    let target: Vec<String> = units.iter().map(|unit| unit.key.clone()).collect();
+    // Pinned units stay put; only the rows below them bubble.
+    let pinned = units.iter().take_while(|u| u.pin_order.is_some()).count();
+    let mut units = units;
+    let rest = units.split_off(pinned);
+    let target: Vec<String> = rest.iter().map(|unit| unit.key.clone()).collect();
     let order = app.workspace_list_motion.project(&target);
-    let mut by_key: std::collections::HashMap<String, WorkspaceUnit> = units
+    let mut by_key: std::collections::HashMap<String, WorkspaceUnit> = rest
         .into_iter()
         .map(|unit| (unit.key.clone(), unit))
         .collect();
-    order
-        .into_iter()
-        .filter_map(|key| by_key.remove(&key))
-        .collect()
+    units.extend(order.into_iter().filter_map(|key| by_key.remove(&key)));
+    units
 }
 
 pub(crate) fn workspace_motion_active(app: &AppState) -> bool {
@@ -452,6 +454,7 @@ pub(crate) fn workspace_motion_active(app: &AppState) -> bool {
 pub(crate) fn workspace_unit_target_keys(app: &AppState) -> Vec<String> {
     workspace_sorted_units(app, false)
         .into_iter()
+        .filter(|unit| unit.pin_order.is_none())
         .map(|unit| unit.key)
         .collect()
 }
@@ -464,6 +467,9 @@ struct WorkspaceUnit {
     key: String,
     priority: u8,
     last_change_seq: Option<u64>,
+    /// Pin order of the unit: a workspace's own, or the smallest across a
+    /// worktree group's members. `Some` units sit above every other unit.
+    pin_order: Option<u64>,
     entries: Vec<WorkspaceListEntry>,
 }
 
@@ -527,6 +533,7 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
                 key: format!("ws:{}", ws.id),
                 priority,
                 last_change_seq,
+                pin_order: ws.pin_order,
                 entries: vec![WorkspaceListEntry::Workspace {
                     ws_idx,
                     indented: false,
@@ -553,6 +560,7 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
                 key: format!("ws:{}", ws.id),
                 priority,
                 last_change_seq,
+                pin_order: ws.pin_order,
                 entries: vec![WorkspaceListEntry::Workspace {
                     ws_idx,
                     indented: false,
@@ -602,6 +610,10 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
             key: format!("space:{}", space.key),
             priority,
             last_change_seq,
+            pin_order: members
+                .iter()
+                .filter_map(|idx| app.workspaces.get(*idx).and_then(|ws| ws.pin_order))
+                .min(),
             entries,
         });
     }
@@ -616,6 +628,12 @@ fn workspace_sorted_units(app: &AppState, force_expanded: bool) -> Vec<Workspace
             )
         });
     }
+
+    // Pinned units go first in pin order, under every sort. Unpinned units
+    // keep the order the sort gave them.
+    units.sort_by_key(|unit| unit.pin_order.is_none());
+    let pinned = units.iter().take_while(|u| u.pin_order.is_some()).count();
+    units[..pinned].sort_by_key(|unit| unit.pin_order);
 
     units
 }
@@ -2663,6 +2681,46 @@ mod tests {
             .map(|ws_idx| format!("ws:{}", app.workspaces[*ws_idx].id))
             .collect();
         assert_eq!(workspace_unit_target_keys(&app), expected_keys);
+    }
+
+    #[test]
+    fn pinned_spaces_lead_in_pin_order_under_manual_and_priority() {
+        let mut app = mixed_state_workspaces();
+        app.sort_motion_bubble = false;
+        app.workspace_sort = WorkspaceSort::Manual;
+        assert_eq!(workspace_order(&app), vec![0, 1, 2, 3, 4]);
+
+        app.pin_workspace(3);
+        app.pin_workspace(1);
+        assert_eq!(workspace_order(&app), vec![3, 1, 0, 2, 4]);
+
+        app.workspace_sort = WorkspaceSort::Priority;
+        // Priority order alone is 3, 4, 1, 0, 2; pins pull 3 then 1 first.
+        assert_eq!(workspace_order(&app), vec![3, 1, 4, 0, 2]);
+
+        app.unpin_workspace(3);
+        assert_eq!(workspace_order(&app), vec![1, 3, 4, 0, 2]);
+        app.unpin_workspace(1);
+        assert_eq!(workspace_order(&app), vec![3, 4, 1, 0, 2]);
+    }
+
+    #[test]
+    fn pinned_spaces_are_left_out_of_the_motion_target() {
+        let mut app = mixed_state_workspaces();
+        app.workspace_sort = WorkspaceSort::Priority;
+        app.pin_workspace(0);
+        let keys = workspace_unit_target_keys(&app);
+        assert_eq!(keys.len(), 4);
+        assert!(!keys.contains(&format!("ws:{}", app.workspaces[0].id)));
+    }
+
+    #[test]
+    fn pinned_spaces_hold_still_while_the_rest_bubbles() {
+        let mut app = mixed_state_workspaces();
+        app.workspace_sort = WorkspaceSort::Priority;
+        app.sort_motion_bubble = true;
+        app.pin_workspace(0);
+        assert_eq!(workspace_order(&app), vec![0, 3, 4, 1, 2]);
     }
 
     #[test]
