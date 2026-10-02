@@ -47,7 +47,7 @@ git status --short                # unrelated WIP from sibling agents is common 
 git add <files> && git commit
 git push origin master && git push internal master
 just beta                         # dispatches beta.yml from pushed origin/master
-command gh run watch <run-id> --repo colangelo/herdr --exit-status
+command gh run watch <run-id> --repo colangelo/herdr-max --exit-status
 just brew-upgrade herdr-beta      # brew upgrade + live handoff; panes preserved
 herdr-beta --version              # X.Y.Z-ac-beta.<run>-<codename> = the new build
 ```

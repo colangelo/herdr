@@ -30,9 +30,9 @@ const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
 // Fork-aware update check: point at this fork's own manifests via raw GitHub,
 // not upstream herdr.dev. Keep in sync with `src/update.rs`.
 const STABLE_UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/colangelo/herdr/master/website/latest.json";
+    "https://raw.githubusercontent.com/colangelo/herdr-max/master/website/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/colangelo/herdr/master/website/preview.json";
+    "https://raw.githubusercontent.com/colangelo/herdr-max/master/website/preview.json";
 const REMOTE_BINARY_ENV_VAR: &str = "HERDR_REMOTE_BINARY";
 const SSH_CONTROL_SOCKET_NAME: &str = "ctl";
 pub(crate) const REATTACH_COMMAND_ENV_VAR: &str = "HERDR_REATTACH_COMMAND";

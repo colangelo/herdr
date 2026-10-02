@@ -293,11 +293,11 @@ latest-json-check tag="":
     test -n "$PROTOCOL" || { echo "error: no PROTOCOL_VERSION in $TAG:src/protocol/wire.rs"; exit 1; }; \
     echo "checking $TAG (version $BASE, protocol $PROTOCOL)"; \
     python3 scripts/changelog.py verify-release-state \
-        --repo colangelo/herdr \
+        --repo colangelo/herdr-max \
         --version "$BASE" \
         --tag "$TAG" \
         --protocol "$PROTOCOL" \
-        --live-url https://raw.githubusercontent.com/colangelo/herdr/master/website/latest.json
+        --live-url https://raw.githubusercontent.com/colangelo/herdr-max/master/website/latest.json
 
 # Fork: trigger a rolling -ac-beta build from a branch (default master).
 # Runs .github/workflows/beta.yml: builds macOS binaries, replaces the rolling
@@ -306,8 +306,8 @@ latest-json-check tag="":
 # Pass a codename to pin the build's suffix, e.g. `just beta master pirlo`;
 # it must be one of the names in beta.yml's pool. Empty derives it from the run.
 beta ref="master" codename="":
-    command gh workflow run beta.yml --repo colangelo/herdr --ref {{ref}} -f ref={{ref}} -f codename={{codename}}
-    @echo "beta build dispatched from {{ref}} — watch: gh run watch --repo colangelo/herdr"
+    command gh workflow run beta.yml --repo colangelo/herdr-max --ref {{ref}} -f ref={{ref}} -f codename={{codename}}
+    @echo "beta build dispatched from {{ref}} — watch: gh run watch --repo colangelo/herdr-max"
 
 # Upgrade a Homebrew-installed herdr and live-hand-off the running server onto the
 # new binary so panes survive — replicates `herdr update --handoff` for brew installs

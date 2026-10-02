@@ -145,7 +145,7 @@ Fork: on macOS, `just windows-lint` (and so the Windows stage of `just check`)
 is skipped with a notice, because zig applies the Windows libc configuration to
 the native helper tools it builds on the host, which then cannot find
 libSystem. Set `HERDR_WINDOWS_LINT=1` to run it anyway
-(https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/83).
+(https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues/83).
 
 Unit tests live next to the code (`#[cfg(test)] mod tests`). New `AppState` or `Workspace` behavior should be testable with `AppState::test_new()` and `Workspace::test_new()` without PTYs.
 
@@ -233,8 +233,8 @@ Exploratory conversation before that point is unconstrained — the Superpowers 
 
 ## Fork: every fix, bug and feature gets a Gitea issue
 
-Fork only (AC-forks/herdr). Every piece of fork work gets an issue on the fork's Gitea tracker,
-https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues, **opened when the work is approved or
+Fork only (AC-forks/herdr-max). Every piece of fork work gets an issue on the fork's Gitea tracker,
+https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues, **opened when the work is approved or
 found, before it starts**. That covers a bug found, a fix, a feature, an upstream cherry-pick
 batch or port, and a follow-up spotted during other work. Don't file a closed record after the
 fact. On 2026-09-27/28, five jobs (the scroll-read fix, the unbound-key warning, cherry-pick

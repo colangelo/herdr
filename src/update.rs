@@ -27,9 +27,9 @@ use serde::{Deserialize, Deserializer};
 // the fork's preview workflow; `website/latest.json` is rewritten by the
 // `release-ac` publish step on each stable fork release.
 const STABLE_UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/colangelo/herdr/master/website/latest.json";
+    "https://raw.githubusercontent.com/colangelo/herdr-max/master/website/latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/colangelo/herdr/master/website/preview.json";
+    "https://raw.githubusercontent.com/colangelo/herdr-max/master/website/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";

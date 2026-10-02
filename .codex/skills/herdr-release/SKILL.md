@@ -27,7 +27,7 @@ Trigger (dispatches `.github/workflows/beta.yml`; default ref `master`):
 ```bash
 just beta            # build + publish beta from master
 just beta my-branch  # or from another branch/commit
-gh run watch --repo colangelo/herdr
+gh run watch --repo colangelo/herdr-max
 ```
 
 What it does: builds the **two macOS targets only** (fast; no Linux beta), then
@@ -53,7 +53,7 @@ herdr-beta --version                        # herdr X.Y.Z-ac-beta.<run>-<codenam
 ```
 
 Notes:
-- Needs the same `HOMEBREW_TAP_TOKEN` secret on colangelo/herdr as stable.
+- Needs the same `HOMEBREW_TAP_TOKEN` secret on colangelo/herdr-max as stable.
 - Build ids are `<run>-<codename>` (above), monotonic via the run number.
   Changing the scheme breaks that ordering once — the 2026-07 timestamp→run-
   number switch made the first new build sort *below* the installed one, so
@@ -143,7 +143,7 @@ herdr                          # reattach with the stable client
 git status --short                      # must be clean (untracked .env is fine)
 grep '^version' Cargo.toml | head -1    # upstream base = the X.Y.Z for the tag
 just release-docs-check                 # shows which docs/next files need promoting
-gh run list --repo colangelo/herdr --branch master --limit 3   # CI green?
+gh run list --repo colangelo/herdr-max --branch master --limit 3   # CI green?
 ```
 
 Also confirm:
@@ -155,7 +155,7 @@ Also confirm:
   `export ZIG="$(brew --prefix zig)/bin/zig"` for the session.
 - Its last stage cross-lints Windows. On macOS it is skipped with a notice
   (zig cannot link its native build tools against the Windows libc there,
-  AC-forks/herdr#83); `HERDR_WINDOWS_LINT=1` forces it. On Linux it needs
+  AC-forks/herdr-max#83); `HERDR_WINDOWS_LINT=1` forces it. On Linux it needs
   Microsoft's SDK once per machine: `cargo install xwin --locked && just
   setup-windows-cross` (prompts to accept Microsoft's SDK license).
 
@@ -218,7 +218,7 @@ Also push master to the internal mirror: `git push internal master`.
 | `cargo update -p herdr --offline` fails | Run `cargo update -p herdr` without `--offline`, then finish the recipe steps manually (check → commit → tag → push). Do NOT rerun release-ac: CHANGELOG is already prepared. |
 | `just check` fails: `failed to execute zig build ... No such file or directory` | Zig missing/not on PATH — see pre-flight. For metadata-only releases, skipping local check and trusting tag CI is acceptable with user sign-off. |
 | Tag CI: `tag ... doesn't match Cargo.toml version` | Cargo.toml must equal the tag's base (strip `-ac*`). The recipe does this; manual releases must too. |
-| `update-homebrew` fails on `git push` | `HOMEBREW_TAP_TOKEN` missing/expired on colangelo/herdr → `gh secret set HOMEBREW_TAP_TOKEN --repo colangelo/herdr`. |
+| `update-homebrew` fails on `git push` | `HOMEBREW_TAP_TOKEN` missing/expired on colangelo/herdr-max → `gh secret set HOMEBREW_TAP_TOKEN --repo colangelo/herdr-max`. |
 | Build failed mid-matrix after tag push | Fix, then re-run the workflow for the same tag (`gh run rerun <id>`). If the fix needs a commit, cut `-ac.2`. |
 | `brew install` gets old version | `brew update` first; formula lives in colangelo/homebrew-tap Formula/herdr.rb. |
 
@@ -241,7 +241,7 @@ Consequences, all intentional — do NOT "fix" them by re-syncing the manifest:
   comment in `justfile`). `just website-build`, which the same recipe runs,
   still renders and validates every version snapshot, so a genuinely broken
   docs tree is still caught.
-- The `Website` workflow is **disabled** on colangelo/herdr (`gh workflow
+- The `Website` workflow is **disabled** on colangelo/herdr-max (`gh workflow
   disable Website`); it runs that same check on every push touching
   `website/**` or `docs/versions/**` and would sit red forever.
 - Upstream's `update-latest-json` job stays removed; the fork's own

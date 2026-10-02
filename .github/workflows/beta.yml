@@ -174,7 +174,7 @@ jobs:
     steps:
       - name: Calculate checksums
         run: |
-          BASE_URL="https://github.com/colangelo/herdr/releases/download/beta"
+          BASE_URL="https://github.com/colangelo/herdr-max/releases/download/beta"
           # Give the freshly uploaded release assets a moment to propagate.
           sleep 5
           curl -fsSL "${BASE_URL}/herdr-macos-aarch64" | sha256sum | cut -d' ' -f1 > darwin-arm64.sha
@@ -193,16 +193,16 @@ jobs:
           cat > Formula/herdr-beta.rb << FORMULA
           class HerdrBeta < Formula
             desc "Terminal workspace manager for AI coding agents (beta channel)"
-            homepage "https://github.com/colangelo/herdr"
+            homepage "https://github.com/colangelo/herdr-max"
             version "${BETA_VERSION}"
             license "AGPL-3.0-or-later"
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/colangelo/herdr/releases/download/beta/herdr-macos-aarch64"
+                url "https://github.com/colangelo/herdr-max/releases/download/beta/herdr-macos-aarch64"
                 sha256 "${DARWIN_ARM64}"
               else
-                url "https://github.com/colangelo/herdr/releases/download/beta/herdr-macos-x86_64"
+                url "https://github.com/colangelo/herdr-max/releases/download/beta/herdr-macos-x86_64"
                 sha256 "${DARWIN_AMD64}"
               end
             end

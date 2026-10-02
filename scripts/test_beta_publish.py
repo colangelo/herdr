@@ -114,7 +114,7 @@ class BetaPublishTests(unittest.TestCase):
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "GH_LOG": str(self.log),
             "GH_STATE": str(self.state_path),
-            "GITHUB_REPOSITORY": "colangelo/herdr",
+            "GITHUB_REPOSITORY": "colangelo/herdr-max",
             "GITHUB_RUN_ID": "42",
             "BETA_VERSION": "0.8.2-ac-beta.93-pirlo",
             "TARGET_SHA": "newsha",

@@ -14,13 +14,13 @@ sync, mostly sidebar/UI features, and it touches `src/` broadly (`src/app/`,
 `src/api/`, `src/ui/`, `src/cli/`, `src/config/`). Budget for real source
 conflicts, not just workflow-file ones.
 
-Remotes: `origin` = github.com/colangelo/herdr, `internal` = Gitea
+Remotes: `origin` = github.com/colangelo/herdr-max, `internal` = Gitea
 (ac/herdr), `upstream` = github.com/herdrdev/herdr. Upstream moved out of
 `ogulcancelik/herdr` into the `herdrdev` org (2026-07); the `upstream` remote
 URL was repointed at the new slug on 2026-08-26, so it no longer rides the
 GitHub redirect, and `gh`/API calls must use `herdrdev/herdr` as well.
 Upstream's `scripts/changelog.py` `DEFAULT_RELEASE_REPO` says `herdrdev/herdr`
-(harmless here: the fork's CI and `release-ac` pass `--repo colangelo/herdr`
+(harmless here: the fork's CI and `release-ac` pass `--repo colangelo/herdr-max`
 explicitly).
 
 ## 1. Assess
@@ -175,7 +175,7 @@ be empty). Then check the load-bearing hunks in
 - upstream's `update-latest-json` job stays REMOVED (it needs upstream deploy
   keys). Note the fork has its OWN `update-latest-json` job — one job with that
   name is correct; tell them apart by `secrets.RELEASE_DEPLOY_KEY` (upstream's)
-  vs `--repo colangelo/herdr` + `--tag`/`--force` (the fork's).
+  vs `--repo colangelo/herdr-max` + `--tag`/`--force` (the fork's).
 
 And in `.github/workflows/ci.yml`: the conventional-commits force-push guard
 (`git cat-file -e "$BEFORE_SHA"` fallback). And in `justfile`: the `release-ac`
@@ -294,12 +294,12 @@ type — and `ignore .vscode` had ridden along invisibly for months.)
 
 - **New upstream bot workflows**: upstream's maintainer automation needs their
   secrets (`KANGAL_GITHUB_TOKEN`, `RELEASE_DEPLOY_KEY`) and fails on the fork.
-  Compare `gh workflow list --repo colangelo/herdr --all` against the disabled
+  Compare `gh workflow list --repo colangelo/herdr-max --all` against the disabled
   set (Approve Contributor, Approve Merged Contributor, Issue Gate,
   Close pending-release issues, PR Gate, Preview, **Website**) and
   `gh workflow disable <name>` any new ones. Keep: CI, Nix, Release,
   Build artifacts (manual).
-- **CI on the pushed master** must go green (`gh run list --repo colangelo/herdr
+- **CI on the pushed master** must go green (`gh run list --repo colangelo/herdr-max
   --branch master --limit 3`). The conventional-commits job tolerates the
   force-push via the fork guard.
 - **`website/latest.json` survived the rebase**: `just latest-json-check`.
@@ -309,13 +309,13 @@ type — and `ignore .vscode` had ridden along invisibly for months.)
   itself already succeeded and no job goes red. `src/update.rs` reads that file
   over raw GitHub, so a dropped commit pins every fork binary's update check to
   an older version: exactly what happened to v0.7.4-ac, which went unnoticed
-  from 2026-07-18 until 2026-07-27 (AC-forks/herdr#38). Restore it with the
+  from 2026-07-18 until 2026-07-27 (AC-forks/herdr-max#38). Restore it with the
   same call CI makes, using the tag's protocol version, not master's:
 
   ```bash
   TAG=v0.7.4-ac; BASE=${TAG#v}; BASE=${BASE%%-ac*}
   PROTOCOL=$(git show "$TAG:src/protocol/wire.rs" | sed -n 's/^pub const PROTOCOL_VERSION: u32 = \([0-9]*\);/\1/p')
-  python3 scripts/changelog.py sync-latest-json --repo colangelo/herdr \
+  python3 scripts/changelog.py sync-latest-json --repo colangelo/herdr-max \
       --tag "$TAG" --version "$BASE" --protocol "$PROTOCOL" --force \
       --output website/latest.json
   ```

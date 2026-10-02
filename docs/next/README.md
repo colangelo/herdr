@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
-  <a href="https://github.com/colangelo/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/colangelo/herdr?include_prereleases&label=release&labelColor=333333&color=666666" alt="latest fork release" /></a>
+  <a href="https://github.com/colangelo/herdr-max/releases/latest"><img src="https://img.shields.io/github/v/release/colangelo/herdr-max?include_prereleases&label=release&labelColor=333333&color=666666" alt="latest fork release" /></a>
   <a href="https://github.com/colangelo/homebrew-tap"><img src="https://img.shields.io/badge/brew-colangelo%2Ftap-666666?labelColor=333333" alt="Homebrew tap" /></a>
   <a href="https://github.com/herdrdev/herdr"><img src="https://img.shields.io/badge/fork_of-herdrdev%2Fherdr-666666?labelColor=333333&logo=github" alt="fork of herdrdev/herdr" /></a>
 </p>
@@ -85,7 +85,7 @@ Homebrew (this is how the fork distributes):
 brew install colangelo/tap/herdr
 ```
 
-or grab a binary from [releases](https://github.com/colangelo/herdr/releases/latest) — `herdr-macos-aarch64`, `herdr-macos-x86_64`, `herdr-linux-x86_64`, `herdr-linux-aarch64`.
+or grab a binary from [releases](https://github.com/colangelo/herdr-max/releases/latest) — `herdr-macos-aarch64`, `herdr-macos-x86_64`, `herdr-linux-x86_64`, `herdr-linux-aarch64`.
 
 > Do **not** use `curl https://herdr.dev/install.sh` — that installs upstream and will overwrite a fork install.
 
@@ -115,7 +115,7 @@ The fork publishes no website. Its documentation lives in the repo, under [`docs
 ## development
 
 ```bash
-git clone https://github.com/colangelo/herdr
+git clone https://github.com/colangelo/herdr-max
 cd herdr
 cargo build --release
 
@@ -123,7 +123,7 @@ just test        # unit tests
 just check       # formatting, tests, and maintenance checks
 ```
 
-Remotes used by this fork: `origin` → GitHub `colangelo/herdr`, `upstream` → GitHub `herdrdev/herdr`, plus a private Gitea mirror that holds the fork's issue backlog.
+Remotes used by this fork: `origin` → GitHub `colangelo/herdr-max`, `upstream` → GitHub `herdrdev/herdr`, plus a private Gitea mirror that holds the fork's issue backlog.
 
 ## agent instructions
 

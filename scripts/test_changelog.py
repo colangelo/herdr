@@ -432,7 +432,7 @@ class ChangelogScriptTests(unittest.TestCase):
             [
                 "verify-release-state",
                 "--repo",
-                "colangelo/herdr",
+                "colangelo/herdr-max",
                 "--version",
                 "0.7.4",
                 "--tag",

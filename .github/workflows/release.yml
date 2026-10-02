@@ -343,7 +343,7 @@ jobs:
       - name: Calculate checksums
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          BASE_URL="https://github.com/colangelo/herdr/releases/download/${GITHUB_REF_NAME}"
+          BASE_URL="https://github.com/colangelo/herdr-max/releases/download/${GITHUB_REF_NAME}"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           curl -fsSL "${BASE_URL}/herdr-macos-aarch64" | sha256sum | cut -d' ' -f1 > darwin-arm64.sha
           curl -fsSL "${BASE_URL}/herdr-macos-x86_64"  | sha256sum | cut -d' ' -f1 > darwin-amd64.sha
@@ -395,7 +395,7 @@ jobs:
           # --tag reads the fork's suffixed release; --version keeps the base semver
           # the binary reports; --force allows same-base -ac.N hotfix republishes.
           python3 scripts/changelog.py sync-latest-json \
-            --repo colangelo/herdr \
+            --repo colangelo/herdr-max \
             --tag "$TAG" \
             --version "$BASE" \
             --protocol "$RELEASE_PROTOCOL" \
