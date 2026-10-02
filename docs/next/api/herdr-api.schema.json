@@ -6844,6 +6844,17 @@
                 "null"
               ]
             },
+            "input_box": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentInputBox"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The input box's draft for a Claude Code agent whose screen shows one.\nWorked out when `agent get` or `agent list` is asked for, never by\ndetection or rendering; absent when no box is on screen."
+            },
             "interactive_ready": {
               "type": "boolean"
             },
@@ -6936,6 +6947,19 @@
             "pane_id",
             "focused",
             "revision"
+          ],
+          "type": "object"
+        },
+        "AgentInputBox": {
+          "description": "What is typed in an agent's input box (fork issue 146).",
+          "properties": {
+            "text": {
+              "description": "The draft, without the prompt marker. Faint text (a grey suggestion, a\ncommand's argument hint) is not part of it; a pasted-text placeholder\nis. Empty for an empty box.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
           ],
           "type": "object"
         },

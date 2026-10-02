@@ -1509,6 +1509,33 @@ fn prompt_box_body(content: &str) -> Option<&str> {
     Some(&content[start.min(content.len())..end.min(content.len())])
 }
 
+/// What is typed in a Claude Code input box (fork issue 146), from the
+/// detection buffer with its styling: the faint runs (the grey reply
+/// suggestion, the `/compact` argument hint) are not text, `[Pasted text #N]`
+/// is. The box body is `prompt_box_body`, the region the `live_prompt_box`
+/// rule reads. The leading `❯` goes, continuation lines lose the box's
+/// two-column indent, the ends are trimmed and a multi-line draft stays
+/// multi-line. `None` when the screen has no prompt box; `Some("")` for an
+/// empty one.
+pub(crate) fn claude_input_box_text(detection_ansi: &str) -> Option<String> {
+    let text = crate::api::dim::drop_dim_runs(detection_ansi, false);
+    let body = prompt_box_body(&text)?;
+    let lines: Vec<&str> = body.lines().collect();
+    let mut draft = Vec::with_capacity(lines.len());
+    for (index, line) in lines.iter().enumerate() {
+        let line = line.trim_end();
+        let line = if index == 0 {
+            let line = line.trim_start();
+            let line = line.strip_prefix('❯').unwrap_or(line);
+            line.strip_prefix(' ').unwrap_or(line)
+        } else {
+            line.strip_prefix("  ").unwrap_or(line)
+        };
+        draft.push(line);
+    }
+    Some(draft.join("\n").trim().to_string())
+}
+
 fn above_prompt_box(content: &str) -> &str {
     let lines: Vec<&str> = content.lines().collect();
     let Some(top) = prompt_box_top_border_index(&lines) else {

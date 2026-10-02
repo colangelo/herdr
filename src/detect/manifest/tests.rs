@@ -1402,3 +1402,66 @@ contains = ["prompt"]
         assert!(!detection.background_work);
     });
 }
+
+/// Fork issue 146: what is typed in Claude Code's input box, from styled
+/// detection text.
+mod input_box {
+    use super::claude_input_box_text;
+
+    const RULE: &str = "────────────────────────────────────────";
+
+    fn screen(box_lines: &[&str]) -> String {
+        format!(
+            "some output\n{RULE}\n{}\n{RULE} herdr-worker ─\n  ~/dev | Sonnet 5.5 | ⚡medium\n",
+            box_lines.join("\n")
+        )
+    }
+
+    #[test]
+    fn an_empty_box_is_empty_text() {
+        assert_eq!(claude_input_box_text(&screen(&["❯ "])).as_deref(), Some(""));
+        assert_eq!(claude_input_box_text(&screen(&["❯"])).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_grey_suggestion_is_not_text() {
+        let suggestion = screen(&["❯ \x1b[2mA/B as is\x1b[0m"]);
+        assert_eq!(claude_input_box_text(&suggestion).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn typed_text_is_text_and_a_pasted_placeholder_stays() {
+        assert_eq!(
+            claude_input_box_text(&screen(&["❯ fix the build"])).as_deref(),
+            Some("fix the build")
+        );
+        assert_eq!(
+            claude_input_box_text(&screen(&["❯ [Pasted text #2 +41 lines]"])).as_deref(),
+            Some("[Pasted text #2 +41 lines]")
+        );
+    }
+
+    #[test]
+    fn typed_text_followed_by_a_faint_hint_gives_only_the_typed_part() {
+        let tail = screen(&["❯ /compact \x1b[2m[instructions for the summary]\x1b[0m"]);
+        assert_eq!(claude_input_box_text(&tail).as_deref(), Some("/compact"));
+        // The hint alone, as `/compact` shows it with nothing typed after it.
+        let hint = screen(&["❯ \x1b[2m/compact [instructions]\x1b[0m"]);
+        assert_eq!(claude_input_box_text(&hint).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_multi_line_draft_stays_multi_line() {
+        assert_eq!(
+            claude_input_box_text(&screen(&["❯ first line", "  second line", "    indented"]))
+                .as_deref(),
+            Some("first line\nsecond line\n  indented")
+        );
+    }
+
+    #[test]
+    fn no_prompt_box_gives_nothing() {
+        assert_eq!(claude_input_box_text("just a shell\n$ ls\n"), None);
+        assert_eq!(claude_input_box_text(""), None);
+    }
+}

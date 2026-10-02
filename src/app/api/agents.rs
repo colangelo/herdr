@@ -17,7 +17,11 @@ impl App {
         encode_success(
             id,
             ResponseResult::AgentList {
-                agents: self.collect_agent_infos(),
+                agents: self
+                    .collect_agent_infos()
+                    .into_iter()
+                    .map(|agent| self.with_input_box(agent))
+                    .collect(),
             },
         )
     }
@@ -25,11 +29,32 @@ impl App {
     pub(super) fn handle_agent_get(&mut self, id: String, target: AgentTarget) -> String {
         self.reconcile_managed_agent_target(&target.target);
         let agent = match self.agent_info_for_target(&target.target) {
-            Ok(agent) => agent,
+            Ok(agent) => self.with_input_box(agent),
             Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
         };
 
         encode_success(id, ResponseResult::AgentInfo { agent })
+    }
+
+    /// The agent with its input box draft (fork issue 146), read from the
+    /// bottom of the pane's buffer. Only a Claude Code agent has one, and only
+    /// these two calls ask: detection, rendering and the other agent answers
+    /// never do.
+    fn with_input_box(
+        &self,
+        mut agent: crate::api::schema::AgentInfo,
+    ) -> crate::api::schema::AgentInfo {
+        if agent.agent.as_deref() != Some("claude") {
+            return agent;
+        }
+        agent.input_box = self
+            .parse_pane_id(&agent.pane_id)
+            .and_then(|(ws_idx, pane_id)| self.lookup_runtime(ws_idx, pane_id))
+            .and_then(|(runtime, _)| {
+                crate::detect::manifest::claude_input_box_text(&runtime.detection_ansi())
+            })
+            .map(|text| crate::api::schema::AgentInputBox { text });
+        agent
     }
 
     pub(super) fn handle_agent_focus(&mut self, id: String, target: AgentTarget) -> String {
