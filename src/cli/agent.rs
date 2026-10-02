@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use crate::api::schema::{
     AgentPromptParams, AgentPromptWaitOptions, AgentReadParams, AgentRenameParams,
-    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, EmptyParams, ErrorBody,
-    ErrorResponse, Method, PaneProcessInfoParams, PaneTarget, ReadFormat, ReadSource, Request,
+    AgentSendKeysParams, AgentStartParams, AgentTarget, AgentWaitParams, ErrorBody, ErrorResponse,
+    Method, PaneProcessInfoParams, PaneTarget, ReadFormat, ReadSource, Request,
 };
 
 const AGENT_START_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -439,14 +439,15 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
 }
 
 fn agent_list(args: &[String]) -> std::io::Result<i32> {
-    if !args.is_empty() {
-        eprintln!("usage: herdr agent list");
+    let input_box = args == ["--input-box"];
+    if !args.is_empty() && !input_box {
+        eprintln!("usage: herdr agent list [--input-box]");
         return Ok(2);
     }
 
     super::print_response(&super::send_request(&Request {
         id: "cli:agent:list".into(),
-        method: Method::AgentList(EmptyParams::default()),
+        method: Method::AgentList(crate::api::schema::AgentListParams { input_box }),
     })?)
 }
 

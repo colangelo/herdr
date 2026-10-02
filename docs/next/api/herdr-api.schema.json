@@ -1377,6 +1377,16 @@
     },
     "request": {
       "$defs": {
+        "AgentListParams": {
+          "description": "`agent.list` parameters. `input_box` asks for each Claude Code agent's input\nbox draft, which reads every such pane's screen, so it is off by default\n(fork issue 146).",
+          "properties": {
+            "input_box": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
             "target": {
@@ -5523,7 +5533,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/EmptyParams"
+              "$ref": "#/schemas/request/$defs/AgentListParams"
             }
           },
           "required": [
@@ -6853,7 +6863,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The input box's draft for a Claude Code agent whose screen shows one.\nWorked out when `agent get` or `agent list` is asked for, never by\ndetection or rendering; absent when no box is on screen."
+              "description": "The input box's draft for a Claude Code agent whose screen shows one.\nAlways filled by `agent get`; `agent list` fills it only with\n`input_box: true`. Never worked out by detection or rendering; absent\nwhen no box is on screen."
             },
             "interactive_ready": {
               "type": "boolean"

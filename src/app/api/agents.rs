@@ -13,15 +13,24 @@ use super::responses::{encode_error, encode_error_body, encode_success};
 const AGENT_PROMPT_SUBMIT_DELAY: Duration = Duration::from_millis(300);
 
 impl App {
-    pub(super) fn handle_agent_list(&mut self, id: String) -> String {
+    pub(super) fn handle_agent_list(
+        &mut self,
+        id: String,
+        params: crate::api::schema::AgentListParams,
+    ) -> String {
+        // The input box reads each Claude pane's screen: only when asked.
+        let agents = self.collect_agent_infos();
         encode_success(
             id,
             ResponseResult::AgentList {
-                agents: self
-                    .collect_agent_infos()
-                    .into_iter()
-                    .map(|agent| self.with_input_box(agent))
-                    .collect(),
+                agents: if params.input_box {
+                    agents
+                        .into_iter()
+                        .map(|agent| self.with_input_box(agent))
+                        .collect()
+                } else {
+                    agents
+                },
             },
         )
     }
@@ -705,7 +714,7 @@ mod tests {
         terminal.set_terminal_title(Some("\u{2733} jev-astra".into()));
 
         let listed: SuccessResponse =
-            serde_json::from_str(&app.handle_agent_list("req".into())).unwrap();
+            serde_json::from_str(&app.handle_agent_list("req".into(), Default::default())).unwrap();
         let ResponseResult::AgentList { agents } = listed.result else {
             panic!("expected agent list");
         };
@@ -756,7 +765,8 @@ mod tests {
             .clone();
         let list_json = |app: &mut App| {
             let listed: SuccessResponse =
-                serde_json::from_str(&app.handle_agent_list("req".into())).unwrap();
+                serde_json::from_str(&app.handle_agent_list("req".into(), Default::default()))
+                    .unwrap();
             let ResponseResult::AgentList { agents } = listed.result else {
                 panic!("expected agent list");
             };

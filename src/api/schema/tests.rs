@@ -574,6 +574,17 @@ fn pane_send_input_defaults_to_empty_text_and_keys() {
 }
 
 #[test]
+fn agent_list_leaves_the_input_box_out_unless_asked() {
+    let params: AgentListParams = serde_json::from_str("{}").unwrap();
+    assert!(
+        !params.input_box,
+        "off by default: an old client sends {{}}"
+    );
+    let params: AgentListParams = serde_json::from_str(r#"{"input_box":true}"#).unwrap();
+    assert!(params.input_box);
+}
+
+#[test]
 fn pane_wait_for_output_defaults_strip_ansi_to_true() {
     let json = r#"
     {

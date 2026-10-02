@@ -405,7 +405,12 @@ fn todo_priority_option() -> Arg {
 fn agent_command() -> Command {
     Command::new("agent")
         .about("Control and inspect agent panes")
-        .subcommand(Command::new("list").about("List agents"))
+        .subcommand(
+            Command::new("list").about("List agents").arg(
+                flag("input-box")
+                    .help("Include each Claude Code agent's input box draft (reads their screens)"),
+            ),
+        )
         .subcommand(id_command("get", "target", "Show an agent"))
         .subcommand(
             Command::new("read")

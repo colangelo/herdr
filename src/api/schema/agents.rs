@@ -192,6 +192,15 @@ pub enum AgentNameSource {
     Title,
 }
 
+/// `agent.list` parameters. `input_box` asks for each Claude Code agent's input
+/// box draft, which reads every such pane's screen, so it is off by default
+/// (fork issue 146).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentListParams {
+    #[serde(default)]
+    pub input_box: bool,
+}
+
 /// What is typed in an agent's input box (fork issue 146).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentInputBox {
@@ -233,8 +242,9 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked_since: Option<i64>,
     /// The input box's draft for a Claude Code agent whose screen shows one.
-    /// Worked out when `agent get` or `agent list` is asked for, never by
-    /// detection or rendering; absent when no box is on screen.
+    /// Always filled by `agent get`; `agent list` fills it only with
+    /// `input_box: true`. Never worked out by detection or rendering; absent
+    /// when no box is on screen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_box: Option<AgentInputBox>,
     #[serde(default, skip_serializing_if = "super::is_false")]

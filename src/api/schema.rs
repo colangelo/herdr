@@ -124,7 +124,7 @@ pub enum Method {
     #[serde(rename = "tab.close")]
     TabClose(TabCloseParams),
     #[serde(rename = "agent.list")]
-    AgentList(EmptyParams),
+    AgentList(AgentListParams),
     #[serde(rename = "agent.get")]
     AgentGet(AgentTarget),
     #[serde(rename = "agent.read")]
