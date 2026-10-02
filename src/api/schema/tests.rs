@@ -937,6 +937,7 @@ fn worktree_request_and_response_round_trip() {
                 focused: true,
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
+                sync: false,
             },
             root_pane: PaneInfo {
                 pane_id: "w_1-1".into(),
@@ -954,6 +955,7 @@ fn worktree_request_and_response_round_trip() {
                 display_agent: None,
                 agent_status: AgentStatus::Unknown,
                 pinned: false,
+                synced: false,
                 blocked_reason: None,
                 blocked_since: None,
                 state_labels: HashMap::new(),
@@ -1370,6 +1372,7 @@ fn create_response_round_trips_with_root_pane() {
                 focused: false,
                 pane_count: 1,
                 agent_status: AgentStatus::Unknown,
+                sync: false,
             },
             root_pane: PaneInfo {
                 pane_id: "w_1-3".into(),
@@ -1387,6 +1390,7 @@ fn create_response_round_trips_with_root_pane() {
                 display_agent: None,
                 agent_status: AgentStatus::Unknown,
                 pinned: false,
+                synced: false,
                 blocked_reason: None,
                 blocked_since: None,
                 state_labels: HashMap::new(),

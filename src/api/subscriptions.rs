@@ -633,6 +633,7 @@ mod tests {
             display_agent: None,
             agent_status: AgentStatus::Unknown,
             pinned: false,
+            synced: false,
             blocked_reason: None,
             blocked_since: None,
             state_labels: HashMap::new(),

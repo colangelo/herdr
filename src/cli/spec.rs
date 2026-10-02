@@ -309,6 +309,16 @@ fn tab_command() -> Command {
                 .arg(required("tab_id", "TAB_ID"))
                 .arg(required("label", "LABEL").num_args(1..)),
         )
+        .subcommand(
+            Command::new("sync")
+                .about("Type into every pane of a tab at once, or stop")
+                .arg(Arg::new("tab_id").value_name("TAB_ID"))
+                .arg(option("tab", "ID"))
+                .arg(flag("current"))
+                .arg(flag("toggle"))
+                .arg(flag("on"))
+                .arg(flag("off")),
+        )
         .subcommand(id_command("close", "tab_id", "Close a tab").arg(flag("force")))
 }
 
@@ -612,6 +622,15 @@ fn pane_command() -> Command {
         .subcommand(
             Command::new("zoom")
                 .about("Toggle or set pane zoom")
+                .arg(Arg::new("pane_id").value_name("PANE_ID"))
+                .args(current_pane_args())
+                .arg(flag("toggle"))
+                .arg(flag("on"))
+                .arg(flag("off")),
+        )
+        .subcommand(
+            Command::new("sync")
+                .about("Put a pane in or out of its tab's synced input")
                 .arg(Arg::new("pane_id").value_name("PANE_ID"))
                 .args(current_pane_args())
                 .arg(flag("toggle"))

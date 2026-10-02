@@ -28,6 +28,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "focus" => pane_focus(&args[1..]),
         "resize" => pane_resize(&args[1..]),
         "zoom" => pane_zoom(&args[1..]),
+        "sync" => pane_sync(&args[1..]),
         "read" => pane_read(&args[1..]),
         "rename" => pane_rename(&args[1..]),
         "input" => pane_input(&args[1..]),
@@ -490,6 +491,30 @@ fn parse_pane_zoom_args(args: &[String]) -> Result<PaneZoomParams, String> {
     }
 
     Ok(PaneZoomParams { pane_id, mode })
+}
+
+fn pane_sync(args: &[String]) -> std::io::Result<i32> {
+    match parse_pane_sync_args(args) {
+        Ok(params) => super::runtime::pane_sync(params),
+        Err(message) => {
+            eprintln!("{message}");
+            Ok(2)
+        }
+    }
+}
+
+/// `herdr pane sync [<pane_id>|--pane ID|--current] [--toggle|--on|--off]`:
+/// the zoom grammar, with the sync modes.
+fn parse_pane_sync_args(args: &[String]) -> Result<crate::api::schema::PaneSyncParams, String> {
+    let params = parse_pane_zoom_args(args)?;
+    Ok(crate::api::schema::PaneSyncParams {
+        pane_id: params.pane_id,
+        mode: super::sync_mode(match params.mode {
+            PaneZoomMode::Toggle => "toggle",
+            PaneZoomMode::On => "on",
+            PaneZoomMode::Off => "off",
+        }),
+    })
 }
 
 fn pane_rename(args: &[String]) -> std::io::Result<i32> {
@@ -1965,6 +1990,7 @@ fn print_pane_help() {
         "  herdr pane resize --direction left|right|up|down [--amount FLOAT] [--pane ID|--current]"
     );
     eprintln!("  herdr pane zoom [<pane_id>|--pane ID|--current] [--toggle|--on|--off]");
+    eprintln!("  herdr pane sync [<pane_id>|--pane ID|--current] [--toggle|--on|--off]");
     eprintln!("  herdr pane rename <pane_id> <label>|--clear");
     eprintln!("  herdr pane read <pane_id> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi] [--strip-dim]");
     eprintln!("  herdr pane input [<pane_id>|--pane ID|--current] --right-click herdr|pane");

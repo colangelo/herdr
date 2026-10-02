@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use crate::api::schema::{
-    EventData, EventEnvelope, EventKind, ResponseResult, TabCloseParams, TabCreateParams,
-    TabListParams, TabMoveParams, TabRenameParams, TabTarget,
+    EventData, EventEnvelope, EventKind, ResponseResult, SyncMode, TabCloseParams, TabCreateParams,
+    TabListParams, TabMoveParams, TabRenameParams, TabSyncParams, TabTarget,
 };
 use crate::app::{App, Mode};
 
@@ -176,6 +176,47 @@ impl App {
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
         encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
+    /// `tab.sync`: turn input sync on or off for a tab (fork issue 141).
+    /// Turning it on starts from every pane of the tab.
+    pub(super) fn handle_tab_sync(&mut self, id: String, params: TabSyncParams) -> String {
+        let target =
+            match params.tab_id.as_deref() {
+                Some(tab_id) => match self.parse_tab_id(tab_id) {
+                    Some(target) => target,
+                    None => return tab_not_found(id, tab_id),
+                },
+                None => match self.state.active.and_then(|ws_idx| {
+                    Some((ws_idx, self.state.workspaces.get(ws_idx)?.active_tab))
+                }) {
+                    Some(target) => target,
+                    None => return tab_not_found(id, "current"),
+                },
+            };
+        let (ws_idx, tab_idx) = target;
+        let Some(syncing) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.tabs.get(tab_idx))
+            .map(crate::workspace::Tab::is_syncing)
+        else {
+            return tab_not_found(id, params.tab_id.as_deref().unwrap_or("current"));
+        };
+        let on = match params.mode {
+            SyncMode::Toggle => !syncing,
+            SyncMode::On => true,
+            SyncMode::Off => false,
+        };
+        // Asking for "on" while it is on keeps the exclusions.
+        if on != syncing {
+            self.state.set_tab_sync(ws_idx, tab_idx, on);
+        }
+        match self.tab_info(ws_idx, tab_idx) {
+            Some(tab) => encode_success(id, ResponseResult::TabInfo { tab }),
+            None => tab_not_found(id, params.tab_id.as_deref().unwrap_or("current")),
+        }
     }
 
     pub(super) fn handle_tab_move(&mut self, id: String, params: TabMoveParams) -> String {
@@ -354,6 +395,82 @@ mod tests {
         config::{Config, ShellModeConfig},
         workspace::Workspace,
     };
+
+    // Fork issue 141: `tab.sync` and `pane.sync` over the API.
+    #[test]
+    fn api_tab_sync_and_pane_sync_change_the_synced_set() {
+        use crate::api::schema::{PaneSyncParams, SyncMode};
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut workspace = Workspace::test_new("sync");
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+        let right_id = app.public_pane_id(0, right).unwrap();
+        let tab_of = |response: String| match serde_json::from_str::<SuccessResponse>(&response)
+            .unwrap()
+            .result
+        {
+            ResponseResult::TabInfo { tab } => tab,
+            other => panic!("tab info expected, got {other:?}"),
+        };
+        let pane_of = |response: String| match serde_json::from_str::<SuccessResponse>(&response)
+            .unwrap()
+            .result
+        {
+            ResponseResult::PaneInfo { pane } => pane,
+            other => panic!("pane info expected, got {other:?}"),
+        };
+        let pane_sync = |app: &mut App, mode| {
+            app.handle_pane_sync(
+                "req".into(),
+                PaneSyncParams {
+                    pane_id: Some(right_id.clone()),
+                    mode,
+                },
+            )
+        };
+
+        // Not syncing: pane.sync says so and changes nothing.
+        let refused = pane_sync(&mut app, SyncMode::Off);
+        assert!(refused.contains("sync_not_active"), "{refused}");
+
+        let tab = tab_of(app.handle_tab_sync(
+            "req".into(),
+            TabSyncParams {
+                tab_id: Some(tab_id.clone()),
+                mode: SyncMode::On,
+            },
+        ));
+        assert!(tab.sync);
+        assert!(pane_of(pane_sync(&mut app, SyncMode::On)).synced);
+
+        assert!(!pane_of(pane_sync(&mut app, SyncMode::Off)).synced);
+        // "on" for a tab that already syncs keeps the exclusion.
+        let tab = tab_of(app.handle_tab_sync(
+            "req".into(),
+            TabSyncParams {
+                tab_id: None,
+                mode: SyncMode::On,
+            },
+        ));
+        assert!(tab.sync);
+        assert!(!app.state.workspaces[0].tabs[0].pane_synced(right));
+
+        let tab = tab_of(app.handle_tab_sync(
+            "req".into(),
+            TabSyncParams {
+                tab_id: Some(tab_id),
+                mode: SyncMode::Toggle,
+            },
+        ));
+        assert!(!tab.sync);
+        assert!(!app.state.workspaces[0].tabs[0].is_syncing());
+    }
 
     #[test]
     fn api_tab_close_last_tab_closes_workspace_and_emits_both_events() {

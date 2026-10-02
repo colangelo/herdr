@@ -1102,6 +1102,42 @@ impl App {
         self.schedule_session_save();
     }
 
+    /// `pane.sync`: put a pane in or out of its tab's synced set (fork issue
+    /// 141). The tab has to sync already.
+    pub(super) fn handle_pane_sync(
+        &mut self,
+        id: String,
+        params: crate::api::schema::PaneSyncParams,
+    ) -> String {
+        use crate::api::schema::SyncMode;
+        let Some((ws_idx, pane_id)) = self.resolve_optional_pane(params.pane_id.as_deref()) else {
+            return encode_error(id, "pane_not_found", "pane not found");
+        };
+        let Some(synced) = self.state.workspaces[ws_idx]
+            .find_tab_index_for_pane(pane_id)
+            .and_then(|tab_idx| self.state.workspaces[ws_idx].tabs.get(tab_idx))
+            .and_then(|tab| tab.is_syncing().then(|| tab.pane_synced(pane_id)))
+        else {
+            return encode_error(
+                id,
+                "sync_not_active",
+                "the pane's tab is not syncing; turn it on with tab.sync first",
+            );
+        };
+        let wanted = match params.mode {
+            SyncMode::Toggle => !synced,
+            SyncMode::On => true,
+            SyncMode::Off => false,
+        };
+        if wanted != synced {
+            self.state.toggle_pane_sync(ws_idx, pane_id);
+        }
+        match self.pane_info(ws_idx, pane_id) {
+            Some(pane) => encode_success(id, ResponseResult::PaneInfo { pane }),
+            None => encode_error(id, "pane_not_found", "pane not found"),
+        }
+    }
+
     pub(super) fn handle_pane_zoom(&mut self, id: String, params: PaneZoomParams) -> String {
         let Some((ws_idx, pane_id)) = self.resolve_optional_pane(params.pane_id.as_deref()) else {
             return encode_error(id, "pane_not_found", "pane not found");

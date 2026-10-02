@@ -886,6 +886,15 @@ pub(super) fn normalize_workspace_id(value: &str) -> String {
     value.to_string()
 }
 
+/// The sync mode a `--toggle` / `--on` / `--off` flag names (without dashes).
+pub(super) fn sync_mode(name: &str) -> crate::api::schema::SyncMode {
+    match name {
+        "on" => crate::api::schema::SyncMode::On,
+        "off" => crate::api::schema::SyncMode::Off,
+        _ => crate::api::schema::SyncMode::Toggle,
+    }
+}
+
 pub(super) fn normalize_tab_id(value: &str) -> String {
     value.to_string()
 }

@@ -111,6 +111,14 @@ pub(super) fn pane_zoom(params: PaneZoomParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:zoom", Method::PaneZoom(params))
 }
 
+pub(super) fn pane_sync(params: crate::api::schema::PaneSyncParams) -> std::io::Result<i32> {
+    print_method_response("cli:pane:sync", Method::PaneSync(params))
+}
+
+pub(super) fn tab_sync(params: crate::api::schema::TabSyncParams) -> std::io::Result<i32> {
+    print_method_response("cli:tab:sync", Method::TabSync(params))
+}
+
 pub(super) fn pane_rename(params: PaneRenameParams) -> std::io::Result<i32> {
     print_method_response("cli:pane:rename", Method::PaneRename(params))
 }

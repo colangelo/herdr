@@ -122,6 +122,16 @@ pub enum PaneZoomMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+pub struct PaneSyncParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    /// `on` puts the pane in the synced set, `off` takes it out. The pane's
+    /// tab must already sync (`sync_not_active` otherwise).
+    #[serde(default)]
+    pub mode: super::SyncMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
 pub struct PaneLayoutParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_id: Option<String>,
@@ -515,6 +525,9 @@ pub struct PaneInfo {
     /// Pinned agents sit at the top of the agent panel in pin order.
     #[serde(default, skip_serializing_if = "super::is_false")]
     pub pinned: bool,
+    /// The pane's tab syncs input and this pane is in the synced set.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub synced: bool,
     /// Why the agent is blocked: `question`, `permission`, `form` or
     /// `other`. Present only while `agent_status` is `blocked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

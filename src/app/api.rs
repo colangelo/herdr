@@ -1274,6 +1274,8 @@ impl App {
             Method::TabCreate(params) => return self.handle_tab_create(request.id, params),
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),
+            Method::TabSync(params) => return self.handle_tab_sync(request.id, params),
+            Method::PaneSync(params) => return self.handle_pane_sync(request.id, params),
             Method::TabMove(params) => return self.handle_tab_move(request.id, params),
             Method::TabClose(params) => return self.handle_tab_close(request.id, params),
             Method::AgentList(params) => return self.handle_agent_list(request.id, params),

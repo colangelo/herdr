@@ -326,6 +326,7 @@ impl App {
             focused: self.state.active == Some(ws_idx) && ws.active_tab == tab_idx,
             pane_count: tab.panes.len(),
             agent_status: pane_agent_status(agg_state, seen),
+            sync: tab.is_syncing(),
         })
     }
 
@@ -493,6 +494,7 @@ impl App {
             display_agent: presentation.display_agent,
             agent_status: pane_agent_status(terminal.state, pane.seen),
             pinned: terminal.pin_order.is_some(),
+            synced: ws.tabs[tab_idx].pane_synced(pane_id),
             blocked_reason: terminal.blocked_reason(),
             blocked_since: terminal.blocked_since_unix_ms(),
             state_labels: presentation.state_labels,

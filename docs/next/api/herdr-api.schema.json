@@ -986,6 +986,10 @@
               },
               "type": "object"
             },
+            "synced": {
+              "description": "The pane's tab syncs input and this pane is in the synced set.",
+              "type": "boolean"
+            },
             "tab_id": {
               "type": "string"
             },
@@ -1207,6 +1211,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "sync": {
+              "description": "Input typed into one pane goes to every synced pane of the tab.",
+              "type": "boolean"
             },
             "tab_id": {
               "type": "string"
@@ -3456,6 +3464,22 @@
           },
           "type": "object"
         },
+        "PaneSyncParams": {
+          "properties": {
+            "mode": {
+              "$ref": "#/schemas/request/$defs/SyncMode",
+              "default": "toggle",
+              "description": "`on` puts the pane in the synced set, `off` takes it out. The pane's\ntab must already sync (`sync_not_active` otherwise)."
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "PaneTarget": {
           "properties": {
             "pane_id": {
@@ -4382,6 +4406,14 @@
             }
           ]
         },
+        "SyncMode": {
+          "enum": [
+            "toggle",
+            "on",
+            "off"
+          ],
+          "type": "string"
+        },
         "TabCloseParams": {
           "description": "`tab.close`, with the same `force` as `pane.close`.",
           "properties": {
@@ -4471,6 +4503,22 @@
             "tab_id",
             "label"
           ],
+          "type": "object"
+        },
+        "TabSyncParams": {
+          "properties": {
+            "mode": {
+              "$ref": "#/schemas/request/$defs/SyncMode",
+              "default": "toggle"
+            },
+            "tab_id": {
+              "description": "The tab to change; the tab on screen when absent.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         },
         "TabTarget": {
@@ -5537,6 +5585,22 @@
         {
           "properties": {
             "method": {
+              "const": "tab.sync",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/TabSyncParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "tab.move",
               "type": "string"
             },
@@ -5846,6 +5910,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneZoomParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.sync",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneSyncParams"
             }
           },
           "required": [
@@ -8461,6 +8541,10 @@
                 "type": "string"
               },
               "type": "object"
+            },
+            "synced": {
+              "description": "The pane's tab syncs input and this pane is in the synced set.",
+              "type": "boolean"
             },
             "tab_id": {
               "type": "string"
@@ -11155,6 +11239,10 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "sync": {
+              "description": "Input typed into one pane goes to every synced pane of the tab.",
+              "type": "boolean"
             },
             "tab_id": {
               "type": "string"
