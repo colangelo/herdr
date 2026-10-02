@@ -306,10 +306,24 @@ fn agent_pin_rank(entries: &[AgentPanelEntry], entry: &AgentPanelEntry) -> usize
 
 /// The marker colour for the pinned row at `rank` (0 is the top pin of its own
 /// list: the spaces list and the agent panel each count from their own top).
+///
+/// The top pin keeps the start colour; every pin below it fades twice as fast
+/// as one step per rung (fork issue 154): the second pin has the colour the
+/// fourth had at one step per rung, the third the sixth's, and so on.
 pub(crate) fn pin_marker_color(rank: usize) -> Color {
+    let steps = if rank == 0 {
+        0
+    } else {
+        rank.saturating_mul(2) + 1
+    };
+    marker_color_after(steps)
+}
+
+/// The start colour dimmed by `steps` steps, down to the floor.
+fn marker_color_after(steps: usize) -> Color {
     let channel = |top: u8, floor: u8| {
         let mut value = u32::from(top);
-        for _ in 0..rank.min(32) {
+        for _ in 0..steps.min(64) {
             value = value * PIN_MARKER_STEP_PERCENT / 100;
         }
         u8::try_from(value.max(u32::from(floor))).unwrap_or(floor)
@@ -3099,6 +3113,17 @@ mod tests {
             "the floor is reached"
         );
         assert_eq!(pin_marker_color(40), pin_marker_color(1000), "and held");
+    }
+
+    /// Fork issue 154: the fade is doubled. The second pin is what the fourth
+    /// was at one step per rung, the third what the sixth was.
+    #[test]
+    fn the_pin_marker_fades_twice_as_fast_as_one_step_per_rung() {
+        assert_eq!(pin_marker_color(0), marker_color_after(0));
+        assert_eq!(pin_marker_color(1), marker_color_after(3), "2nd is old 4th");
+        assert_eq!(pin_marker_color(2), marker_color_after(5), "3rd is old 6th");
+        assert_eq!(pin_marker_color(3), marker_color_after(7), "4th is old 8th");
+        assert_ne!(pin_marker_color(0), pin_marker_color(1));
     }
 
     #[test]
