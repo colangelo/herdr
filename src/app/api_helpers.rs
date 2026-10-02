@@ -153,10 +153,22 @@ fn read_terminal_snapshot_without_dim(
         ReadSource::RecentUnwrapped => terminal.recent_unwrapped_ansi_snapshot(recent_lines),
         ReadSource::Detection => limit_snapshot_lines(terminal.detection_ansi(), line_limit),
     };
-    let keep_sequences = format == crate::api::schema::ReadFormat::Ansi;
     crate::pane::TerminalReadSnapshot {
-        text: crate::api::dim::drop_dim_runs(&styled.text, keep_sequences),
+        text: without_dim_text(&styled.text, format),
         truncated: styled.truncated,
+    }
+}
+
+/// The styled snapshot without its faint runs. A text read ends its lines with
+/// LF like the plain read does (the styled snapshot uses CRLF, fork issue
+/// 147); an ANSI read stays as the snapshot has it.
+fn without_dim_text(styled: &str, format: crate::api::schema::ReadFormat) -> String {
+    let ansi = format == crate::api::schema::ReadFormat::Ansi;
+    let text = crate::api::dim::drop_dim_runs(styled, ansi);
+    if ansi {
+        text
+    } else {
+        text.replace("\r\n", "\n")
     }
 }
 
@@ -174,6 +186,24 @@ pub(crate) fn limit_snapshot_lines(
     crate::pane::TerminalReadSnapshot {
         text: lines[lines.len().saturating_sub(limit)..].concat(),
         truncated: lines.len() > limit,
+    }
+}
+
+#[cfg(test)]
+mod strip_dim_text_tests {
+    use super::without_dim_text;
+    use crate::api::schema::ReadFormat;
+
+    #[test]
+    fn a_strip_dim_text_read_ends_lines_with_lf_and_an_ansi_read_is_left_alone() {
+        let styled = "one \x1b[2mgrey\x1b[0m\r\ntwo\r\n";
+        let text = without_dim_text(styled, ReadFormat::Text);
+        assert_eq!(text, "one \ntwo\n");
+        assert!(!text.contains('\r'));
+        assert_eq!(
+            without_dim_text(styled, ReadFormat::Ansi),
+            "one \x1b[2m\x1b[0m\r\ntwo\r\n"
+        );
     }
 }
 
