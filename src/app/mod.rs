@@ -4450,7 +4450,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_config_preserves_invalid_ui_section_but_applies_valid_keys() {
+    fn reload_config_drops_one_invalid_ui_key_to_its_default_and_applies_valid_keys() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-invalid-ui-section");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -4469,22 +4469,25 @@ mod tests {
         assert!(report
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.contains("invalid ui config")));
+            .any(|diagnostic| diagnostic.contains("ui.toast.delivery")
+                && diagnostic.contains("line 4")));
         assert!(app
             .state
             .keybinds
             .new_workspace
             .matches_prefix(&KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty())));
+        // The bad key falls back to its default, not to the running value
+        // (fork issue 133).
         assert_eq!(
             app.state.toast_config.delivery,
-            crate::config::ToastDelivery::Herdr
+            crate::config::ToastConfig::default().delivery
         );
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
-    fn reload_config_preserves_invalid_terminal_section_but_applies_valid_ui() {
+    fn reload_config_drops_one_invalid_terminal_key_and_applies_its_siblings_and_ui() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-invalid-terminal-section");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -4505,10 +4508,13 @@ mod tests {
         assert!(report
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.contains("invalid terminal config")));
-        assert_eq!(app.state.default_shell, original_default_shell);
+            .any(|diagnostic| diagnostic.contains("terminal.shell_mode")
+                && diagnostic.contains("line 3")));
+        // Only the bad key is lost: its siblings apply, it takes its default.
+        assert_ne!(app.state.default_shell, original_default_shell);
+        assert_eq!(app.state.default_shell, "nu");
         assert_eq!(app.state.shell_mode, original_shell_mode);
-        assert_eq!(app.state.new_terminal_cwd, original_new_cwd);
+        assert_ne!(app.state.new_terminal_cwd, original_new_cwd);
         assert_eq!(
             app.state.toast_config.delivery,
             crate::config::ToastDelivery::Terminal

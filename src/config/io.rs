@@ -124,10 +124,15 @@ impl Config {
             }
         };
 
+        // A value this build does not know (a newer build's enum variant, a
+        // typo) costs that one key, not the file (fork issue 133).
+        let (content, mut repair_diagnostics) = repair_invalid_values(&content);
+
         match deserialize_with_ignored::<Config, _>(toml::Deserializer::new(&content)) {
             Ok((config, ignored_keys)) => {
                 let (unknown_sections, mut diagnostics) =
                     unknown_top_level_sections_from_str(&content);
+                diagnostics.append(&mut repair_diagnostics);
                 diagnostics.extend(unknown_config_key_diagnostics(
                     ignored_keys
                         .into_iter()
@@ -238,6 +243,8 @@ pub fn load_live_config() -> Result<LoadedConfig, Vec<String>> {
 }
 
 fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>> {
+    let (content, repair_diagnostics) = repair_invalid_values(content);
+    let content = content.as_str();
     let value = content
         .parse::<toml::Value>()
         .map_err(|err| vec![format!("config parse error: {err}; keeping current config")])?;
@@ -249,7 +256,8 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
     })?;
 
     let mut config = Config::default();
-    let mut diagnostics = unknown_top_level_section_diagnostics(table);
+    let mut diagnostics = repair_diagnostics;
+    diagnostics.extend(unknown_top_level_section_diagnostics(table));
     diagnostics.extend(unknown_top_level_config_key_diagnostics(table));
     let mut invalid_sections = Vec::new();
 
@@ -365,6 +373,76 @@ fn load_live_config_from_str(content: &str) -> Result<LoadedConfig, Vec<String>>
         config,
         diagnostics,
         invalid_sections,
+    })
+}
+
+/// How many bad values one file may lose before the repair gives up.
+const MAX_VALUE_REPAIRS: usize = 64;
+
+/// Turn each value of valid TOML that the config model rejects (an unknown
+/// enum variant, a wrong type) into a per-key warning, so that key falls back
+/// to its default and the rest of the file applies (fork issue 133). The
+/// offending `key = value` line is blanked, never deleted, so the line
+/// numbers of the other findings stay true. Real TOML syntax errors, and
+/// errors that do not point at a single `key = value` line, are left for the
+/// normal parse to report and reject as before.
+fn repair_invalid_values(content: &str) -> (String, Vec<String>) {
+    if content.parse::<toml::Table>().is_err() {
+        return (content.to_string(), Vec::new());
+    }
+    let mut text = content.to_string();
+    let mut diagnostics = Vec::new();
+    for _ in 0..MAX_VALUE_REPAIRS {
+        let Err(err) = deserialize_with_ignored::<Config, _>(toml::Deserializer::new(&text)) else {
+            break;
+        };
+        let Some(span) = err.span() else { break };
+        let Some((line_start, line_end)) = blank_target_line(&text, span.start) else {
+            break;
+        };
+        let line = &text[line_start..line_end];
+        let Some((key, _)) = line.split_once('=') else {
+            break;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            break;
+        }
+        let path = match table_header_before(&text, line_start) {
+            Some(header) => format!("{header}.{key}"),
+            None => key.to_string(),
+        };
+        let line_number = text[..line_start].matches('\n').count() + 1;
+        diagnostics.push(format!(
+            "invalid value for {path} at line {line_number}: {}; using the default for this key",
+            err.message()
+        ));
+        // Same byte length, so no later span moves.
+        text.replace_range(line_start..line_end, &" ".repeat(line_end - line_start));
+    }
+    (text, diagnostics)
+}
+
+/// The byte range of the line that holds `offset`, when that line is one
+/// `key = value` pair (not a table header or a comment).
+fn blank_target_line(text: &str, offset: usize) -> Option<(usize, usize)> {
+    if offset > text.len() {
+        return None;
+    }
+    let start = text[..offset].rfind('\n').map_or(0, |at| at + 1);
+    let end = text[offset..]
+        .find('\n')
+        .map_or(text.len(), |at| offset + at);
+    let line = text[start..end].trim_start();
+    (line.contains('=') && !line.starts_with('[') && !line.starts_with('#')).then_some((start, end))
+}
+
+/// The dotted name of the last `[table]` header above `offset`, if any.
+fn table_header_before(text: &str, offset: usize) -> Option<String> {
+    text[..offset].lines().rev().find_map(|line| {
+        let line = line.trim();
+        let inner = line.strip_prefix('[')?.strip_suffix(']')?;
+        Some(inner.trim_matches(['[', ']']).trim().to_string())
     })
 }
 
@@ -734,6 +812,110 @@ fn upsert_section_raw(content: &str, section: &str, key: &str, value: &str) -> S
 mod tests {
     use super::*;
 
+    // Fork issue 133: one value this build does not know costs that key only.
+    const CONFIG_WITH_ONE_BAD_VALUE: &str = "\
+[keys]
+prefix = \"ctrl+a\"
+
+[theme]
+name = \"nord\"
+
+[ui]
+sidebar_width = 31
+workspace_sort = \"from-a-newer-build\"
+agent_panel_sort = \"priority\"
+";
+
+    #[test]
+    fn an_unknown_enum_value_is_a_per_key_warning_with_its_line() {
+        let (repaired, diagnostics) = repair_invalid_values(CONFIG_WITH_ONE_BAD_VALUE);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(
+            diagnostics[0].contains("ui.workspace_sort"),
+            "{diagnostics:?}"
+        );
+        assert!(diagnostics[0].contains("line 9"), "{diagnostics:?}");
+        assert!(
+            diagnostics[0].contains("from-a-newer-build"),
+            "{diagnostics:?}"
+        );
+        assert!(diagnostics[0].contains("default"), "{diagnostics:?}");
+        // The rest of the file is untouched and still parses.
+        let config: Config = toml::from_str(&repaired).expect("repaired file parses");
+        assert_eq!(config.ui.sidebar_width, 31);
+        assert_eq!(config.theme.name.as_deref(), Some("nord"));
+        assert_eq!(
+            repaired.len(),
+            CONFIG_WITH_ONE_BAD_VALUE.len(),
+            "lines keep their place"
+        );
+    }
+
+    #[test]
+    fn a_live_reload_keeps_every_other_key_and_section_when_one_value_is_bad() {
+        let loaded = load_live_config_from_str(CONFIG_WITH_ONE_BAD_VALUE).expect("loads");
+        assert_eq!(loaded.config.ui.sidebar_width, 31);
+        assert_eq!(loaded.config.theme.name.as_deref(), Some("nord"));
+        assert!(
+            loaded
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("ui.workspace_sort") && d.contains("line 9")),
+            "{:?}",
+            loaded.diagnostics
+        );
+        assert!(loaded.invalid_sections.is_empty(), "no section was dropped");
+    }
+
+    #[test]
+    fn several_bad_values_are_each_reported_and_the_default_applies() {
+        let content =
+            "[ui]\nworkspace_sort = \"x\"\nsidebar_width = 31\nagent_panel_sort = \"y\"\n";
+        let (repaired, diagnostics) = repair_invalid_values(content);
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+        let config: Config = toml::from_str(&repaired).unwrap();
+        assert_eq!(config.ui.sidebar_width, 31);
+    }
+
+    // The report that opened fork issue 133: a newer build's variant in a
+    // nested table dropped every keybinding, the theme and all of [ui].
+    #[test]
+    fn a_newer_builds_variant_in_a_nested_table_keeps_keys_theme_and_ui() {
+        let content = "[keys]\nprefix = \"ctrl+a\"\n\n[theme]\nname = \"nord\"\n\n[ui]\nsidebar_width = 31\n\n[ui.toast.clipboard]\nenabled = true\nposition = \"from-a-newer-build\"\n";
+        let loaded = load_live_config_from_str(content).expect("loads");
+        assert_eq!(loaded.config.ui.sidebar_width, 31);
+        assert_eq!(loaded.config.theme.name.as_deref(), Some("nord"));
+        assert!(
+            loaded.config.ui.toast.clipboard.enabled,
+            "its sibling key applies"
+        );
+        assert!(
+            loaded
+                .diagnostics
+                .iter()
+                .any(|d| { d.contains("ui.toast.clipboard.position") && d.contains("line 12") }),
+            "{:?}",
+            loaded.diagnostics
+        );
+    }
+
+    #[test]
+    fn broken_toml_syntax_is_still_rejected_whole() {
+        let content = "[ui\nworkspace_sort = \"x\"\n";
+        let (repaired, diagnostics) = repair_invalid_values(content);
+        assert_eq!(repaired, content);
+        assert!(diagnostics.is_empty());
+        assert!(load_live_config_from_str(content).is_err());
+    }
+
+    #[test]
+    fn a_clean_file_has_nothing_to_repair() {
+        let content = "[ui]\nsidebar_width = 31\n";
+        let (repaired, diagnostics) = repair_invalid_values(content);
+        assert_eq!(repaired, content);
+        assert!(diagnostics.is_empty());
+    }
+
     #[test]
     fn upsert_top_level_bool_replaces_existing_value() {
         let content = "onboarding = true\n[keys]\nprefix = \"ctrl+b\"\n";
@@ -1081,7 +1263,7 @@ agent_panel_sort = "priority"
     }
 
     #[test]
-    fn load_live_config_discards_ignored_keys_from_an_invalid_section() {
+    fn load_live_config_reports_a_bad_value_and_an_unknown_key_separately() {
         let loaded = load_live_config_from_str(
             r#"
 [ui]
@@ -1091,10 +1273,12 @@ mouse_captur = true
         )
         .unwrap();
 
-        assert_eq!(loaded.diagnostics.len(), 1);
-        assert!(loaded.diagnostics[0].contains("invalid ui config"));
-        assert!(!loaded.diagnostics[0].starts_with("unknown config key"));
-        assert_eq!(loaded.invalid_sections, vec!["ui"]);
+        // The bad value is one warning with its line; the unknown key next to
+        // it is another; the section is not dropped (fork issue 133).
+        assert_eq!(loaded.diagnostics.len(), 2, "{:?}", loaded.diagnostics);
+        assert!(loaded.diagnostics[0].contains("invalid value for ui.mouse_capture at line 3"));
+        assert!(loaded.diagnostics[1].starts_with("unknown config key ui.mouse_captur"));
+        assert!(loaded.invalid_sections.is_empty());
     }
 
     #[test]
