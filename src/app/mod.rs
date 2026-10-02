@@ -30,6 +30,7 @@ mod runtime;
 mod runtime_mutations;
 mod session;
 pub mod state;
+mod sync_panes;
 mod tab_bar_status;
 mod terminal_targets;
 mod terminal_titles;

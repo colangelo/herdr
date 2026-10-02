@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,6 +12,17 @@ use crate::render_signal::RenderSignal;
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, TerminalState};
 
 pub(crate) type DetachedPane = (PaneId, TerminalId);
+
+/// Synchronized input for a tab (fork issue 141): what is typed into the
+/// focused pane also goes to every other pane of the tab that is not in
+/// `excluded`. Runtime state: never saved in a snapshot and never carried
+/// through a live handoff, so a restart turns it off.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncPanes {
+    /// Panes taken out of the set. A pane created while sync is on is not in
+    /// here, so it joins; a closed pane's id is dropped when asked about.
+    pub excluded: HashSet<PaneId>,
+}
 
 pub(crate) struct MovedPane {
     pub pane_id: PaneId,
@@ -46,12 +57,76 @@ pub struct Tab {
     #[cfg(test)]
     pub runtimes: HashMap<PaneId, TerminalRuntime>,
     pub zoomed: bool,
+    /// `Some` while the tab types into several panes at once.
+    pub sync: Option<SyncPanes>,
     pub events: mpsc::Sender<AppEvent>,
     pub(crate) render_notify: Arc<Notify>,
     pub(crate) render_dirty: Arc<RenderSignal>,
 }
 
 impl Tab {
+    /// Whether the tab is in sync mode.
+    pub fn is_syncing(&self) -> bool {
+        self.sync.is_some()
+    }
+
+    /// Turn sync on (every pane of the tab in) or off. Turning it on again
+    /// starts from every pane, forgetting earlier exclusions.
+    pub fn set_sync(&mut self, on: bool) {
+        self.sync = on.then(SyncPanes::default);
+    }
+
+    /// Whether `pane_id` is in the synced set: the tab syncs and the pane was
+    /// not taken out.
+    pub fn pane_synced(&self, pane_id: PaneId) -> bool {
+        self.sync.as_ref().is_some_and(|sync| {
+            self.panes.contains_key(&pane_id) && !sync.excluded.contains(&pane_id)
+        })
+    }
+
+    /// Every pane of the synced set, in layout reading order. Empty when the
+    /// tab does not sync.
+    pub fn synced_panes(&self) -> Vec<PaneId> {
+        if self.sync.is_none() {
+            return Vec::new();
+        }
+        self.layout
+            .pane_ids()
+            .into_iter()
+            .filter(|pane_id| self.pane_synced(*pane_id))
+            .collect()
+    }
+
+    /// The panes that also receive what is typed into `focused`: the rest of
+    /// the synced set, in layout order. Empty when the tab does not sync or
+    /// `focused` was taken out (the exclusion wins: it is typed into alone).
+    pub fn sync_peers(&self, focused: PaneId) -> Vec<PaneId> {
+        if !self.pane_synced(focused) {
+            return Vec::new();
+        }
+        self.synced_panes()
+            .into_iter()
+            .filter(|pane_id| *pane_id != focused)
+            .collect()
+    }
+
+    /// Take a pane out of the synced set, or put it back. `None` when the tab
+    /// does not sync or the pane is not in it; else whether the pane is in
+    /// the set now.
+    pub fn toggle_pane_sync(&mut self, pane_id: PaneId) -> Option<bool> {
+        if !self.panes.contains_key(&pane_id) {
+            return None;
+        }
+        let sync = self.sync.as_mut()?;
+        sync.excluded.retain(|id| self.panes.contains_key(id));
+        if sync.excluded.remove(&pane_id) {
+            Some(true)
+        } else {
+            sync.excluded.insert(pane_id);
+            Some(false)
+        }
+    }
+
     // Tab construction threads pane runtime geometry, host context, and render hooks.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -188,6 +263,7 @@ impl Tab {
                 #[cfg(test)]
                 runtimes: HashMap::new(),
                 zoomed: false,
+                sync: None,
                 events,
                 render_notify,
                 render_dirty,
@@ -481,6 +557,7 @@ impl Tab {
             #[cfg(test)]
             runtimes: HashMap::new(),
             zoomed: false,
+            sync: None,
             events,
             render_notify,
             render_dirty,

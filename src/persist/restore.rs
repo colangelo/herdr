@@ -966,6 +966,9 @@ fn restore_tab(
                 #[cfg(test)]
                 runtimes: HashMap::new(),
                 zoomed: snap.zoomed,
+                // Sync mode is never saved: a restart or a live handoff turns
+                // it off (fork issue 141).
+                sync: None,
                 events: runtime_context.events.clone(),
                 render_notify: runtime_context.render_notify.clone(),
                 render_dirty: runtime_context.render_dirty.clone(),
