@@ -1426,7 +1426,7 @@ fn top_non_empty_lines(content: &str, count: usize) -> &str {
         return "";
     };
     let byte_offset = line_start_offset(content, &lines, end_index + 1);
-    &content[..byte_offset]
+    content.get(..byte_offset).unwrap_or("")
 }
 
 fn after_last_prompt_marker(content: &str) -> &str {
@@ -1446,7 +1446,7 @@ fn before_current_prompt_marker(content: &str) -> &str {
         .iter()
         .map(|line| line.len() + 1)
         .sum::<usize>();
-    &content[..byte_offset.min(content.len())]
+    content.get(..byte_offset.min(content.len())).unwrap_or("")
 }
 
 fn whole_recent_without_current_prompt_marker(content: &str) -> &str {
@@ -1506,7 +1506,7 @@ fn prompt_box_body(content: &str) -> Option<&str> {
         .map(|relative| top + 1 + relative)
         .unwrap_or(lines.len());
     let end = line_start_offset(content, &lines, end_index);
-    Some(&content[start.min(content.len())..end.min(content.len())])
+    content.get(start.min(content.len())..end.min(content.len()))
 }
 
 /// The grey Claude Code draws a command's argument hint in (`/compact
@@ -1550,7 +1550,7 @@ fn above_prompt_box(content: &str) -> &str {
         return content;
     };
     let end = line_start_offset(content, &lines, top);
-    &content[..end.min(content.len())]
+    content.get(..end.min(content.len())).unwrap_or(content)
 }
 
 /// Everything after the last horizontal rule. A labelled rule
@@ -1574,7 +1574,9 @@ fn after_last_horizontal_rule(content: &str) -> &str {
         }
         offset = next_offset;
     }
-    &content[before_trailing_label.unwrap_or(last_rule_end)..]
+    content
+        .get(before_trailing_label.unwrap_or(last_rule_end)..)
+        .unwrap_or("")
 }
 
 /// A horizontal rule carrying text after its run of `─`.
@@ -1631,7 +1633,7 @@ fn is_horizontal_rule(line: &str) -> bool {
 
 fn slice_from_line_index<'a>(content: &'a str, lines: &[&str], index: usize) -> &'a str {
     let byte_offset = line_start_offset(content, lines, index);
-    &content[byte_offset.min(content.len())..]
+    content.get(byte_offset.min(content.len())..).unwrap_or("")
 }
 
 fn line_start_offset(content: &str, lines: &[&str], index: usize) -> usize {

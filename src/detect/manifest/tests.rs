@@ -1497,3 +1497,22 @@ mod input_box {
         assert_eq!(claude_input_box_text(""), None);
     }
 }
+
+/// Fork issue 146: a region helper must never panic on an offset inside a
+/// multi-byte character, the way CRLF text with wide characters puts one: a
+/// server panic kills every pane.
+#[test]
+fn region_helpers_never_panic_on_crlf_and_wide_characters() {
+    let rule = "─".repeat(30);
+    for filler in ["", "三", "三四五", "✻", "é"] {
+        let text = format!(
+            "{filler} out\r\n{filler}\r\n{rule}\r\n❯ {filler}x\r\n{rule} name ─\r\n  footer {filler}\r\n"
+        );
+        let _ = super::prompt_box_body(&text);
+        let _ = super::above_prompt_box(&text);
+        let _ = super::after_last_horizontal_rule(&text);
+        let _ = super::before_current_prompt_marker(&text);
+        let _ = super::after_last_prompt_marker(&text);
+        let _ = super::last_non_empty_line(super::above_prompt_box(&text));
+    }
+}
