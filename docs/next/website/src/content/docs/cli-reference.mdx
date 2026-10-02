@@ -156,6 +156,8 @@ Create a workspace without stealing focus:
 herdr workspace create --cwd ~/project --label api --no-focus
 ```
 
+Pin with the mouse too: right-click a space for Pin or Unpin (first in its menu), right-click an agent row in the agent panel for Pin or Unpin, and click the `↑` marker of a pinned row to unpin it. With bubble motion, pinning bubbles the row up into the pinned block and unpinning bubbles it back down.
+
 Pinned workspaces sit at the top of the list in pin order, under every sort. `pin` is idempotent, `unpin` returns the row to where the sort puts it, and `.result.workspace.pinned` reports the state. The pin is saved with the session.
 
 A workspace is a top-level project or work context. Creating one also creates its first tab and root pane. The JSON response exposes their IDs as `.result.workspace.workspace_id`, `.result.tab.tab_id`, and `.result.root_pane.pane_id`.

@@ -330,6 +330,56 @@ impl AppState {
         })
     }
 
+    /// The pinned space whose `↑` marker is at this cell. The marker sits in the
+    /// last cell of the name row's lead, so its column follows the lead width
+    /// (`ui::sidebar` draws the same cell).
+    pub(super) fn pinned_workspace_marker_at(&self, col: u16, row: u16) -> Option<usize> {
+        self.workspace_at_row(row)?;
+        let cards = if self.view.workspace_card_areas.is_empty() {
+            crate::ui::compute_workspace_card_areas(self, self.view.sidebar_rect)
+        } else {
+            self.view.workspace_card_areas.clone()
+        };
+        let bar_reserve =
+            u16::from(self.sidebar_active_border == crate::config::SidebarActiveBorderConfig::Left);
+        cards.iter().find_map(|card| {
+            let ws = self.workspaces.get(card.ws_idx)?;
+            if ws.pin_order.is_none() || row != card.rect.y {
+                return None;
+            }
+            let lead = if card.indented {
+                3
+            } else if crate::ui::workspace_parent_group_state(self, card.ws_idx).is_some() {
+                2
+            } else {
+                1
+            };
+            (col == card.rect.x + bar_reserve + lead - 1).then_some(card.ws_idx)
+        })
+    }
+
+    /// The pinned agent whose `↑` marker is at this cell: the first cell of its
+    /// name row.
+    pub(super) fn pinned_agent_marker_at(
+        &self,
+        col: u16,
+        row: u16,
+    ) -> Option<crate::layout::PaneId> {
+        let (_, _, pane_id, top) = self.agent_detail_target_and_top_at(row)?;
+        let terminal = self.pane_terminal(pane_id)?;
+        let body = crate::ui::agent_panel_body_rect(
+            self.agent_panel_rect(),
+            crate::ui::should_show_scrollbar(crate::ui::agent_panel_scroll_metrics(
+                self,
+                self.agent_panel_rect(),
+            )),
+        );
+        let bar_reserve =
+            u16::from(self.sidebar_active_border == crate::config::SidebarActiveBorderConfig::Left);
+        (terminal.pin_order.is_some() && row == top && col == body.x + bar_reserve)
+            .then_some(pane_id)
+    }
+
     pub(super) fn collapsed_workspace_at_row(&self, row: u16) -> Option<usize> {
         if !self.sidebar_collapsed {
             return None;
@@ -500,6 +550,15 @@ impl AppState {
         &self,
         row: u16,
     ) -> Option<(usize, usize, crate::layout::PaneId)> {
+        self.agent_detail_target_and_top_at(row)
+            .map(|(ws_idx, tab_idx, pane_id, _)| (ws_idx, tab_idx, pane_id))
+    }
+
+    /// [`Self::agent_detail_target_at`] plus the screen row the entry starts on.
+    pub(super) fn agent_detail_target_and_top_at(
+        &self,
+        row: u16,
+    ) -> Option<(usize, usize, crate::layout::PaneId, u16)> {
         if self.sidebar_collapsed {
             return None;
         }
@@ -524,7 +583,7 @@ impl AppState {
                 break;
             }
             if row >= row_y && row < row_y.saturating_add(height) {
-                return Some((detail.ws_idx, detail.tab_idx, detail.pane_id));
+                return Some((detail.ws_idx, detail.tab_idx, detail.pane_id, row_y));
             }
             row_y = row_y
                 .saturating_add(height)

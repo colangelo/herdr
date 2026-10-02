@@ -366,7 +366,10 @@ mod tests {
         crate::ui::test_support::overlay_snapshot_of(|app| {
             app.open_overlay(crate::app::state::Overlay::ContextMenu(
                 crate::app::state::ContextMenuState {
-                    kind: crate::app::state::ContextMenuKind::Workspace { ws_idx: 0 },
+                    kind: crate::app::state::ContextMenuKind::Workspace {
+                        ws_idx: 0,
+                        pinned: false,
+                    },
                     x: 10,
                     y: 5,
                     list: crate::app::state::ListCursor::new(0),
@@ -374,9 +377,10 @@ mod tests {
             ));
         })
         .assert(
-            Rect::new(10, 5, 14, 4),
+            Rect::new(10, 5, 14, 5),
             &[
                 "┌────────────┐",
+                "│ Pin        │",
                 "│ Rename     │",
                 "│ Close      │",
                 "└────────────┘",
@@ -400,6 +404,62 @@ mod tests {
                 "│ reload config │",
                 "│ detach        │",
                 "└───────────────┘",
+            ],
+        );
+    }
+
+    #[test]
+    fn snapshot_pinned_workspace_context_menu_offers_unpin_first() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            app.open_overlay(crate::app::state::Overlay::ContextMenu(
+                crate::app::state::ContextMenuState {
+                    kind: crate::app::state::ContextMenuKind::Workspace {
+                        ws_idx: 0,
+                        pinned: true,
+                    },
+                    x: 10,
+                    y: 5,
+                    list: crate::app::state::ListCursor::new(0),
+                },
+            ));
+        })
+        .assert(
+            Rect::new(10, 5, 14, 5),
+            &[
+                "┌────────────┐",
+                "│ Unpin      │",
+                "│ Rename     │",
+                "│ Close      │",
+                "└────────────┘",
+            ],
+        );
+    }
+
+    #[test]
+    fn snapshot_agent_context_menu() {
+        crate::ui::test_support::overlay_snapshot_of(|app| {
+            let pane_id = app.workspaces[0].tabs[0].root_pane;
+            app.open_overlay(crate::app::state::Overlay::ContextMenu(
+                crate::app::state::ContextMenuState {
+                    kind: crate::app::state::ContextMenuKind::Agent {
+                        ws_idx: 0,
+                        tab_idx: 0,
+                        pane_id,
+                        pinned: false,
+                    },
+                    x: 10,
+                    y: 5,
+                    list: crate::app::state::ListCursor::new(0),
+                },
+            ));
+        })
+        .assert(
+            Rect::new(10, 5, 15, 4),
+            &[
+                "┌─────────────┐",
+                "│ Pin         │",
+                "│ Rename pane │",
+                "└─────────────┘",
             ],
         );
     }

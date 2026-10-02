@@ -1008,6 +1008,17 @@ impl AppState {
                         }
                     }
 
+                    // A click on a pinned row's `↑` unpins it; anywhere else on
+                    // the row focuses as before.
+                    if let Some(ws_idx) = self.pinned_workspace_marker_at(mouse.column, mouse.row) {
+                        self.unpin_workspace(ws_idx);
+                        return None;
+                    }
+                    if let Some(pane_id) = self.pinned_agent_marker_at(mouse.column, mouse.row) {
+                        self.unpin_agent(pane_id);
+                        return None;
+                    }
+
                     if let Some(idx) = self.workspace_at_row(mouse.row) {
                         self.workspace_presses.insert(
                             source_id,
@@ -1495,6 +1506,7 @@ impl AppState {
                                     .is_some_and(|space| !space.is_linked_worktree);
                             show_git_menu.then_some(ContextMenuKind::GitWorkspace {
                                 ws_idx: idx,
+                                pinned: ws.pin_order.is_some(),
                                 is_linked_worktree,
                                 has_worktree_children: group_state.is_some(),
                                 collapsed: group_state
@@ -1502,9 +1514,29 @@ impl AppState {
                                     .is_some_and(|(_, collapsed)| *collapsed),
                             })
                         })
-                        .unwrap_or(ContextMenuKind::Workspace { ws_idx: idx });
+                        .unwrap_or(ContextMenuKind::Workspace {
+                            ws_idx: idx,
+                            pinned: self.workspaces[idx].pin_order.is_some(),
+                        });
                     self.open_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
                         kind,
+                        x: mouse.column,
+                        y: mouse.row,
+                        list: ListCursor::new(0),
+                    }));
+                } else if let Some((ws_idx, tab_idx, pane_id)) =
+                    self.agent_detail_target_at(mouse.row)
+                {
+                    let pinned = self
+                        .pane_terminal(pane_id)
+                        .is_some_and(|terminal| terminal.pin_order.is_some());
+                    self.open_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
+                        kind: ContextMenuKind::Agent {
+                            ws_idx,
+                            tab_idx,
+                            pane_id,
+                            pinned,
+                        },
                         x: mouse.column,
                         y: mouse.row,
                         list: ListCursor::new(0),
@@ -3040,6 +3072,150 @@ mod tests {
     }
 
     #[test]
+    fn clicking_the_marker_of_a_pinned_space_unpins_it_and_other_clicks_focus() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("first"), Workspace::test_new("second")];
+        app.state.active = Some(1);
+        app.state.selected = 1;
+        app.state.pin_workspace(0);
+        let area = Rect::new(0, 0, 106, 20);
+        crate::ui::compute_view(&mut app.state, area);
+        let card = app.state.view.workspace_card_areas[0];
+        assert_eq!(card.ws_idx, 0, "the pinned space is the first card");
+
+        // A click beside the marker focuses the row as before; it stays pinned.
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            card.rect.x + 6,
+            card.rect.y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            card.rect.x + 6,
+            card.rect.y,
+        ));
+        assert_eq!(app.state.active, Some(0));
+        assert!(app.state.workspaces[0].pin_order.is_some());
+
+        // A click on the marker unpins it and does not move focus.
+        app.state.active = Some(1);
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            card.rect.x,
+            card.rect.y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            card.rect.x,
+            card.rect.y,
+        ));
+        assert!(app.state.workspaces[0].pin_order.is_none());
+        assert_eq!(app.state.active, Some(1));
+    }
+
+    #[test]
+    fn right_click_menus_pin_and_unpin_a_space_and_an_agent() {
+        use crate::app::state::Overlay;
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("first"), Workspace::test_new("second")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let area = Rect::new(0, 0, 106, 30);
+        crate::ui::compute_view(&mut app.state, area);
+
+        // Space menu: Pin first, then (pinned) Unpin first.
+        let card = app.state.view.workspace_card_areas[1];
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            card.rect.x + 4,
+            card.rect.y,
+        ));
+        let menu = app.state.take_context_menu().expect("space menu opens");
+        assert_eq!(menu.items()[0], "Pin");
+        let ws_idx = match menu.kind {
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. } => ws_idx,
+            ref other => panic!("space menu expected, got {other:?}"),
+        };
+        app.apply_context_menu_action_via_api(menu, 0);
+        assert!(app.state.workspaces[ws_idx].pin_order.is_some());
+        app.state
+            .set_overlay(Overlay::ContextMenu(ContextMenuState {
+                kind: ContextMenuKind::Workspace {
+                    ws_idx,
+                    pinned: true,
+                },
+                x: 0,
+                y: 0,
+                list: ListCursor::new(0),
+            }));
+        let menu = app.state.take_context_menu().unwrap();
+        assert_eq!(menu.items()[0], "Unpin");
+        app.apply_context_menu_action_via_api(menu, 0);
+        assert!(app.state.workspaces[ws_idx].pin_order.is_none());
+
+        // Agent menu: a right click on an agent row offers Pin / Rename pane.
+        let pane_id = app.state.workspaces[1].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        crate::ui::compute_view(&mut app.state, area);
+        let body = crate::ui::agent_panel_body_rect(app.state.agent_panel_rect(), false);
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            body.x + 4,
+            body.y,
+        ));
+        let menu = app.state.take_context_menu().expect("agent menu opens");
+        assert_eq!(menu.items(), vec!["Pin", "Rename pane"]);
+        assert!(matches!(
+            menu.kind,
+            ContextMenuKind::Agent { pinned: false, .. }
+        ));
+        app.apply_context_menu_action_via_api(menu, 0);
+        assert!(app.state.terminals[&terminal_id].pin_order.is_some());
+    }
+
+    #[test]
+    fn clicking_the_marker_of_a_pinned_agent_unpins_it() {
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("first")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        app.state.pin_agent(pane_id);
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 30));
+        let body = crate::ui::agent_panel_body_rect(app.state.agent_panel_rect(), false);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            body.x,
+            body.y,
+        ));
+        assert!(app.state.terminals[&terminal_id].pin_order.is_none());
+    }
+
+    #[test]
     fn concurrent_input_sources_keep_their_tab_clicks() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");
@@ -4244,7 +4420,10 @@ mod tests {
         let mut app = app_for_mouse_test();
         app.state
             .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
-                kind: ContextMenuKind::Workspace { ws_idx: 0 },
+                kind: ContextMenuKind::Workspace {
+                    ws_idx: 0,
+                    pinned: false,
+                },
                 x: 2,
                 y: 2,
                 list: ListCursor::new(0),
@@ -4894,10 +5073,13 @@ mod tests {
 
         app.state
             .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
-                kind: ContextMenuKind::Workspace { ws_idx: 1 },
+                kind: ContextMenuKind::Workspace {
+                    ws_idx: 1,
+                    pinned: false,
+                },
                 x: 2,
                 y: 2,
-                list: ListCursor::new(1),
+                list: ListCursor::new(2),
             }));
         app.state.mode = Mode::ContextMenu;
         handle_context_menu_key(
@@ -4935,10 +5117,13 @@ mod tests {
         app.state.confirm_close = false;
         app.state
             .set_overlay(crate::app::state::Overlay::ContextMenu(ContextMenuState {
-                kind: ContextMenuKind::Workspace { ws_idx: 1 },
+                kind: ContextMenuKind::Workspace {
+                    ws_idx: 1,
+                    pinned: false,
+                },
                 x: 2,
                 y: 2,
-                list: ListCursor::new(1),
+                list: ListCursor::new(2),
             }));
         app.state.mode = Mode::ContextMenu;
 
@@ -4946,7 +5131,7 @@ mod tests {
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
             menu.x + 2,
-            menu.y + 2,
+            menu.y + 3,
         ));
 
         assert_eq!(app.state.workspaces.len(), 1);

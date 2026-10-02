@@ -859,13 +859,30 @@ pub(super) fn apply_context_menu_action(
             leave_modal(state);
         }
         (
-            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            Some("Pin" | "Unpin"),
+        ) => {
+            state.toggle_pin_workspace(ws_idx);
+            leave_modal(state);
+        }
+        (ContextMenuKind::Agent { pane_id, .. }, Some("Pin" | "Unpin")) => {
+            state.toggle_pin_agent(pane_id);
+            leave_modal(state);
+        }
+        (ContextMenuKind::Agent { pane_id, .. }, Some("Rename pane")) => {
+            open_rename_pane(state, pane_id);
+        }
+        (
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
             Some("Rename"),
         ) => {
             open_rename_workspace(state, terminal_runtimes, ws_idx);
         }
         (
-            ContextMenuKind::Workspace { ws_idx } | ContextMenuKind::GitWorkspace { ws_idx, .. },
+            ContextMenuKind::Workspace { ws_idx, .. }
+            | ContextMenuKind::GitWorkspace { ws_idx, .. },
             Some("Close" | "Close group"),
         ) => {
             state.selected = ws_idx;
@@ -1898,12 +1915,27 @@ impl App {
                 leave_modal(&mut self.state);
             }
             (
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
+                | ContextMenuKind::GitWorkspace { ws_idx, .. },
+                Some("Pin" | "Unpin"),
+            ) => {
+                self.state.toggle_pin_workspace(ws_idx);
+                leave_modal(&mut self.state);
+            }
+            (ContextMenuKind::Agent { pane_id, .. }, Some("Pin" | "Unpin")) => {
+                self.state.toggle_pin_agent(pane_id);
+                leave_modal(&mut self.state);
+            }
+            (ContextMenuKind::Agent { pane_id, .. }, Some("Rename pane")) => {
+                open_rename_pane(&mut self.state, pane_id);
+            }
+            (
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
                 Some("Rename"),
             ) => open_rename_workspace(&mut self.state, &self.terminal_runtimes, ws_idx),
             (
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. },
                 Some("Close" | "Close group"),
             ) => {
@@ -3350,6 +3382,7 @@ mod tests {
         let menu = ContextMenuState {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
+                pinned: false,
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed: false,
@@ -3360,7 +3393,7 @@ mod tests {
         };
         let mut terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
 
-        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 1);
+        apply_context_menu_action(&mut state, &mut terminal_runtimes, menu, 2);
 
         assert_eq!(state.selected, 0);
         assert_eq!(state.mode, Mode::ConfirmClose);

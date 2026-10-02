@@ -7325,10 +7325,13 @@ last_pane = "prefix+tab"
         app.state
             .set_overlay(crate::app::state::Overlay::ContextMenu(
                 state::ContextMenuState {
-                    kind: state::ContextMenuKind::Workspace { ws_idx: 1 },
+                    kind: state::ContextMenuKind::Workspace {
+                        ws_idx: 1,
+                        pinned: false,
+                    },
                     x: 2,
                     y: 2,
-                    list: state::ListCursor::new(1),
+                    list: state::ListCursor::new(2),
                 },
             ));
         app.state.mode = Mode::ContextMenu;

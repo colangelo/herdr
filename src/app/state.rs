@@ -1695,9 +1695,11 @@ pub(crate) struct TabPressState {
 pub enum ContextMenuKind {
     Workspace {
         ws_idx: usize,
+        pinned: bool,
     },
     GitWorkspace {
         ws_idx: usize,
+        pinned: bool,
         is_linked_worktree: bool,
         has_worktree_children: bool,
         collapsed: bool,
@@ -1705,6 +1707,13 @@ pub enum ContextMenuKind {
     Tab {
         ws_idx: usize,
         tab_idx: usize,
+    },
+    /// An agent row in the agent panel.
+    Agent {
+        ws_idx: usize,
+        tab_idx: usize,
+        pane_id: PaneId,
+        pinned: bool,
     },
     Pane {
         ws_idx: usize,
@@ -1724,31 +1733,58 @@ pub struct ContextMenuState {
     pub list: ListCursor,
 }
 
+/// The pin item's label follows the state of the row it acts on.
+fn pin_label(pinned: bool) -> &'static str {
+    if pinned {
+        "Unpin"
+    } else {
+        "Pin"
+    }
+}
+
 impl ContextMenuState {
     pub fn items(&self) -> Vec<&'static str> {
         match self.kind {
-            ContextMenuKind::Workspace { .. } => vec!["Rename", "Close"],
+            ContextMenuKind::Workspace { pinned, .. } => {
+                vec![pin_label(pinned), "Rename", "Close"]
+            }
             ContextMenuKind::GitWorkspace {
+                pinned,
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
-            } => vec!["Rename", "Close", "New worktree", "Open worktree..."],
+            } => vec![
+                pin_label(pinned),
+                "Rename",
+                "Close",
+                "New worktree",
+                "Open worktree...",
+            ],
             ContextMenuKind::GitWorkspace {
+                pinned,
                 is_linked_worktree: true,
                 ..
-            } => vec!["Rename", "Close", "Delete worktree checkout..."],
+            } => vec![
+                pin_label(pinned),
+                "Rename",
+                "Close",
+                "Delete worktree checkout...",
+            ],
             ContextMenuKind::GitWorkspace {
+                pinned,
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed,
                 ..
             } => vec![
+                pin_label(pinned),
                 "Rename",
                 "Close group",
                 "New worktree",
                 "Open worktree...",
                 if collapsed { "Expand" } else { "Collapse" },
             ],
+            ContextMenuKind::Agent { pinned, .. } => vec![pin_label(pinned), "Rename pane"],
             ContextMenuKind::Tab { .. } => vec!["New tab", "Rename", "Close"],
             ContextMenuKind::Pane {
                 source_pane_id,
@@ -4387,9 +4423,26 @@ impl AppState {
         }
         if let Some(menu) = self.context_menu() {
             match menu.kind {
-                ContextMenuKind::Workspace { ws_idx }
+                ContextMenuKind::Workspace { ws_idx, .. }
                 | ContextMenuKind::GitWorkspace { ws_idx, .. } => {
                     assert_workspace_index(ws_idx, "context menu workspace")
+                }
+                ContextMenuKind::Agent {
+                    ws_idx,
+                    tab_idx,
+                    pane_id,
+                    ..
+                } => {
+                    assert_tab_index(ws_idx, tab_idx, "context menu agent tab");
+                    assert!(
+                        self.workspaces[ws_idx].tabs[tab_idx]
+                            .panes
+                            .contains_key(&pane_id),
+                        "context menu agent references pane {:?} outside workspace {} tab {}",
+                        pane_id,
+                        ws_idx,
+                        tab_idx
+                    );
                 }
                 ContextMenuKind::Tab { ws_idx, tab_idx } => {
                     assert_tab_index(ws_idx, tab_idx, "context menu tab")
@@ -5116,7 +5169,10 @@ mod tests {
             OverlayKind::KeybindHelp => Overlay::KeybindHelp(KeybindHelpState::default()),
             OverlayKind::Navigator => Overlay::Navigator(NavigatorState::default()),
             OverlayKind::ContextMenu => Overlay::ContextMenu(ContextMenuState {
-                kind: ContextMenuKind::Workspace { ws_idx: 0 },
+                kind: ContextMenuKind::Workspace {
+                    ws_idx: 0,
+                    pinned: false,
+                },
                 x: 0,
                 y: 0,
                 list: ListCursor::new(0),
@@ -5414,6 +5470,7 @@ mod tests {
         let menu = ContextMenuState {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
+                pinned: false,
                 is_linked_worktree: true,
                 has_worktree_children: false,
                 collapsed: false,
@@ -5425,7 +5482,7 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "Delete worktree checkout..."]
+            &["Pin", "Rename", "Close", "Delete worktree checkout..."]
         );
     }
 
@@ -5434,6 +5491,7 @@ mod tests {
         let menu = ContextMenuState {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
+                pinned: false,
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 collapsed: false,
@@ -5445,7 +5503,7 @@ mod tests {
 
         assert_eq!(
             menu.items(),
-            &["Rename", "Close", "New worktree", "Open worktree..."]
+            &["Pin", "Rename", "Close", "New worktree", "Open worktree..."]
         );
     }
 
@@ -5454,6 +5512,7 @@ mod tests {
         let menu = ContextMenuState {
             kind: ContextMenuKind::GitWorkspace {
                 ws_idx: 0,
+                pinned: false,
                 is_linked_worktree: false,
                 has_worktree_children: true,
                 collapsed: false,
@@ -5466,6 +5525,7 @@ mod tests {
         assert_eq!(
             menu.items(),
             &[
+                "Pin",
                 "Rename",
                 "Close group",
                 "New worktree",
