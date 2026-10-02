@@ -26,8 +26,28 @@ pub(super) fn render_display_panes(app: &AppState, frame: &mut Frame, mode_bar_a
     for label in &labels {
         render_label(app, frame, label, true);
     }
-    render_summary_bar(app, frame, mode_bar_area, &labels, true);
+    render_summary_bar(app, frame, mode_bar_area, &labels, BarHints::Labels);
     render_sidebar_section_sizes(app, frame);
+}
+
+/// Keyboard resize mode (`prefix+r`, fork issue 152): the mode's own help
+/// line and the window view's sizes and version share the one bar, as the
+/// mouse drag shows them.
+pub(super) fn render_resize_mode_bar(app: &AppState, frame: &mut Frame, mode_bar_area: Rect) {
+    let labels = app.display_panes_labels();
+    render_summary_bar(app, frame, mode_bar_area, &labels, BarHints::Resize);
+    render_sidebar_section_sizes(app, frame);
+}
+
+/// Which key hints the summary bar carries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BarHints {
+    /// None: nothing to press (the window view during a drag).
+    None,
+    /// `prefix+i`: the label numbers and any key.
+    Labels,
+    /// Keyboard resize mode: the resize keys.
+    Resize,
 }
 
 /// The window-resize extras (fork issue 138): everything `prefix+i` shows
@@ -35,7 +55,7 @@ pub(super) fn render_display_panes(app: &AppState, frame: &mut Frame, mode_bar_a
 /// labels come from [`render_resize_labels`].
 pub(super) fn render_window_resize_summary(app: &AppState, frame: &mut Frame, mode_bar_area: Rect) {
     let labels = app.display_panes_labels();
-    render_summary_bar(app, frame, mode_bar_area, &labels, false);
+    render_summary_bar(app, frame, mode_bar_area, &labels, BarHints::None);
     render_sidebar_section_sizes(app, frame);
 }
 
@@ -182,27 +202,55 @@ fn render_summary_bar(
     frame: &mut Frame,
     area: Rect,
     labels: &[DisplayPaneLabel],
-    hints: bool,
+    hints: BarHints,
 ) {
     let p = &app.palette;
     let key = Style::default().fg(p.red).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
     let value = Style::default().fg(p.text);
-    let mode_style = mode_chip_style(app);
+    let resize = hints == BarHints::Resize;
+    let mode_style = if resize {
+        Style::default()
+            .fg(panel_contrast_fg(&app.palette))
+            .bg(app.palette.mauve)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        mode_chip_style(app)
+    };
+    let key = if resize {
+        Style::default()
+            .fg(app.palette.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        key
+    };
     let window = frame.area();
     let panes = app.view.terminal_area;
 
-    let mut spans = vec![
-        Span::styled(" PANES ", mode_style),
-        Span::raw("  "),
+    let mut spans = vec![Span::styled(
+        if resize { " RESIZE " } else { " PANES " },
+        mode_style,
+    )];
+    spans.push(Span::raw("  "));
+    if resize {
+        spans.extend([
+            Span::styled("h/l", key),
+            Span::styled(" width  ", dim),
+            Span::styled("j/k", key),
+            Span::styled(" height  ", dim),
+            Span::styled("esc", key),
+            Span::styled(" done  ", dim),
+        ]);
+    }
+    spans.extend([
         Span::styled("window ", dim),
         Span::styled(format!("{}x{}", window.width, window.height), value),
         Span::styled(" · panes ", dim),
         Span::styled(format!("{}x{}", panes.width, panes.height), value),
         Span::raw("  "),
-    ];
+    ]);
     let numbered = labels.iter().filter_map(|label| label.index).max();
-    if !hints {
+    if hints != BarHints::Labels {
         spans.pop();
     } else if let Some(last) = numbered {
         let range = if last == 1 {
@@ -213,7 +261,7 @@ fn render_summary_bar(
         spans.push(Span::styled(range, key));
         spans.push(Span::styled(" focus  ", dim));
     }
-    if hints {
+    if hints == BarHints::Labels {
         spans.push(Span::styled("any key", key));
         spans.push(Span::styled(" close", dim));
     }
@@ -389,6 +437,12 @@ mod tests {
         let bar = rows.last().unwrap();
         assert!(bar.contains("RESIZE"), "{bar:?}");
         assert!(!bar.contains("PANES"), "{bar:?}");
+        // Fork issue 152: the keys and the window view's sizes and version
+        // share the bar.
+        assert!(bar.contains("h/l width"), "{bar:?}");
+        assert!(bar.contains("esc done"), "{bar:?}");
+        assert!(bar.contains(&format!("window {WIDTH}x{HEIGHT}")), "{bar:?}");
+        assert!(bar.contains("VERSION"), "{bar:?}");
     }
 
     #[test]

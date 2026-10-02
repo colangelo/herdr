@@ -299,33 +299,6 @@ pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
     }
 }
 
-pub(super) fn render_resize_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
-    let key = Style::default()
-        .fg(app.palette.accent)
-        .add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(app.palette.overlay0);
-
-    let mode_style = Style::default()
-        .fg(panel_contrast_fg(&app.palette))
-        .bg(app.palette.mauve)
-        .add_modifier(Modifier::BOLD);
-
-    let line = Line::from(vec![
-        Span::styled(" RESIZE ", mode_style),
-        Span::raw("  "),
-        Span::styled("h/l", key),
-        Span::styled(" width  ", dim),
-        Span::styled("j/k", key),
-        Span::styled(" height  ", dim),
-        Span::styled("esc", key),
-        Span::styled(" done", dim),
-    ]);
-
-    let overlay_y = area.y + area.height.saturating_sub(1);
-    let overlay_area = Rect::new(area.x, overlay_y, area.width, 1);
-    render_bottom_bar(frame, overlay_area, line, app.palette.panel_bg);
-}
-
 pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
     let Some(menu) = app.context_menu() else {
         return;
