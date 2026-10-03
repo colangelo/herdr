@@ -28,3 +28,11 @@ https://gitea.cat-bluegill.ts.net/AC-forks/herdr/issues/141
 ## 6. Verify
 
 - [ ] 6.1 throwaway server: three panes, type, exclude one by right click, type, captures on the issue
+
+## 7. Round 2 (issue 155)
+
+- [ ] 7.1 tests first: explicit members (pair start, whole-tab start, toggle, new pane joins only a whole-tab group), empty group then grace then off, re-add cancels, group of one
+- [ ] 7.2 `SyncPanes` members/whole_tab/ending_until, `sync_deadline`/`expire_sync` in the loop, `SYNC ending…`
+- [ ] 7.3 `#FFD60A` borders and chip, gray border for panes outside the group
+- [ ] 7.4 "Sync input" on another pane starts the pair; focused pane and the key stay whole-tab; right click re-adds during the grace
+- [ ] 7.5 API/CLI semantics, docs, `just check`, throwaway proof with captures

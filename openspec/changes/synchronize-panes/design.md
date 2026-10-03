@@ -83,3 +83,39 @@ and honours exclusion, rendered-layout tests for the yellow borders and bar,
 a mouse test for the right-click toggle and the menu item, an API schema
 round-trip, and a live proof on a throwaway server: three panes, sync on,
 type, capture all three, exclude one by right click, type again, capture.
+
+## Round 2 (fork issue 155)
+
+ac, 2026-10-03: the yellow was too pale, and "Sync input" should be able to
+start a group of two panes, with the rest grayed out. These decisions replace
+the matching ones above.
+
+- **Explicit members.** `SyncPanes` holds `members: HashSet<PaneId>`,
+  `whole_tab: bool` and `ending_until: Option<Instant>`, not an exclusion set.
+  Closed panes are ignored when asked about (membership checks the pane still
+  exists), so nothing needs cleaning up.
+- **Two ways in.** The key, `tab.sync on` and "Sync input" on the focused pane
+  start a whole-tab group (every pane a member, `whole_tab` set). "Sync input"
+  on another pane starts `{focused, clicked}` with `whole_tab` unset.
+- **A new pane joins only a whole-tab group.** A pane made by a split while
+  `whole_tab` is set becomes a member; it never joins a group that was started
+  as a pair, or whose membership was edited into a different shape by hand, so
+  a two-pane group stays two. Toggling a member in or out does not clear
+  `whole_tab`: the flag records how the group started, which is the only thing
+  a user can predict.
+- **Gray, not normal.** While the tab on screen syncs, a pane outside the group
+  draws `palette.surface1`, a dimmer gray than the normal inactive border
+  (`overlay0`), so "not in the group" reads at a glance. The yellow is a fixed
+  `#FFD60A` for borders and the bar chip, not a theme colour: the theme yellow
+  was the pale one.
+- **Grace in server state.** Taking out the last member sets `ending_until =
+  now + 3 s` and leaves the tab in sync mode, with no members (nothing is
+  typed anywhere). The deadline is checked by the event loop like the other
+  lingering views (`sync_deadline` in the wake-up list, `expire_sync` in the
+  tick), never in render. Adding a member clears it. When it passes, `sync`
+  becomes `None`. The chip reads `SYNC ending…` meanwhile. A group that empties
+  because its panes were closed is treated the same way at the next tick.
+- **API.** `tab.sync on` starts a whole-tab group (it keeps an existing group
+  as it is); `pane.sync on` and `off` add and remove a member, `toggle` flips
+  it; all stay `sync_not_active` outside sync mode. `TabInfo.sync` is true
+  through the grace; `PaneInfo.synced` is true for members.
