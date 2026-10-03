@@ -354,6 +354,7 @@ impl App {
         changed |= self.expire_display_panes(now);
         changed |= self.state.expire_resize_labels(now);
         changed |= self.state.expire_sync(now);
+        changed |= self.expire_agent_hints(now);
 
         if self
             .selection_autoscroll_deadline
@@ -403,6 +404,20 @@ impl App {
     }
 
     /// Clears temporary copied-token highlights, such as after double-click copy.
+    /// Drop the hints whose time is up, through the same path a report takes so
+    /// the pane's state change reaches notifications and events. `true` when
+    /// something was due.
+    pub(crate) fn expire_agent_hints(&mut self, now: Instant) -> bool {
+        let due = self.state.due_agent_hint_panes(now);
+        for pane_id in &due {
+            self.handle_internal_event(crate::events::AppEvent::AgentHintExpired {
+                pane_id: *pane_id,
+                now,
+            });
+        }
+        !due.is_empty()
+    }
+
     pub(crate) fn clear_due_selection_highlight(&mut self, now: Instant) -> bool {
         if self
             .selection_highlight_clear_deadline
@@ -626,6 +641,7 @@ impl App {
             self.state.display_panes_deadline(),
             self.state.resize_labels_deadline(),
             self.state.sync_deadline(),
+            self.state.agent_hint_deadline(),
             include_git_refresh
                 .then(|| self.git_refresh_deadline())
                 .flatten(),

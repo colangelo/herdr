@@ -3481,6 +3481,16 @@ impl AppState {
                 })
                 .into_iter()
                 .collect(),
+            AppEvent::AgentHintReported { pane_id, report } => self
+                .update_terminal_state(pane_id, |terminal| {
+                    terminal.set_agent_hint_at(report, Instant::now())
+                })
+                .into_iter()
+                .collect(),
+            AppEvent::AgentHintExpired { pane_id, now } => self
+                .update_terminal_state(pane_id, |terminal| terminal.expire_agent_hint_at(now))
+                .into_iter()
+                .collect(),
             AppEvent::HookAuthorityCleared {
                 pane_id,
                 source,

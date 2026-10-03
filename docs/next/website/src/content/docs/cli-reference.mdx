@@ -327,6 +327,15 @@ Those commands include `foreground_cwd` when Herdr can resolve the cwd of the fo
 
 `pane get` and `pane list` include `scroll` when terminal scroll metrics are available. `scroll.offset_from_bottom == 0` means the pane is at the bottom of its scrollback.
 
+Tell Herdr an agent is waiting on a question or a permission prompt, or that it stopped:
+
+```bash
+herdr pane report-hint <pane_id> --source ID --agent LABEL \
+  (--kind question|permission [--id ID] [--ttl-ms N] | --clear) [--seq N]
+```
+
+A hint raises `blocked` with that reason while it is live and ages out after `--ttl-ms` (default 15000, at most 60000) unless it is repeated. See `pane.report_hint` in the socket API for how the screen and a hint combine.
+
 Report display-only pane metadata without taking over semantic state:
 
 ```bash

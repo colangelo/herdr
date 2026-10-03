@@ -17,8 +17,11 @@ use crate::terminal::TerminalId;
 /// letting an unrelated later report pair with an old restart.
 pub(crate) const REPLACED_PROCESS_SESSION_WINDOW: Duration = Duration::from_secs(60);
 
+#[path = "hint.rs"]
+mod hint;
 #[path = "metadata.rs"]
 mod metadata;
+pub use hint::AgentHintReport;
 pub use metadata::{AgentMetadata, AgentMetadataReport, EffectivePresentation};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -175,6 +178,11 @@ pub struct TerminalState {
     /// Blocked, kept while it stays Blocked, cleared on leaving. A runtime fact
     /// that is not persisted and restarts after a restore or live handoff.
     blocked_spell: Option<BlockedSpell>,
+    /// A source's claim that the agent waits on the user (fork issue 157).
+    /// Runtime only: not saved, not carried through a handoff.
+    agent_hint: Option<hint::AgentHint>,
+    /// The newest `seq` accepted from each hint source.
+    agent_hint_sequences: HashMap<String, u64>,
     pub hook_authority: Option<HookAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
@@ -242,6 +250,8 @@ impl TerminalState {
             fallback_blocked_reason: None,
             fallback_observed_at: None,
             blocked_spell: None,
+            agent_hint: None,
+            agent_hint_sequences: HashMap::new(),
             hook_authority: None,
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
@@ -2839,10 +2849,21 @@ impl TerminalState {
                     (authority.state, false)
                 })
         };
+        // A live hint (fork issue 157) raises Blocked with its own reason over
+        // the screen. Without one this is exactly the screen's answer.
+        self.note_agent_hint_screen(now);
+        let hint_kind = self.live_agent_hint_kind(now);
+        let state = if hint_kind.is_some() {
+            AgentState::Blocked
+        } else {
+            state
+        };
         let blocked_reason = (state == AgentState::Blocked).then(|| {
-            self.fallback_blocked_reason
-                .filter(|_| screen_decides)
-                .unwrap_or(BlockedReason::Other)
+            hint_kind.unwrap_or_else(|| {
+                self.fallback_blocked_reason
+                    .filter(|_| screen_decides)
+                    .unwrap_or(BlockedReason::Other)
+            })
         });
         self.sync_blocked_spell(blocked_reason);
         let agent_label = self.effective_agent_label().map(str::to_string);

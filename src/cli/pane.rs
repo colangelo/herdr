@@ -45,6 +45,7 @@ pub(super) fn run_pane_command(args: &[String]) -> std::io::Result<i32> {
         "report-agent-session" => pane_report_agent_session(&args[1..]),
         "release-agent" => pane_release_agent(&args[1..]),
         "report-metadata" => pane_report_metadata(&args[1..]),
+        "report-hint" => pane_report_hint(&args[1..]),
         "run" => pane_run(&args[1..]),
         "help" | "--help" | "-h" => {
             print_pane_help();
@@ -1784,6 +1785,101 @@ fn pane_release_agent(args: &[String]) -> std::io::Result<i32> {
     }))
 }
 
+const REPORT_HINT_USAGE: &str = "usage: herdr pane report-hint <pane_id> --source ID --agent LABEL (--kind question|permission [--id ID] [--ttl-ms N] | --clear) [--seq N]";
+
+fn pane_report_hint(args: &[String]) -> std::io::Result<i32> {
+    match parse_pane_report_hint_args(args) {
+        Ok(params) => super::send_ok_request(Method::PaneReportHint(params)),
+        Err(message) => {
+            eprintln!("{message}");
+            Ok(2)
+        }
+    }
+}
+
+/// `herdr pane report-hint <pane_id> --source ID --agent LABEL (--kind
+/// question|permission [--id ID] [--ttl-ms N] | --clear) [--seq N]`.
+fn parse_pane_report_hint_args(
+    args: &[String],
+) -> Result<crate::api::schema::PaneReportHintParams, String> {
+    use crate::api::schema::AgentHintKind;
+    let Some(raw_pane_id) = args.first() else {
+        return Err(REPORT_HINT_USAGE.into());
+    };
+    let pane_id = super::normalize_pane_id(raw_pane_id);
+    let (mut source, mut agent, mut kind, mut id) = (None, None, None, None);
+    let (mut ttl_ms, mut seq, mut clear) = (None, None, false);
+    let mut index = 1;
+    let value = |index: usize, flag: &str| -> Result<String, String> {
+        args.get(index + 1)
+            .cloned()
+            .ok_or_else(|| format!("missing value for {flag}"))
+    };
+    let number = |flag: &str, text: String| -> Result<u64, String> {
+        text.parse::<u64>()
+            .map_err(|_| format!("invalid value for {flag}: {text}"))
+    };
+    while index < args.len() {
+        match args[index].as_str() {
+            "--source" => {
+                source = Some(value(index, "--source")?);
+                index += 2;
+            }
+            "--agent" => {
+                agent = Some(value(index, "--agent")?);
+                index += 2;
+            }
+            "--kind" => {
+                kind = Some(match value(index, "--kind")?.as_str() {
+                    "question" => AgentHintKind::Question,
+                    "permission" => AgentHintKind::Permission,
+                    other => return Err(format!("unknown hint kind: {other}")),
+                });
+                index += 2;
+            }
+            "--id" => {
+                id = Some(value(index, "--id")?);
+                index += 2;
+            }
+            "--ttl-ms" => {
+                ttl_ms = Some(number("--ttl-ms", value(index, "--ttl-ms")?)?);
+                index += 2;
+            }
+            "--seq" => {
+                seq = Some(number("--seq", value(index, "--seq")?)?);
+                index += 2;
+            }
+            "--clear" => {
+                clear = true;
+                index += 1;
+            }
+            other => return Err(format!("unknown option: {other}")),
+        }
+    }
+    let Some(source) = source.filter(|source| !source.trim().is_empty()) else {
+        return Err("missing required --source".into());
+    };
+    let Some(agent) = agent.filter(|agent| !agent.trim().is_empty()) else {
+        return Err("missing required --agent".into());
+    };
+    if clear && kind.is_some() {
+        return Err("cannot set --kind and --clear together".into());
+    }
+    if !clear && kind.is_none() {
+        return Err("give --kind, or --clear to end the hint".into());
+    }
+    Ok(crate::api::schema::PaneReportHintParams {
+        pane_id,
+        source,
+        agent,
+        kind,
+        id,
+        ttl_ms,
+        clear,
+        seq,
+    })
+}
+
 fn pane_report_metadata(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_pane_id) = args.first() else {
         eprintln!("usage: herdr pane report-metadata <pane_id> --source ID [--agent LABEL] [--applies-to-source ID] [--title TEXT|--clear-title] [--display-agent TEXT|--clear-display-agent] [--state-label STATUS=TEXT] [--clear-state-labels] [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
@@ -2011,6 +2107,7 @@ fn print_pane_help() {
     eprintln!("  herdr pane report-agent <pane_id> --source ID --agent LABEL --state idle|working|blocked|unknown [--message TEXT] [--seq N] [--agent-session-id ID] [--agent-session-path PATH]");
     eprintln!("  herdr pane report-agent-session <pane_id> --source ID --agent LABEL [--seq N] [--agent-session-id ID] [--agent-session-path PATH]");
     eprintln!("  herdr pane release-agent <pane_id> --source ID --agent LABEL [--seq N]");
+    eprintln!("  {}", &REPORT_HINT_USAGE["usage: ".len()..]);
     eprintln!("  herdr pane report-metadata <pane_id> --source ID [--agent LABEL] [--applies-to-source ID] [--title TEXT|--clear-title] [--display-agent TEXT|--clear-display-agent] [--state-label STATUS=TEXT] [--clear-state-labels] [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
     eprintln!("  herdr pane run <pane_id> <command>");
 }
@@ -2354,6 +2451,61 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("invalid ratio"));
+    }
+
+    #[test]
+    fn parse_pane_report_hint_args_takes_a_hint_or_a_clear() {
+        use crate::api::schema::AgentHintKind;
+        let params = parse_pane_report_hint_args(&args(&[
+            "w1:p1",
+            "--source",
+            "herdr:claude-mod",
+            "--agent",
+            "claude",
+            "--kind",
+            "permission",
+            "--id",
+            "toolu_1",
+            "--ttl-ms",
+            "15000",
+            "--seq",
+            "42",
+        ]))
+        .unwrap();
+        assert_eq!(params.kind, Some(AgentHintKind::Permission));
+        assert_eq!(params.id.as_deref(), Some("toolu_1"));
+        assert_eq!(
+            (params.ttl_ms, params.seq, params.clear),
+            (Some(15000), Some(42), false)
+        );
+
+        let cleared = parse_pane_report_hint_args(&args(&[
+            "w1:p1", "--source", "s", "--agent", "claude", "--clear",
+        ]))
+        .unwrap();
+        assert!(cleared.clear && cleared.kind.is_none());
+    }
+
+    #[test]
+    fn parse_pane_report_hint_args_rejects_bad_requests() {
+        let base = ["w1:p1", "--source", "s", "--agent", "claude"];
+        let with = |extra: &[&str]| {
+            let mut all: Vec<&str> = base.to_vec();
+            all.extend_from_slice(extra);
+            parse_pane_report_hint_args(&args(&all))
+        };
+        assert!(with(&[]).is_err(), "neither a kind nor --clear");
+        assert!(with(&["--kind", "question", "--clear"]).is_err());
+        assert!(with(&["--kind", "form"])
+            .unwrap_err()
+            .contains("unknown hint kind"));
+        assert!(with(&["--kind", "question", "--ttl-ms", "soon"]).is_err());
+        assert!(
+            parse_pane_report_hint_args(&args(&["w1:p1", "--agent", "claude", "--clear"]))
+                .unwrap_err()
+                .contains("--source")
+        );
+        assert!(parse_pane_report_hint_args(&args(&[])).is_err());
     }
 
     #[test]

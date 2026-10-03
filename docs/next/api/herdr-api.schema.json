@@ -1393,6 +1393,21 @@
     },
     "request": {
       "$defs": {
+        "AgentHintKind": {
+          "description": "What an agent waits for, as a source reports it (fork issue 157).",
+          "oneOf": [
+            {
+              "const": "question",
+              "description": "The agent asked the user a question.",
+              "type": "string"
+            },
+            {
+              "const": "permission",
+              "description": "The agent waits for approval to run a tool or command.",
+              "type": "string"
+            }
+          ]
+        },
         "AgentListParams": {
           "description": "`agent.list` parameters. `input_box` asks for each Claude Code agent's input\nbox draft, which reads every such pane's screen, so it is off by default\n(fork issue 146).",
           "properties": {
@@ -3186,6 +3201,67 @@
             },
             "source": {
               "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "source",
+            "agent"
+          ],
+          "type": "object"
+        },
+        "PaneReportHintParams": {
+          "description": "A source's claim that an agent waits on the user, or the end of it. A hint\nis evidence for the pane's state, not a state: it raises `blocked` with the\nreason and ages out unless it is repeated.",
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "clear": {
+              "default": false,
+              "description": "End the source's hint.",
+              "type": "boolean"
+            },
+            "id": {
+              "description": "The source's own id for the dialog.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/AgentHintKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the agent waits for. Required unless `clear` is set."
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "seq": {
+              "description": "Per-source ordering: a report with a `seq` not above the last accepted\none is ignored. A wall-clock based value survives a restart of the\nsource.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "ttl_ms": {
+              "description": "How long the hint lives without being repeated, in milliseconds.\nDefault 15000, at most 60000.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [
@@ -6358,6 +6434,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneReportMetadataParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.report_hint",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneReportHintParams"
             }
           },
           "required": [

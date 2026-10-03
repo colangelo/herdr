@@ -431,6 +431,44 @@ pub struct PaneReportAgentParams {
     pub resume_argv: Option<Vec<String>>,
 }
 
+/// What an agent waits for, as a source reports it (fork issue 157).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHintKind {
+    /// The agent asked the user a question.
+    Question,
+    /// The agent waits for approval to run a tool or command.
+    Permission,
+}
+
+/// A source's claim that an agent waits on the user, or the end of it. A hint
+/// is evidence for the pane's state, not a state: it raises `blocked` with the
+/// reason and ages out unless it is repeated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneReportHintParams {
+    pub pane_id: String,
+    pub source: String,
+    pub agent: String,
+    /// What the agent waits for. Required unless `clear` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AgentHintKind>,
+    /// The source's own id for the dialog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// How long the hint lives without being repeated, in milliseconds.
+    /// Default 15000, at most 60000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_ms: Option<u64>,
+    /// End the source's hint.
+    #[serde(default)]
+    pub clear: bool,
+    /// Per-source ordering: a report with a `seq` not above the last accepted
+    /// one is ignored. A wall-clock based value survives a restart of the
+    /// source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PaneReportAgentSessionParams {
     pub pane_id: String,

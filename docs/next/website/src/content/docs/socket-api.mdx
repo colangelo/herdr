@@ -105,7 +105,7 @@ Raw socket method names use dot notation:
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.pin`, `workspace.unpin`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
 | Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.sync`, `tab.move`, `tab.close` |
-| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.sync`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.clear`, `pane.close`, `pane.respawn`, `pane.wait_for_output` |
+| Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.sync`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_hint`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.clear`, `pane.close`, `pane.respawn`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio`, `layout.balance`, `layout.set_preset` |
 | Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.pin`, `agent.unpin`, `agent.start`, `agent.view.set`, `agent.view.clear` |
@@ -975,6 +975,15 @@ Both fields are omitted whenever the pane is not blocked. They are runtime facts
 ```
 
 `PaneInfo` and `AgentInfo` expose optional `terminal_title` and `terminal_title_stripped` fields. `terminal_title` is the latest OSC 0/2 title after safety normalization. `terminal_title_stripped` removes one recognized leading activity or spinner glyph and following whitespace. These server-owned values are ephemeral across a cold restart and are independent of the metadata `title` and semantic agent state.
+
+Use `pane.report_hint` when a source knows an agent is waiting on the user, to say so exactly where the screen cannot (an Esc'd or half-drawn dialog):
+
+```json
+{"id":"req_hint","method":"pane.report_hint","params":{"pane_id":"w1:p1","source":"herdr:claude-mod","agent":"claude","kind":"question","id":"toolu_01","seq":1790000000000001}}
+{"id":"req_hint_end","method":"pane.report_hint","params":{"pane_id":"w1:p1","source":"herdr:claude-mod","agent":"claude","clear":true,"seq":1790000004000002}}
+```
+
+`kind` is `question` or `permission`, and is required unless `clear` is set. A hint is evidence, not a state: while it is live and the pane's agent is `agent`, the pane reads `blocked` with that reason (`blocked_reason`). A `question` hint is held until it is cleared or ages out, whatever the screen shows. A `permission` hint is raised the same way, but the screen may clear it once it has stopped showing a blocked prompt (about 1.5 s, or 4 s if the screen never showed one), because the end of a permission prompt is not something a source can see. A hint ages out `ttl_ms` after its last report (default 15000, at most 60000), so a source repeats it while the dialog is open (the Claude Code mod every 5 s). `seq` orders a source's reports: one not above the last accepted is ignored, so derive it from the wall clock (microseconds) rather than a counter that restarts. One source owns a terminal's hint at a time. Hints are runtime state: not saved, not carried through a live handoff. The method returns `type: "ok"`; a stale or ignored report is still `ok`.
 
 Use `pane.report_metadata` when a user hook wants to customize presentation without taking over lifecycle state from a Herdr integration.
 

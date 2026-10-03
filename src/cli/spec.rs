@@ -777,6 +777,7 @@ fn pane_command() -> Command {
         .subcommand(report_agent_session_command())
         .subcommand(release_agent_command())
         .subcommand(report_metadata_command())
+        .subcommand(report_hint_command())
 }
 
 fn report_agent_command() -> Command {
@@ -820,6 +821,19 @@ fn release_agent_command() -> Command {
         .arg(required("pane_id", "PANE_ID"))
         .arg(option("source", "ID").required(true))
         .arg(option("agent", "LABEL").required(true))
+        .arg(option("seq", "N"))
+}
+
+fn report_hint_command() -> Command {
+    Command::new("report-hint")
+        .about("Report that an agent waits on a question or a permission, or that it stopped")
+        .arg(required("pane_id", "PANE_ID"))
+        .arg(option("source", "ID").required(true))
+        .arg(option("agent", "LABEL").required(true))
+        .arg(option("kind", "question|permission"))
+        .arg(option("id", "ID"))
+        .arg(option("ttl-ms", "N"))
+        .arg(flag("clear"))
         .arg(option("seq", "N"))
 }
 
@@ -1302,6 +1316,7 @@ mod tests {
             ),
             (&["pane", "release-agent"][..], &["source", "agent"][..]),
             (&["pane", "report-metadata"][..], &["source"][..]),
+            (&["pane", "report-hint"][..], &["source", "agent"][..]),
         ] {
             let cmd = command_path(&super::command(), path).clone();
             for option in options {

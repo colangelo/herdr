@@ -141,6 +141,17 @@ pub enum AppEvent {
         seq: Option<u64>,
         ttl: Option<std::time::Duration>,
     },
+    /// A source reported (or ended) a hint that the agent waits on the user.
+    AgentHintReported {
+        pane_id: PaneId,
+        report: crate::terminal::AgentHintReport,
+    },
+    /// A pane's hint is due to be dropped (its time is up, or the screen no
+    /// longer backs it).
+    AgentHintExpired {
+        pane_id: PaneId,
+        now: std::time::Instant,
+    },
     /// Hook authority was explicitly cleared for a pane.
     HookAuthorityCleared {
         pane_id: PaneId,

@@ -4928,6 +4928,7 @@ impl HeadlessServer {
         changed |= self.app.expire_display_panes(now);
         changed |= self.app.state.expire_resize_labels(now);
         changed |= self.app.state.expire_sync(now);
+        changed |= self.app.expire_agent_hints(now);
 
         if self
             .app
@@ -5789,6 +5790,58 @@ mod tests {
         assert!(!server.handle_scheduled_tasks_headless(deadline - Duration::from_millis(1), false));
         assert!(server.handle_scheduled_tasks_headless(deadline, false));
         assert!(!server.app.state.workspaces[0].tabs[0].is_syncing());
+    }
+
+    // Fork issue 157: the server's own tick drops a hint whose time is up, and
+    // the wake-up list knows its deadline.
+    #[tokio::test]
+    async fn the_server_tick_ends_an_agent_hint_at_its_ttl() {
+        let (mut server, _client_rx, _) = retained_test_server(b"aaaa");
+        server.app.state.ensure_test_terminals();
+        let pane = server.app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = server.app.state.workspaces[0]
+            .pane_state(pane)
+            .unwrap()
+            .attached_terminal_id
+            .clone();
+        let t0 = Instant::now();
+        {
+            let terminal = server.app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_detected_screen_state_at(
+                Some(crate::detect::Agent::Claude),
+                crate::detect::AgentState::Idle,
+                false,
+                None,
+                false,
+                false,
+                t0,
+            );
+            terminal.set_agent_hint_at(
+                crate::terminal::AgentHintReport {
+                    source: "herdr:claude-mod".into(),
+                    agent_label: "claude".into(),
+                    kind: Some(crate::detect::BlockedReason::Question),
+                    id: None,
+                    ttl: Duration::from_secs(15),
+                    seq: Some(1),
+                },
+                t0,
+            );
+            assert_eq!(terminal.state, crate::detect::AgentState::Blocked);
+        }
+        let deadline = server.app.state.agent_hint_deadline().expect("hint armed");
+        assert_eq!(deadline, t0 + Duration::from_secs(15));
+        assert!(
+            server
+                .app
+                .next_headless_loop_deadline_with_git_refresh(t0, false, false)
+                .is_some_and(|next| next <= deadline),
+            "the loop wakes by the deadline"
+        );
+        assert!(!server.handle_scheduled_tasks_headless(deadline - Duration::from_millis(1), false));
+        assert!(server.handle_scheduled_tasks_headless(deadline, false));
+        let terminal = &server.app.state.terminals[&terminal_id];
+        assert_eq!(terminal.state, crate::detect::AgentState::Idle);
     }
 
     #[tokio::test]

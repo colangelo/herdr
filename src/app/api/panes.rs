@@ -1651,6 +1651,70 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
+    /// `pane.report_hint`: a source says an agent waits on the user (fork issue
+    /// 157). Hint state lives in the terminal; an unknown pane is an error, a
+    /// stale or ignored report is still `ok`.
+    pub(super) fn handle_pane_report_hint(
+        &mut self,
+        id: String,
+        params: crate::api::schema::PaneReportHintParams,
+    ) -> String {
+        use crate::api::schema::AgentHintKind;
+        const DEFAULT_TTL_MS: u64 = 15_000;
+        const MAX_TTL_MS: u64 = 60_000;
+        let Some((_ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return pane_not_found(id, &params.pane_id);
+        };
+        let Some(agent_label) = normalize_reported_agent_label(&params.agent) else {
+            return invalid_agent(id);
+        };
+        let source = params.source.trim().to_string();
+        if source.is_empty() {
+            return encode_error(id, "invalid_hint_source", "hint source must not be empty");
+        }
+        let kind = match (params.kind, params.clear) {
+            (Some(_), true) => {
+                return encode_error(
+                    id,
+                    "invalid_hint_request",
+                    "cannot set and clear a hint in one report",
+                );
+            }
+            (None, false) => {
+                return encode_error(
+                    id,
+                    "invalid_hint_request",
+                    "a hint needs a kind, or clear to end it",
+                );
+            }
+            (Some(AgentHintKind::Question), false) => Some(crate::detect::BlockedReason::Question),
+            (Some(AgentHintKind::Permission), false) => {
+                Some(crate::detect::BlockedReason::Permission)
+            }
+            (None, true) => None,
+        };
+        let ttl_ms = params.ttl_ms.unwrap_or(DEFAULT_TTL_MS);
+        if ttl_ms == 0 || ttl_ms > MAX_TTL_MS {
+            return encode_error(
+                id,
+                "invalid_hint_ttl",
+                format!("hint ttl_ms must be between 1 and {MAX_TTL_MS}"),
+            );
+        }
+        self.handle_internal_event(crate::events::AppEvent::AgentHintReported {
+            pane_id,
+            report: crate::terminal::AgentHintReport {
+                source,
+                agent_label,
+                kind,
+                id: params.id,
+                ttl: std::time::Duration::from_millis(ttl_ms),
+                seq: params.seq,
+            },
+        });
+        encode_success(id, ResponseResult::Ok {})
+    }
+
     pub(super) fn handle_pane_clear_agent_authority(
         &mut self,
         id: String,
@@ -2411,6 +2475,114 @@ mod tests {
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
         (app, public_pane_id)
+    }
+
+    // Fork issue 157: `pane.report_hint` over the API.
+    #[test]
+    fn pane_report_hint_blocks_the_pane_with_the_hint_and_clears() {
+        use crate::api::schema::{AgentHintKind, PaneReportHintParams};
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .pane_state(pane)
+            .unwrap()
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Claude),
+                crate::detect::AgentState::Idle,
+            );
+        let hint = |kind, clear, seq| PaneReportHintParams {
+            pane_id: public_pane_id.clone(),
+            source: "herdr:claude-mod".into(),
+            agent: "claude".into(),
+            kind,
+            id: Some("toolu_1".into()),
+            ttl_ms: None,
+            clear,
+            seq: Some(seq),
+        };
+
+        let ok = app
+            .handle_pane_report_hint("req".into(), hint(Some(AgentHintKind::Question), false, 10));
+        assert!(matches!(
+            serde_json::from_str::<SuccessResponse>(&ok).unwrap().result,
+            ResponseResult::Ok {}
+        ));
+        let terminal = &app.state.terminals[&terminal_id];
+        assert_eq!(terminal.state, crate::detect::AgentState::Blocked);
+        assert_eq!(
+            terminal.blocked_reason(),
+            Some(crate::detect::BlockedReason::Question)
+        );
+        assert!(app.state.agent_hint_deadline().is_some());
+
+        app.handle_pane_report_hint("req".into(), hint(None, true, 11));
+        let terminal = &app.state.terminals[&terminal_id];
+        assert_eq!(terminal.state, crate::detect::AgentState::Idle);
+        assert!(app.state.agent_hint_deadline().is_none());
+    }
+
+    #[test]
+    fn pane_report_hint_rejects_bad_requests() {
+        use crate::api::schema::{AgentHintKind, PaneReportHintParams};
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        let params = |mutate: &dyn Fn(&mut PaneReportHintParams)| {
+            let mut params = PaneReportHintParams {
+                pane_id: public_pane_id.clone(),
+                source: "s".into(),
+                agent: "claude".into(),
+                kind: Some(AgentHintKind::Question),
+                id: None,
+                ttl_ms: None,
+                clear: false,
+                seq: None,
+            };
+            mutate(&mut params);
+            params
+        };
+        let code = |app: &mut App, params| {
+            let response: serde_json::Value =
+                serde_json::from_str(&app.handle_pane_report_hint("req".into(), params)).unwrap();
+            response["error"]["code"]
+                .as_str()
+                .unwrap_or("ok")
+                .to_string()
+        };
+        assert_eq!(code(&mut app, params(&|_| {})), "ok");
+        assert_eq!(
+            code(&mut app, params(&|p| p.pane_id = "w9:p9".into())),
+            "pane_not_found"
+        );
+        assert_eq!(
+            code(&mut app, params(&|p| p.kind = None)),
+            "invalid_hint_request"
+        );
+        assert_eq!(
+            code(&mut app, params(&|p| p.clear = true)),
+            "invalid_hint_request"
+        );
+        assert_eq!(
+            code(&mut app, params(&|p| p.ttl_ms = Some(0))),
+            "invalid_hint_ttl"
+        );
+        assert_eq!(
+            code(&mut app, params(&|p| p.ttl_ms = Some(60_001))),
+            "invalid_hint_ttl"
+        );
+        assert_eq!(code(&mut app, params(&|p| p.ttl_ms = Some(60_000))), "ok");
+        assert_eq!(
+            code(&mut app, params(&|p| p.source = "  ".into())),
+            "invalid_hint_source"
+        );
+        assert_eq!(
+            code(&mut app, params(&|p| p.agent = "".into())),
+            "invalid_agent"
+        );
     }
 
     #[test]
