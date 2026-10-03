@@ -101,7 +101,11 @@ The effective blocked state is computed where the screen result is published:
 3. **A live `permission` hint:** the pane is `blocked` with reason `permission`
    from the moment the hint arrives, but **the screen may clear it**: when the
    screen detection has read something other than `blocked` continuously for
-   1.5 s, the hint is dropped. Reason: the mod cannot see a permission prompt
+   1.5 s after it has shown a blocked prompt, the hint is dropped. If the screen
+   has not yet shown one (the mod reports a few milliseconds before the dialog
+   is drawn and detection polls), the wait is 4 s instead, so a slow scan cannot
+   drop a live hint. Found by a unit test that had the screen read `working`
+   when the hint arrived. Reason: the mod cannot see a permission prompt
    end (see (d)), so its close is best-effort, and a late close must not pin the
    pane blocked while the user is already running the tool.
 4. **Reason precedence:** while a live hint exists its kind is the reason
