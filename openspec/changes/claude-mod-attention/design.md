@@ -161,27 +161,45 @@ calls this, subagents too: a subagent's tool call that needs permission shows
 the prompt in the parent's pane, so (unlike a question, which subagents cannot
 ask in this build) the `agentId` guard does not apply to permission.
 
-How the prompt's end is seen is the hard part, because no event fires when the
-user answers it. The mod closes on the first of:
+How the prompt's end is seen was measured, not guessed (milestone-2 spike,
+Claude Code 2.1.288, Haiku, a mod that logs every candidate event with
+timestamps; Bash command `rm -f <outside-cwd file> && sleep 8 && echo`, which
+`tool.check` resolves to `ask`). Times are relative to the key press that
+answers the prompt:
 
-1. the `tool.call` `next(e)` settling or aborting (the tool finished, was denied,
-   or Esc interrupted): exact but late for a long-running allowed tool;
-2. `classic.PermissionDenied` for the same `tool_use_id`, where the build
-   fires it;
-3. the first sign the tool is **running**: a `ui.render` hook on `ToolProgress`
-   or `ToolUse` whose `e.requestId` is the open `tool_use_id` (to be verified:
-   the milestone-2 spike measures which of 2 and 3 fire and when, and the
-   implementation uses the earliest that proves out);
-4. `turn.complete` (also an interrupt) and `session.end`.
+| Event | Allow (Enter) | Deny ("3") | Esc |
+|---|---|---|---|
+| `tool.check` | `{decision: "ask"}` 1.8 s before the key | same | same |
+| `classic.PermissionRequest` | fires 10-20 ms after `tool.check`, when the dialog shows (no tool id) | same | same |
+| `tool.call` `next.signal` abort | never | **+8 ms** | **+63 ms** |
+| `tool.call` `await next(e)` settles | at the tool's end, **+8.2 s** | **+9 ms** (`isError`) | **+63 ms** |
+| `classic.PermissionDenied` | never | **never fires** | never |
+| `classic.PostToolUse` | at the tool's end, +8.1 s | never | never |
+| `ui.render` `ToolProgress` | +3.0 s (`background_hint`, only if the tool runs 3 s) | never | never |
+| `ui.render` `Spinner` | mode stays `tool-use`: no change | no change | no change |
+| `ui.render` `ToolUse` | never fired in this build | | |
 
-Herdr adds its own backstop for permission: the screen may clear a permission
-hint after 1.5 s of not looking blocked (b.3), and the TTL ends it if the mod
-dies. So a permission hint can be wrong for at most about 1.5 s after the screen
-moves on, and never for longer than 15 s without a heartbeat. If the
-milestone-2 measurements show that none of 2 and 3 fires reliably, the design
-degrades to "raise only": the mod reports the hint with a short TTL (5 s) and
-no heartbeat, and the screen clears it. That is still strictly better than
-today for a late permission dialog, and it needs no change to herdr.
+Findings: (1) deny and Esc are **exact**: `tool.call` aborts and settles in under
+100 ms, so the same close the question uses works. (2) **Allow has no signal at
+the moment of the answer**: nothing a mod can see changes until the tool ends,
+so a long-running allowed tool would hold a permission hint for its whole run.
+(3) `classic.PermissionDenied` never fires for a user's denial, and the
+`Spinner`/`ToolUse` renders carry nothing, so neither is used. (4) `tool.check`
+has `tool`, `input` and `tool_use_id`, and `decided` is `{decision, reason?}`.
+(5) A mod's hooks module does **not load until the workspace is trusted**
+("hooks modules not loaded until workspace trust is accepted" in the debug
+log): in an untrusted directory no hint is ever reported and the screen
+detects as today.
+
+So the mod closes a permission hint on `tool.call` settling or aborting
+(exact for deny, Esc, interrupts and any tool that ends soon), on
+`turn.complete` and `session.end`; and for **allow of a long tool** herdr's own
+rule does the work: the screen may clear a `permission` hint after 1.5 s of
+not looking blocked (b.3). That is why the asymmetry in (b) exists, and the
+measurements confirm it is needed rather than a precaution. A permission hint
+is therefore wrong for at most about 1.5 s after an allow, never longer than
+15 s without a heartbeat, and exact in the cases the mod can see. The
+raise-only fallback is not needed.
 
 ### (e) The install path
 

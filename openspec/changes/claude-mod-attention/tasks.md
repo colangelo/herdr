@@ -17,7 +17,7 @@ https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues/157
 
 ## 4. The production mod
 
-- [ ] 4.1 milestone-2 spike: measure with a real Claude (Haiku) which of `classic.PermissionDenied` and a `ui.render` `ToolProgress`/`ToolUse` signal fire when a permission prompt is answered allow, deny and Esc; record the table on the issue and pick the earliest signal (or fall back to raise-only)
+- [x] 4.1 milestone-2 spike (result in design.md (d): deny/Esc exact via `tool.call` abort, allow has no signal, so the screen clears a permission hint): measure with a real Claude (Haiku) which of `classic.PermissionDenied` and a `ui.render` `ToolProgress`/`ToolUse` signal fire when a permission prompt is answered allow, deny and Esc; record the table on the issue and pick the earliest signal (or fall back to raise-only)
 - [ ] 4.2 `integrations/claude-mod/` production module: open map, serialised queue, wall-clock `seq` with a counter, 5 s heartbeat while open, a 30 minute ceiling per open id (clear, drop, one log line; tested with a fake clock), `tool.check` permission report, question report with the abort listener, clears on `turn.complete`/`session.end`, failures only logged (one per minute), `claude plugin test` tests
 - [ ] 4.3 `herdr-hint.sh` helper (socket JSON, inert without `HERDR_SOCKET_PATH`/`HERDR_PANE_ID`)
 
