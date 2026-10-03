@@ -23,7 +23,7 @@ https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues/157
 
 ## 5. Install
 
-- [ ] 5.1 tests first: version gate (below the floor, no `claude`), idempotent install, uninstall removes, marker and `integration status`
+- [ ] 5.1 tests first: version gate (below the floor, no `claude`), idempotent install, uninstall removes, marker file left out (see design (e))
 - [ ] 5.2 `herdr integration install claude` writes the plugin and the local marketplace, runs `claude plugin marketplace add` and `claude plugin install`, bumps `HERDR_INTEGRATION_VERSION` once from the released value
 - [ ] 5.3 docs (`integrations.mdx`, `cli-reference.mdx`, `socket-api.mdx`); a macos-setup request to call `herdr integration install claude` (relayed, not edited here), which says never to add a commented `#herdr-attention@herdr-local` line to its plugin manifest (its reconcile disables commented-out lines); `socket-api.mdx` and `cli/spec.rs` cover the new method; `PROTOCOL_VERSION` is not bumped (a new method and optional fields only, checked against `wire.rs`)
 

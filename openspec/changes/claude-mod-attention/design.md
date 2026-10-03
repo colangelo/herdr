@@ -219,9 +219,10 @@ Mechanics: the command writes the plugin files to
 `~/.config/herdr/claude-mod/` (plugin dir `herdr-attention/` plus a one-plugin
 local marketplace manifest `herdr-local`), then runs
 `claude plugin marketplace add <dir>` and
-`claude plugin install herdr-attention@herdr-local --scope user`, both
-idempotent, and records the integration version in a marker file next to the
-plugin. `uninstall` reverses both and removes the directory. The fleet manifest
+`claude plugin install herdr-attention@herdr-local --scope user`. Both were
+run against a scratch config and are idempotent (a second run exits 0 with
+"already ..."), and the plugin "loads in place" from the folder. The marketplace
+is recorded in Claude's user settings (`extraKnownMarketplaces`). `uninstall` reverses both and removes the directory. The fleet manifest
 (macos-setup) gets one line that runs `herdr integration install claude`; it
 does not list `herdr-attention@...` itself.
 
@@ -229,10 +230,14 @@ Already-running Claude sessions do not have the mod: Claude loads a new or
 updated plugin at its next start, or on `/reload-plugins`. The install output
 says so ("running Claude sessions pick it up on /reload-plugins or restart"),
 and nothing breaks meanwhile: those panes keep today's screen detection. Herdr
-never requires the mod to be present. After a herdr upgrade the integration
-version marker differs, `integration status` shows the mod as outdated, and
-install rewrites it; running sessions keep the old mod until reloaded, which is
-safe because the hint API is additive.
+never requires the mod to be present. After a herdr upgrade, installing again rewrites the mod in
+place (Claude loads the plugin from the folder, so no `plugin update` is
+needed); running sessions keep the old mod until reloaded, which is safe because
+the hint API is additive. The mod is **not** covered by `integration status`:
+the Claude integration version is already ahead of the last release, and the
+rule is to bump it once per release, so a second bump for the mod is not
+allowed. A follow-up could give the mod its own marker; until then the dogfood
+runs the install explicitly.
 
 ### (f) The Claude Code version gate and logging
 
