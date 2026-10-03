@@ -51,9 +51,19 @@ pane.report_hint {
   id?: string,                         // the source's own id for the dialog
   ttl_ms?: u64,                        // default 15000, at most 60000
   clear?: bool,
-  seq?: u64                            // monotonic per source; older is ignored
+  seq?: u64                            // per source, wall-clock based; older is ignored
 }
 ```
+
+`seq` is the sender's wall clock in microseconds, built as `Date.now() * 1000 +
+(counter % 1000)`, so two reports in the same millisecond still order. It is
+deliberately not a counter that starts at 1: `/reload-plugins` or a plugin
+update restarts the mod's module (and its counter) while the Claude process and
+its live hint carry on, and a restarted counter would be lower than the live
+hint's `seq`, so herdr would ignore the new mod until it caught up. A clock
+that keeps rising across reloads has no such window. (A backwards wall-clock
+step can still make one report stale; the next heartbeat, at most 5 s later,
+carries a fresh `seq` and the TTL covers the gap.)
 
 CLI `herdr pane report-hint <pane> --source S --agent claude --kind question
 [--id X] [--ttl-ms N]` and `--clear`. The response is the usual pane info.
@@ -110,6 +120,25 @@ lost report does not drop a live dialog. Expiry is a deadline in server state,
 checked by the event loop (a `hint_deadline` in the wake-up list and an
 `expire_hints` in both ticks, `App` and the headless server), never in render.
 When a pane's process exits its terminal state is dropped with its hint.
+
+### A ceiling on a held hint
+
+A heartbeat keeps a hint alive, so a close that was missed while the mod is
+still alive (an event that never fired, a map entry that never emptied) would
+hold a pane blocked for as long as Claude runs. Two ways to bound it were
+weighed: a herdr-side rule (the screen clears a question hint after about 10 s
+of continuous `working`) or a mod-side cap. **The mod stops heartbeating an id
+after 30 minutes open, drops it from its map, sends the clear, and logs one
+failure line; the 15 s TTL would end it anyway if the clear were lost.**
+
+Reason: it keeps herdr's merge rule simple and true ("a question hint is held
+by its close, whatever the screen shows"), where the herdr-side rule would put
+a screen heuristic back into the one case the mod exists to make exact, and a
+screen that shows `working` behind a real, long-open dialog is the case the
+spike saw. The cost is that a question genuinely open for more than 30 minutes
+reverts to screen detection, which reads such a dialog correctly in the normal
+case, so the user loses nothing they have today. The cap is one constant in the
+mod (`MAX_OPEN_MS`).
 
 ### (c) The `isOpen` flag
 

@@ -6,7 +6,8 @@ herdr SHALL accept a hint for a pane through `pane.report_hint` (and
 `herdr pane report-hint`): a `kind` of `question` or `permission`, the source,
 the agent, an optional dialog `id`, an optional `ttl_ms` (default 15000, at most
 60000) and a `seq`. A hint with a `seq` lower than the live one from the same
-source SHALL be ignored. A hint with `clear` SHALL end the source's live hint.
+source SHALL be ignored. A source SHALL derive `seq` from its wall clock so a
+restart of the source (a mod reload) does not make its reports stale. A hint with `clear` SHALL end the source's live hint.
 Hints SHALL be runtime state: not saved in the session snapshot and not carried
 through a live handoff. The method SHALL NOT change `PROTOCOL_VERSION`.
 
@@ -26,6 +27,12 @@ through a live handoff. The method SHALL NOT change `PROTOCOL_VERSION`.
 
 - **WHEN** the server restarts or hands off with a hint live
 - **THEN** no pane has a hint afterwards
+
+#### Scenario: The source reloads
+
+- **WHEN** a source's module reloads and its next report has a lower counter but
+  a later clock than the live hint's `seq`
+- **THEN** herdr accepts it
 
 ### Requirement: A question hint holds the blocked state against the screen
 
@@ -76,6 +83,17 @@ no hint code SHALL run per rendered frame.
 
 - **WHEN** a Claude pane has never reported a hint
 - **THEN** its blocked state and reason are exactly the screen's
+
+### Requirement: A held hint has a ceiling
+
+The mod SHALL stop reporting a dialog that has been open for 30 minutes, clear
+it, and log one failure line, so a missed close cannot hold a pane blocked for
+as long as Claude runs.
+
+#### Scenario: A close that never came
+
+- **WHEN** a dialog has been open 30 minutes in the mod's map
+- **THEN** the mod clears the hint, drops the entry, and logs once
 
 ### Requirement: The mod reports only what is open
 
