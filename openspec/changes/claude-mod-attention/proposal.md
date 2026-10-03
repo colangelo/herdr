@@ -57,6 +57,6 @@ Claude without it, behaves as today.
 
 Each is decided in `design.md` with a reason and is a small constant or a
 one-place choice if the review disagrees: the hint TTL and heartbeat (15 s and
-5 s), the screen-clear grace for permission hints (1.5 s), the choice of the
+5 s), the screen-clear grace for permission hints (0.5 s), the choice of the
 tool-running signal for a permission prompt (verified in milestone 2), and the
 install mechanism (`claude plugin install` from a herdr-owned local marketplace).

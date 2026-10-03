@@ -13,7 +13,11 @@ use crate::detect::BlockedReason;
 /// `permission` hint is dropped, once the screen has shown the dialog. A mod
 /// cannot see a permission prompt being answered (only a deny, an Esc or the
 /// tool's end), so the screen clears it.
-pub(crate) const PERMISSION_HINT_SCREEN_GRACE: Duration = Duration::from_millis(1500);
+///
+/// Short on purpose (about two detection polls): the first proof run showed the
+/// screen alone leaves blocked within about 0.4 s of an allow, and a longer
+/// grace made the hint hold the pane blocked 1.4 s after that.
+pub(crate) const PERMISSION_HINT_SCREEN_GRACE: Duration = Duration::from_millis(500);
 
 /// The same, while the screen has not yet shown the dialog the hint announced:
 /// the mod reports a few milliseconds before the dialog is drawn and detection

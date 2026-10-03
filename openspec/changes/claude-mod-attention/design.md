@@ -101,7 +101,10 @@ The effective blocked state is computed where the screen result is published:
 3. **A live `permission` hint:** the pane is `blocked` with reason `permission`
    from the moment the hint arrives, but **the screen may clear it**: when the
    screen detection has read something other than `blocked` continuously for
-   1.5 s after it has shown a blocked prompt, the hint is dropped. If the screen
+   0.5 s after it has shown a blocked prompt, the hint is dropped. (It was 1.5 s in
+   the first draft; the proof run showed the screen alone leaves blocked within
+   about 0.4 s of an allow, and 1.5 s made the hint hold the pane blocked 1.4 s
+   longer than the screen would, so it is about two detection polls.) If the screen
    has not yet shown one (the mod reports a few milliseconds before the dialog
    is drawn and detection polls), the wait is 4 s instead, so a slow scan cannot
    drop a live hint. Found by a unit test that had the screen read `working`
@@ -198,10 +201,10 @@ detects as today.
 So the mod closes a permission hint on `tool.call` settling or aborting
 (exact for deny, Esc, interrupts and any tool that ends soon), on
 `turn.complete` and `session.end`; and for **allow of a long tool** herdr's own
-rule does the work: the screen may clear a `permission` hint after 1.5 s of
+rule does the work: the screen may clear a `permission` hint after 0.5 s of
 not looking blocked (b.3). That is why the asymmetry in (b) exists, and the
 measurements confirm it is needed rather than a precaution. A permission hint
-is therefore wrong for at most about 1.5 s after an allow, never longer than
+is therefore wrong for at most about 0.5 s after an allow, never longer than
 15 s without a heartbeat, and exact in the cases the mod can see. The
 raise-only fallback is not needed.
 
@@ -282,7 +285,7 @@ in a Claude that is not in a herdr pane.
 
 Unit tests for the hint state (set, replace by `seq`, clear, expiry at the
 deadline, dropped on agent change) and the merge (question holds against an idle
-screen; permission cleared after 1.5 s of an unblocked screen; no hint means
+screen; permission cleared 0.5 s after the screen stops showing it; no hint means
 today's result), a server-tick test for expiry, schema and CLI tests. The mod's
 own logic (open map, queue, heartbeat) gets `claude plugin test` tests. Milestone
 2's throwaway proof uses a real Claude (Haiku) for question and permission

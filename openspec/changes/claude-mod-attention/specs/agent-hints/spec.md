@@ -54,13 +54,13 @@ until the hint is cleared, expires, or the agent leaves.
 
 While a live `permission` hint exists, the pane SHALL be `blocked` with reason
 `permission`. The hint SHALL be dropped when screen detection has read
-something other than `blocked` continuously for 1.5 seconds after the screen
+something other than `blocked` continuously for 0.5 seconds after the screen
 has shown a blocked prompt, or for 4 seconds if it never has.
 
 #### Scenario: The user answered
 
 - **WHEN** a `permission` hint is live, the screen showed the dialog, and has
-  shown no blocked prompt for 1.5 s
+  shown no blocked prompt for 0.5 s
 - **THEN** the hint is dropped and the pane shows what the screen shows
 
 #### Scenario: A slow scan

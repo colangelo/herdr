@@ -12,7 +12,7 @@ https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues/157
 
 ## 3. Detector merge
 
-- [ ] 3.1 tests first: question holds against an idle and a working screen; permission raises and clears after 1.5 s of an unblocked screen; reason precedence; no hint is today's result
+- [ ] 3.1 tests first: question holds against an idle and a working screen; permission raises and clears 0.5 s after the screen stops showing it; reason precedence; no hint is today's result
 - [ ] 3.2 the merge where the screen result is published, `blocked_spell` on the effective state, notifications unchanged
 
 ## 4. The production mod
