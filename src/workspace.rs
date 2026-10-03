@@ -22,6 +22,8 @@ mod tab;
 #[cfg(test)]
 use self::git::git_ahead_behind;
 use self::git::git_status_cache_key_for_space;
+#[cfg(test)]
+pub(crate) use self::tab::SYNC_GRACE;
 pub(crate) use self::{git::git_status_snapshot_for_cwd_with_demand, tab::MovedPane};
 pub use self::{
     git::{
@@ -1357,6 +1359,7 @@ impl Workspace {
         let new_id = tab.layout.split_focused(direction);
         tab.panes
             .insert(new_id, PaneState::new(TerminalId::alloc()));
+        tab.sync_pane_added(new_id);
         self.register_new_pane(new_id);
         new_id
     }

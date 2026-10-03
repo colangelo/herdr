@@ -1014,14 +1014,18 @@ pub(super) fn apply_context_menu_action(
         }
         (
             ContextMenuKind::Pane {
-                ws_idx, tab_idx, ..
+                ws_idx,
+                tab_idx,
+                pane_id,
+                source_pane_id,
+                ..
             },
             Some("Sync input"),
         ) => {
             state.selected = ws_idx;
             state.active = Some(ws_idx);
             state.switch_tab(tab_idx);
-            state.toggle_sync_panes();
+            state.sync_input_from_menu(ws_idx, tab_idx, pane_id, source_pane_id);
             state.mode = Mode::Terminal;
         }
         (
@@ -2076,12 +2080,26 @@ impl App {
             }
             (
                 ContextMenuKind::Pane {
-                    ws_idx, pane_id, ..
+                    ws_idx,
+                    pane_id,
+                    source_pane_id,
+                    ..
                 },
                 Some("Sync input"),
             ) => {
-                self.focus_pane_internal_via_api(ws_idx, pane_id);
-                self.state.toggle_sync_panes();
+                // The focused pane stays the focused pane: the menu was opened
+                // on another one, which joins it.
+                if let Some(tab_idx) = self
+                    .state
+                    .workspaces
+                    .get(ws_idx)
+                    .and_then(|ws| ws.find_tab_index_for_pane(pane_id))
+                {
+                    self.focus_workspace_idx_via_api(ws_idx);
+                    self.focus_tab_idx_via_api(tab_idx);
+                    self.state
+                        .sync_input_from_menu(ws_idx, tab_idx, pane_id, source_pane_id);
+                }
                 self.state.mode = Mode::Terminal;
             }
             (

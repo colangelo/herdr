@@ -2,6 +2,8 @@
 //! `Tab::sync`. The state and its set arithmetic live on `Tab`; this is the
 //! part that knows which workspace and tab are on screen.
 
+use std::time::Instant;
+
 use super::state::AppState;
 use crate::layout::PaneId;
 
@@ -33,9 +35,72 @@ impl AppState {
         true
     }
 
+    /// Start a group of the focused pane and `other` in one tab (fork issue
+    /// 155), replacing whatever sync state the tab had.
+    pub(crate) fn start_sync_pair(&mut self, ws_idx: usize, tab_idx: usize, other: PaneId) {
+        let Some(tab) = self
+            .workspaces
+            .get_mut(ws_idx)
+            .and_then(|ws| ws.tabs.get_mut(tab_idx))
+        else {
+            return;
+        };
+        let focused = tab.layout.focused();
+        tab.start_sync_pair(focused, other);
+    }
+
+    /// "Sync input" in a pane menu (fork issue 155). On a pane other than the
+    /// focused one (`source_pane_id` names the focused pane the menu was
+    /// opened from) it starts a group of just those two; on the focused pane
+    /// it is the whole-tab switch, like the key.
+    pub(crate) fn sync_input_from_menu(
+        &mut self,
+        ws_idx: usize,
+        tab_idx: usize,
+        pane_id: PaneId,
+        source_pane_id: Option<PaneId>,
+    ) {
+        match source_pane_id {
+            Some(source) if source != pane_id => self.start_sync_pair(ws_idx, tab_idx, pane_id),
+            _ => {
+                self.toggle_sync_panes();
+            }
+        }
+    }
+
+    /// When the earliest ending group's grace is up, for the loops' wake-up
+    /// list.
+    pub(crate) fn sync_deadline(&self) -> Option<Instant> {
+        self.workspaces
+            .iter()
+            .flat_map(|ws| ws.tabs.iter())
+            .filter_map(crate::workspace::Tab::sync_deadline)
+            .min()
+    }
+
+    /// The loop's tick: end sync mode where the grace is up. `true` when that
+    /// changed what is drawn.
+    pub(crate) fn expire_sync(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+        for tab in self.workspaces.iter_mut().flat_map(|ws| ws.tabs.iter_mut()) {
+            changed |= tab.expire_sync(now);
+        }
+        changed
+    }
+
     /// Take a pane out of its tab's synced set or put it back. `None` when its
     /// tab does not sync.
     pub(crate) fn toggle_pane_sync(&mut self, ws_idx: usize, pane_id: PaneId) -> Option<bool> {
+        self.toggle_pane_sync_at(ws_idx, pane_id, Instant::now())
+    }
+
+    /// [`Self::toggle_pane_sync`] with the clock given, for the grace.
+    pub(crate) fn toggle_pane_sync_at(
+        &mut self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        now: Instant,
+    ) -> Option<bool> {
         let tab_idx = self
             .workspaces
             .get(ws_idx)?
@@ -44,7 +109,7 @@ impl AppState {
             .get_mut(ws_idx)?
             .tabs
             .get_mut(tab_idx)?
-            .toggle_pane_sync(pane_id)
+            .toggle_pane_sync(pane_id, now)
     }
 
     /// The panes that also get what is typed into the focused pane of the
@@ -160,6 +225,131 @@ mod tests {
         state.toggle_sync_panes();
         state.toggle_sync_panes();
         assert!(state.workspaces[0].tabs[0].pane_synced(b));
+    }
+
+    // ---- fork issue 155: explicit members, a pair, a grace
+
+    #[test]
+    fn the_menu_on_another_pane_starts_a_pair_and_the_rest_stay_out() {
+        let (mut state, [a, b, c]) = three_panes();
+        state.sync_input_from_menu(0, 0, b, Some(a));
+        let tab = &state.workspaces[0].tabs[0];
+        assert!(tab.pane_synced(a) && tab.pane_synced(b) && !tab.pane_synced(c));
+        assert_eq!(state.sync_peer_panes(0), vec![b]);
+    }
+
+    #[test]
+    fn the_menu_on_the_focused_pane_and_the_key_sync_the_whole_tab() {
+        let (mut state, [a, b, c]) = three_panes();
+        state.sync_input_from_menu(0, 0, a, None);
+        let tab = &state.workspaces[0].tabs[0];
+        assert!([a, b, c].iter().all(|pane| tab.pane_synced(*pane)));
+        assert!(tab.sync.as_ref().unwrap().whole_tab);
+
+        let (mut state, [a, b, c]) = three_panes();
+        state.toggle_sync_panes();
+        let tab = &state.workspaces[0].tabs[0];
+        assert!([a, b, c].iter().all(|pane| tab.pane_synced(*pane)));
+    }
+
+    #[test]
+    fn a_new_pane_joins_a_whole_tab_group_and_never_a_pair() {
+        let (mut state, [a, b, _]) = three_panes();
+        state.toggle_sync_panes();
+        let d = state.workspaces[0].test_split(Direction::Horizontal);
+        assert!(state.workspaces[0].tabs[0].pane_synced(d));
+
+        let (mut state, [a2, b2, _]) = three_panes();
+        let _ = (a, b);
+        state.start_sync_pair(0, 0, b2);
+        let d = state.workspaces[0].test_split(Direction::Horizontal);
+        let tab = &state.workspaces[0].tabs[0];
+        assert!(!tab.pane_synced(d), "a pair stays two");
+        assert!(tab.pane_synced(a2) && tab.pane_synced(b2));
+    }
+
+    #[test]
+    fn right_clicking_members_out_and_others_in_edits_the_group() {
+        let (mut state, [a, b, c]) = three_panes();
+        state.start_sync_pair(0, 0, b);
+        assert_eq!(state.toggle_pane_sync(0, c), Some(true), "c joins");
+        assert_eq!(state.toggle_pane_sync(0, a), Some(false), "a leaves");
+        let tab = &state.workspaces[0].tabs[0];
+        assert!(!tab.pane_synced(a) && tab.pane_synced(b) && tab.pane_synced(c));
+    }
+
+    #[test]
+    fn a_group_of_one_stays_in_sync_mode() {
+        let (mut state, [a, b, _]) = three_panes();
+        state.start_sync_pair(0, 0, b);
+        state.toggle_pane_sync(0, a);
+        let tab = &state.workspaces[0].tabs[0];
+        assert!(tab.is_syncing() && !tab.sync_ending());
+        assert!(tab.pane_synced(b));
+        assert!(state.sync_deadline().is_none());
+    }
+
+    #[test]
+    fn an_empty_group_ends_sync_after_the_grace() {
+        use crate::workspace::SYNC_GRACE;
+        use std::time::{Duration, Instant};
+        let (mut state, [a, b, _]) = three_panes();
+        let t0 = Instant::now();
+        state.start_sync_pair(0, 0, b);
+        state.toggle_pane_sync_at(0, a, t0);
+        state.toggle_pane_sync_at(0, b, t0);
+
+        let tab = &state.workspaces[0].tabs[0];
+        assert!(tab.is_syncing() && tab.sync_ending(), "still in sync mode");
+        assert!(
+            state.sync_peer_panes(0).is_empty(),
+            "nothing is typed anywhere"
+        );
+        assert_eq!(state.sync_deadline(), Some(t0 + SYNC_GRACE));
+
+        assert!(!state.expire_sync(t0 + SYNC_GRACE - Duration::from_millis(1)));
+        assert!(state.workspaces[0].tabs[0].is_syncing());
+        assert!(state.expire_sync(t0 + SYNC_GRACE));
+        assert!(!state.workspaces[0].tabs[0].is_syncing(), "back to normal");
+        assert_eq!(state.sync_deadline(), None);
+        assert_eq!(
+            state.toggle_pane_sync(0, a),
+            None,
+            "so a click opens the menu"
+        );
+    }
+
+    #[test]
+    fn a_click_during_the_grace_puts_the_pane_back_and_cancels_the_countdown() {
+        use std::time::{Duration, Instant};
+        let (mut state, [a, b, c]) = three_panes();
+        let t0 = Instant::now();
+        state.start_sync_pair(0, 0, b);
+        state.toggle_pane_sync_at(0, a, t0);
+        state.toggle_pane_sync_at(0, b, t0);
+
+        let t1 = t0 + Duration::from_secs(1);
+        assert_eq!(state.toggle_pane_sync_at(0, c, t1), Some(true));
+        let tab = &state.workspaces[0].tabs[0];
+        assert!(!tab.sync_ending() && tab.pane_synced(c));
+        assert_eq!(state.sync_deadline(), None);
+        assert!(!state.expire_sync(t0 + Duration::from_secs(60)));
+        assert!(state.workspaces[0].tabs[0].is_syncing());
+    }
+
+    #[test]
+    fn a_group_whose_panes_all_closed_ends_through_the_grace() {
+        use crate::workspace::SYNC_GRACE;
+        use std::time::Instant;
+        let (mut state, [a, b, _]) = three_panes();
+        state.start_sync_pair(0, 0, b);
+        state.workspaces[0].tabs[0].panes.remove(&a);
+        state.workspaces[0].tabs[0].panes.remove(&b);
+        let t0 = Instant::now();
+        assert!(state.expire_sync(t0), "the tick starts the grace");
+        assert!(state.workspaces[0].tabs[0].sync_ending());
+        assert!(state.expire_sync(t0 + SYNC_GRACE));
+        assert!(!state.workspaces[0].tabs[0].is_syncing());
     }
 
     #[test]

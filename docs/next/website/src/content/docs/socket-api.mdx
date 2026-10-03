@@ -389,8 +389,11 @@ into one synced pane go to the others too:
 `mode` is `toggle` (the default), `on` or `off`. Omitting `tab_id` or `pane_id`
 targets the tab or focused pane on screen. Both return the updated record
 (`type: "tab_info"` with `sync`, or `type: "pane_info"` with `synced`).
-`pane.sync` fails with `sync_not_active` when the pane's tab is not syncing.
-Turning a tab on again while it syncs keeps the excluded panes. Sync is runtime
+`tab.sync` `on` makes every pane of the tab a member (keeping an existing group
+as it is). `pane.sync` `on` adds the pane to the group and `off` removes it; it
+fails with `sync_not_active` when the pane's tab is not syncing. Removing the
+last member leaves the tab in sync mode (`sync` still true) for about three
+seconds, then it ends on its own; adding a member in that time cancels it. Sync is runtime
 state: it is not saved, and it is off after a restart or a live handoff.
 
 `pane.clear` purges the target pane's saved scrollback with tmux

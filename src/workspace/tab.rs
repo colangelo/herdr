@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ratatui::layout::Direction;
 use tokio::sync::{mpsc, Notify};
@@ -13,15 +14,24 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 
 pub(crate) type DetachedPane = (PaneId, TerminalId);
 
-/// Synchronized input for a tab (fork issue 141): what is typed into the
-/// focused pane also goes to every other pane of the tab that is not in
-/// `excluded`. Runtime state: never saved in a snapshot and never carried
-/// through a live handoff, so a restart turns it off.
+/// How long a tab stays in sync mode after its last member is taken out,
+/// so a mis-click can be undone (fork issue 155).
+pub(crate) const SYNC_GRACE: Duration = Duration::from_secs(3);
+
+/// Synchronized input for a tab (fork issues 141, 155): what is typed into the
+/// focused pane also goes to every other member. Runtime state: never saved in
+/// a snapshot and never carried through a live handoff, so a restart turns it
+/// off.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncPanes {
-    /// Panes taken out of the set. A pane created while sync is on is not in
-    /// here, so it joins; a closed pane's id is dropped when asked about.
-    pub excluded: HashSet<PaneId>,
+    /// The panes that type together. A closed pane's id is ignored when asked
+    /// about.
+    pub members: HashSet<PaneId>,
+    /// The group started as "every pane of the tab", so a pane created later
+    /// joins it. A pair started from the menu never grows.
+    pub whole_tab: bool,
+    /// Set while the group is empty: when sync mode ends on its own.
+    pub ending_until: Option<Instant>,
 }
 
 pub(crate) struct MovedPane {
@@ -70,22 +80,48 @@ impl Tab {
         self.sync.is_some()
     }
 
-    /// Turn sync on (every pane of the tab in) or off. Turning it on again
-    /// starts from every pane, forgetting earlier exclusions.
+    /// Turn sync on for the whole tab (every pane a member) or off. Turning it
+    /// on again starts from every pane, forgetting earlier edits.
     pub fn set_sync(&mut self, on: bool) {
-        self.sync = on.then(SyncPanes::default);
+        self.sync = on.then(|| SyncPanes {
+            members: self.panes.keys().copied().collect(),
+            whole_tab: true,
+            ending_until: None,
+        });
     }
 
-    /// Whether `pane_id` is in the synced set: the tab syncs and the pane was
-    /// not taken out.
+    /// Start a group of exactly two panes; the others stay out and a pane
+    /// created later does not join.
+    pub fn start_sync_pair(&mut self, first: PaneId, second: PaneId) {
+        self.sync = Some(SyncPanes {
+            members: [first, second]
+                .into_iter()
+                .filter(|pane_id| self.panes.contains_key(pane_id))
+                .collect(),
+            whole_tab: false,
+            ending_until: None,
+        });
+    }
+
+    /// A pane was just created in the tab: it joins a group that started as
+    /// the whole tab, and only while that group is not ending.
+    pub(crate) fn sync_pane_added(&mut self, pane_id: PaneId) {
+        if let Some(sync) = self.sync.as_mut() {
+            if sync.whole_tab && sync.ending_until.is_none() {
+                sync.members.insert(pane_id);
+            }
+        }
+    }
+
+    /// Whether `pane_id` is a member: the tab syncs and the pane is in the
+    /// group.
     pub fn pane_synced(&self, pane_id: PaneId) -> bool {
         self.sync.as_ref().is_some_and(|sync| {
-            self.panes.contains_key(&pane_id) && !sync.excluded.contains(&pane_id)
+            self.panes.contains_key(&pane_id) && sync.members.contains(&pane_id)
         })
     }
 
-    /// Every pane of the synced set, in layout reading order. Empty when the
-    /// tab does not sync.
+    /// Every member, in layout reading order. Empty when the tab does not sync.
     pub fn synced_panes(&self) -> Vec<PaneId> {
         if self.sync.is_none() {
             return Vec::new();
@@ -98,8 +134,8 @@ impl Tab {
     }
 
     /// The panes that also receive what is typed into `focused`: the rest of
-    /// the synced set, in layout order. Empty when the tab does not sync or
-    /// `focused` was taken out (the exclusion wins: it is typed into alone).
+    /// the group, in layout order. Empty when the tab does not sync or
+    /// `focused` is not a member (it is typed into alone).
     pub fn sync_peers(&self, focused: PaneId) -> Vec<PaneId> {
         if !self.pane_synced(focused) {
             return Vec::new();
@@ -110,20 +146,58 @@ impl Tab {
             .collect()
     }
 
-    /// Take a pane out of the synced set, or put it back. `None` when the tab
-    /// does not sync or the pane is not in it; else whether the pane is in
-    /// the set now.
-    pub fn toggle_pane_sync(&mut self, pane_id: PaneId) -> Option<bool> {
+    /// Take a member out of the group, or put a pane in. `None` when the tab
+    /// does not sync or has no such pane; else whether the pane is a member
+    /// now. Emptying the group starts the grace (`now` + `SYNC_GRACE`); adding
+    /// a member cancels it.
+    pub fn toggle_pane_sync(&mut self, pane_id: PaneId, now: Instant) -> Option<bool> {
         if !self.panes.contains_key(&pane_id) {
             return None;
         }
         let sync = self.sync.as_mut()?;
-        sync.excluded.retain(|id| self.panes.contains_key(id));
-        if sync.excluded.remove(&pane_id) {
-            Some(true)
-        } else {
-            sync.excluded.insert(pane_id);
+        sync.members.retain(|id| self.panes.contains_key(id));
+        if sync.members.remove(&pane_id) {
+            if sync.members.is_empty() {
+                sync.ending_until = Some(now + SYNC_GRACE);
+            }
             Some(false)
+        } else {
+            sync.members.insert(pane_id);
+            sync.ending_until = None;
+            Some(true)
+        }
+    }
+
+    /// Sync mode is on but its group is empty and about to end.
+    pub fn sync_ending(&self) -> bool {
+        self.sync
+            .as_ref()
+            .is_some_and(|sync| sync.ending_until.is_some())
+    }
+
+    /// When sync mode ends on its own, for the loops' wake-up list.
+    pub fn sync_deadline(&self) -> Option<Instant> {
+        self.sync.as_ref().and_then(|sync| sync.ending_until)
+    }
+
+    /// The loop's tick. Starts the grace for a group whose panes all closed,
+    /// and ends sync mode once the grace is up. `true` when that changed what
+    /// is drawn.
+    pub fn expire_sync(&mut self, now: Instant) -> bool {
+        let Some(sync) = self.sync.as_mut() else {
+            return false;
+        };
+        match sync.ending_until {
+            Some(until) if now >= until => {
+                self.sync = None;
+                true
+            }
+            Some(_) => false,
+            None if !sync.members.iter().any(|id| self.panes.contains_key(id)) => {
+                sync.ending_until = Some(now + SYNC_GRACE);
+                true
+            }
+            None => false,
         }
     }
 
@@ -515,6 +589,7 @@ impl Tab {
             self.layout.focus_pane(new_id);
         }
         self.panes.insert(new_id, PaneState::new(terminal_id));
+        self.sync_pane_added(new_id);
         self.zoomed = false;
         Ok(NewPane {
             pane_id: new_id,

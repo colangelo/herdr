@@ -217,7 +217,18 @@ pub struct Palette {
     pub peach: Color,
 }
 
+/// The yellow of sync mode (fork issue 155): the synced pane borders and the
+/// bar chip. A fixed bright yellow, not the theme's, which is the pale one.
+pub const SYNC_YELLOW: Color = Color::Rgb(0xff, 0xd6, 0x0a);
+
 impl Palette {
+    /// The border of a pane outside the sync group (fork issue 155): a gray
+    /// dimmer than the normal inactive border, so "not syncing" reads at a
+    /// glance.
+    pub fn sync_outsider(&self) -> Color {
+        self.surface1
+    }
+
     /// A less saturated red: the theme's red pulled halfway toward its own
     /// grey, a rose on dark themes. The one place the display-panes mode's
     /// inactive borders get their colour, so a custom theme's red carries

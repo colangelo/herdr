@@ -539,17 +539,18 @@ fn render_pane_borders(
         if symbol.is_empty() {
             continue;
         }
-        // Sync mode (fork issue 141): a line any synced pane touches is
-        // yellow. The labels view stays red over it.
-        let synced = sync_tab.is_some_and(|tab| {
-            pane_infos.iter().any(|info| {
-                tab.pane_synced(info.id) && line_touches_pane(x, y, info, app.pane_gaps)
-            })
-        });
-        let color = if synced {
-            app.palette.yellow
-        } else {
-            app.pane_border_color(focused)
+        // Sync mode (fork issues 141, 155): a line any group member touches is
+        // yellow, every other line gray. The labels view stays red over it.
+        let color = match sync_tab {
+            Some(tab)
+                if pane_infos.iter().any(|info| {
+                    tab.pane_synced(info.id) && line_touches_pane(x, y, info, app.pane_gaps)
+                }) =>
+            {
+                crate::app::state::SYNC_YELLOW
+            }
+            Some(_) => app.palette.sync_outsider(),
+            None => app.pane_border_color(focused),
         };
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);

@@ -643,10 +643,14 @@ fn render_sync_chip(app: &AppState, frame: &mut Frame, area: Rect) {
     };
     let count = tab.synced_panes().len();
     let noun = if count == 1 { "pane" } else { "panes" };
-    let text = format!(" SYNC {count} {noun} ");
+    let text = if tab.sync_ending() {
+        " SYNC ending… ".to_string()
+    } else {
+        format!(" SYNC {count} {noun} ")
+    };
     let style = Style::default()
         .fg(app.palette.panel_bg)
-        .bg(app.palette.yellow)
+        .bg(crate::app::state::SYNC_YELLOW)
         .add_modifier(Modifier::BOLD);
     let y = area.y + area.height - 1;
     frame
@@ -1286,9 +1290,10 @@ mod tests {
             .collect()
     }
 
-    // Fork issue 141: a syncing tab draws yellow borders and a SYNC chip.
+    // Fork issues 141, 155: a syncing tab draws #FFD60A borders on the group,
+    // gray ones elsewhere, and a SYNC chip.
     #[test]
-    fn a_syncing_tab_draws_yellow_borders_and_a_sync_chip() {
+    fn a_syncing_tab_draws_yellow_group_borders_gray_outsiders_and_a_sync_chip() {
         let (mut app, right) = two_pane_app();
         let draw = |app: &crate::app::state::AppState| {
             let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -1296,27 +1301,48 @@ mod tests {
             terminal.backend().buffer().clone()
         };
         let area = Rect::new(0, 0, 120, 30);
-        let yellow = Some(app.palette.yellow);
+        let yellow = Some(crate::app::state::SYNC_YELLOW);
+        assert_eq!(
+            crate::app::state::SYNC_YELLOW,
+            ratatui::style::Color::Rgb(0xff, 0xd6, 0x0a)
+        );
+        let gray = Some(app.palette.sync_outsider());
+        assert_ne!(
+            gray,
+            Some(app.palette.overlay0),
+            "gray is not the normal border"
+        );
 
         let off = draw(&app);
         assert!(find_text(&off, "SYNC").is_none());
-        assert!(!border_fgs(&off, area).contains(&yellow));
+        let fgs = border_fgs(&off, area);
+        assert!(!fgs.contains(&yellow) && !fgs.contains(&gray));
 
         app.toggle_sync_panes();
         compute_view(&mut app, area);
         let on = draw(&app);
         assert!(find_text(&on, "SYNC 2 panes").is_some());
-        assert!(border_fgs(&on, area).contains(&yellow));
+        let fgs = border_fgs(&on, area);
+        assert!(fgs.contains(&yellow));
+        assert!(!fgs.contains(&gray), "everyone is in the group");
+        let chip = find_text(&on, "SYNC 2 panes").unwrap();
+        assert_eq!(on[chip].style().bg, yellow, "the chip is the same yellow");
 
-        // An excluded pane keeps its normal border: some border cells are
-        // no longer yellow, and the chip counts one pane.
+        // One pane out: its own border goes gray, the member's stays yellow,
+        // and the chip counts one pane.
         app.toggle_pane_sync(0, right);
         compute_view(&mut app, area);
         let one = draw(&app);
         assert!(find_text(&one, "SYNC 1 pane ").is_some());
         let fgs = border_fgs(&one, area);
         assert!(fgs.contains(&yellow));
-        assert!(fgs.len() > 1, "the excluded pane's border is not yellow");
+        assert!(fgs.contains(&gray), "the pane outside the group is gray");
+
+        // The last member out: the grace shows an ending chip.
+        let left = app.workspaces[0].tabs[0].synced_panes()[0];
+        app.toggle_pane_sync(0, left);
+        compute_view(&mut app, area);
+        assert!(find_text(&draw(&app), "SYNC ending…").is_some());
     }
 
     // Fork issue 129: feedback about a pane drawn in that pane.
