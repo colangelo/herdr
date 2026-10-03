@@ -4927,6 +4927,7 @@ impl HeadlessServer {
 
         changed |= self.app.expire_display_panes(now);
         changed |= self.app.state.expire_resize_labels(now);
+        changed |= self.app.state.expire_sync(now);
 
         if self
             .app
@@ -5764,6 +5765,30 @@ mod tests {
             cell_width_px: 0,
             cell_height_px: 0,
         });
+    }
+
+    // Fork issue 155: the server's own tick ends an emptied sync group after
+    // its grace, and the wake-up list knows the deadline.
+    #[tokio::test]
+    async fn the_server_tick_ends_an_empty_sync_group_after_the_grace() {
+        let (mut server, _client_rx, _) = retained_test_server(b"aaaa");
+        let state = &mut server.app.state;
+        let pane = state.workspaces[0].tabs[0].root_pane;
+        state.toggle_sync_panes();
+        let t0 = Instant::now();
+        state.toggle_pane_sync_at(0, pane, t0);
+        let deadline = state.sync_deadline().expect("grace armed");
+        assert_eq!(deadline, t0 + crate::workspace::SYNC_GRACE);
+        assert!(
+            server
+                .app
+                .next_headless_loop_deadline_with_git_refresh(t0, false, false)
+                .is_some_and(|next| next <= deadline),
+            "the loop wakes by the deadline"
+        );
+        assert!(!server.handle_scheduled_tasks_headless(deadline - Duration::from_millis(1), false));
+        assert!(server.handle_scheduled_tasks_headless(deadline, false));
+        assert!(!server.app.state.workspaces[0].tabs[0].is_syncing());
     }
 
     #[tokio::test]
