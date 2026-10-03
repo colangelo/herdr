@@ -1,9 +1,10 @@
 # herdr-attention
 
 A Claude Code mod (Claude Code 2.1.287 or later) that tells herdr when Claude
-waits on the user: a question (`AskUserQuestion`) or a permission prompt. Herdr
-shows such a pane as `blocked` with that reason, exactly, where reading the
-screen can be late or wrong (an Esc'd or half-drawn dialog).
+waits on a question (`AskUserQuestion`). Herdr shows such a pane as `blocked`
+with reason `question`, exactly, where reading the screen can be late or wrong
+(an Esc'd or half-drawn dialog). It does not report permission prompts (see
+below).
 
 Design and decisions: `openspec/changes/claude-mod-attention/`. Issues:
 https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues/137 (spike) and
@@ -17,9 +18,11 @@ https://gitea.cat-bluegill.ts.net/AC-forks/herdr-max/issues/157 (build).
   herdr binary name is on `PATH`; outside a herdr pane it does nothing.
 - **question**: `AskUserQuestion` opens (main agent only). Closed when the call
   settles or aborts; Esc only aborts, so the abort signal is the other close.
-- **permission**: `tool.check` resolved to `ask`, for any agent. Closed when the
-  call settles or aborts (deny, Esc). Allow gives a mod no signal until the tool
-  ends, so herdr's screen clears the hint (see the table below).
+- **permission prompts are not reported.** The proof run showed the screen alone
+  gives the same reason as fast, and a hint held the pane blocked about 0.7 s
+  longer after every allow, because a mod cannot see the answer. To bring it
+  back, add a `tool.check` hook (see the comment in `hooks/register.js`); herdr
+  still accepts `kind: permission`.
 - `turn.complete` (also an interrupted turn) and `session.end` clear everything.
 - Open dialogs are repeated every 5 s (herdr's TTL is 15 s), so a long dialog
   stays blocked and a dead mod ages out. A dialog open for 30 minutes is

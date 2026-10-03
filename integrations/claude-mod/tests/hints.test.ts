@@ -7,8 +7,8 @@ const HERDR_ENV = { HERDR_PANE_ID: 'w1:p1', HERDR_SOCKET_PATH: '/tmp/herdr.sock'
 
 // Stubs shared by the tests: a herdr pane in the environment, a recorder for
 // every process the mod starts, a recorder for its log lines, and the engine
-// beneath the mod (the permission decision, and an optional hold that keeps a
-// tool call open). Every stub is registered before the test's first call on $.
+// beneath the mod (an optional hold that keeps a tool call open). Every stub is
+// registered before the test's first call on $.
 function harness(on: any, env: Record<string, string> = HERDR_ENV, exitCode = 0) {
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
   mock.env(on, env)
@@ -22,11 +22,10 @@ function harness(on: any, env: Record<string, string> = HERDR_ENV, exitCode = 0)
     logs.push(e.text)
     return { value: undefined }
   })
-  const engine = { decision: 'ask', hold: null as Promise<unknown> | null }
+  const engine = { hold: null as Promise<unknown> | null }
   on('session.start', () => ({ cwd: '/work' }))
   on('session.end', () => ({ sessionId: 'test-session' }))
   on('turn.complete', () => ({ text: '' }))
-  on('tool.check', () => ({ decision: engine.decision }))
   on('tool.call', async () => {
     if (engine.hold) await engine.hold
     return { result: 'ok' }
@@ -49,11 +48,17 @@ const startSession = ($: any) => $.session.start({ surface: 'terminal', isIntera
 const endTurn = ($: any, extra: Record<string, unknown> = {}) =>
   $.turn.complete({ turnId: 't1', answer: '', durationMs: 5, isAborted: false, usage: null, ...extra })
 
-test('a question is reported while AskUserQuestion is open and cleared when it settles', async ($, on) => {
-  const { runs, clock, engine } = harness(on)
+// An AskUserQuestion call that stays open until `release` is called.
+function openQuestion($: any, engine: { hold: Promise<unknown> | null }, id: string, extra: Record<string, unknown> = {}) {
   let release: (v: unknown) => void = () => {}
   engine.hold = new Promise((resolve) => { release = resolve })
-  const pending = $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_q1' })
+  const pending = $.tool.call({ tool: 'AskUserQuestion', tool_use_id: id, ...extra })
+  return { release, pending }
+}
+
+test('a question is reported while AskUserQuestion is open and cleared when it settles', async ($, on) => {
+  const { runs, clock, engine } = harness(on)
+  const { release, pending } = openQuestion($, engine, 'toolu_q1')
   await clock.settle()
 
   expect(runs.length).toBe(1)
@@ -67,25 +72,10 @@ test('a question is reported while AskUserQuestion is open and cleared when it s
   expect(kinds(runs)).toEqual(['question', 'clear'])
 })
 
-test('a permission prompt is reported from tool.check and cleared when the call settles', async ($, on) => {
+test('other tool calls report nothing, whether or not they ask for permission', async ($, on) => {
   const { runs, clock } = harness(on)
-  const decision = await $.tool.check({ tool: 'Bash', input: { command: 'rm x' }, tool_use_id: 'toolu_p1' })
-  expect(decision.decision).toBe('ask')
-  await clock.settle()
-  expect(runs.length).toBe(1)
-  expect(call(runs[0])).toMatchObject({ kind: 'permission', id: 'toolu_p1' })
-
-  // A deny or an Esc settles the call at once.
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_p1' })
-  await clock.settle()
-  expect(kinds(runs)).toEqual(['permission', 'clear'])
-})
-
-test('an allowed tool call reports nothing', async ($, on) => {
-  const { runs, clock, engine } = harness(on)
-  engine.decision = 'allow'
-  await $.tool.check({ tool: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_a1' })
   await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_a1' })
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'toolu_a2' })
   await clock.settle()
   expect(runs.length).toBe(0)
 })
@@ -98,38 +88,39 @@ test('a turn or session ending with nothing open starts no process', async ($, o
   expect(runs.length).toBe(0)
 })
 
-test('an interrupted turn and the session end clear what is open', async ($, on) => {
-  const { runs, clock } = harness(on)
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_p2' })
+test('an interrupted turn and the session end clear an open question', async ($, on) => {
+  const { runs, clock, engine } = harness(on)
+  openQuestion($, engine, 'toolu_q2')
+  await clock.settle()
   await endTurn($, { isAborted: true })
   await clock.settle()
-  expect(kinds(runs)).toEqual(['permission', 'clear'])
+  expect(kinds(runs)).toEqual(['question', 'clear'])
 
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_p3' })
+  openQuestion($, engine, 'toolu_q3')
+  await clock.settle()
   await $.session.end({ reason: 'clear' })
   await clock.settle()
-  expect(kinds(runs)).toEqual(['permission', 'clear', 'permission', 'clear'])
+  expect(kinds(runs)).toEqual(['question', 'clear', 'question', 'clear'])
 })
 
-test('a subagent cannot mark a question, its permission prompt is reported, and its turn ending clears nothing', async ($, on) => {
-  const { runs, clock } = harness(on)
+test('a subagent cannot mark a question, and its turn ending clears nothing', async ($, on) => {
+  const { runs, clock, engine } = harness(on)
   await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_sq', agentId: 'agent-1' })
   await clock.settle()
   expect(runs.length).toBe(0)
 
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_sp', agentId: 'agent-1' })
+  openQuestion($, engine, 'toolu_q4')
   await clock.settle()
-  expect(kinds(runs)).toEqual(['permission'])
-
+  expect(kinds(runs)).toEqual(['question'])
   await endTurn($, { agentId: 'agent-1' })
   await clock.settle()
-  expect(kinds(runs)).toEqual(['permission'])
+  expect(kinds(runs)).toEqual(['question'])
 })
 
-test('an open dialog is repeated every five seconds with a rising seq, and the first seq is the wall clock', async ($, on) => {
-  const { runs, clock } = harness(on)
+test('an open question is repeated every five seconds with a rising seq, and the first seq is the wall clock', async ($, on) => {
+  const { runs, clock, engine } = harness(on)
   await startSession($)
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_h1' })
+  openQuestion($, engine, 'toolu_h1')
   await clock.settle()
   expect(runs.length).toBe(1)
   // Wall-clock microseconds plus a counter: the reload-proof sequence.
@@ -140,7 +131,7 @@ test('an open dialog is repeated every five seconds with a rising seq, and the f
   expect(runs.length).toBe(3)
   const seqs = runs.map((run) => call(run).seq)
   expect(seqs[1] > seqs[0] && seqs[2] > seqs[1]).toBe(true)
-  expect(runs.every((run) => call(run).kind === 'permission' && call(run).id === 'toolu_h1')).toBe(true)
+  expect(runs.every((run) => call(run).kind === 'question' && call(run).id === 'toolu_h1')).toBe(true)
 })
 
 test('the heartbeat sends nothing while nothing is open', async ($, on) => {
@@ -150,13 +141,13 @@ test('the heartbeat sends nothing while nothing is open', async ($, on) => {
   expect(runs.length).toBe(0)
 })
 
-test('a dialog open for thirty minutes is released with one log line', async ($, on) => {
-  const { runs, logs, clock } = harness(on)
+test('a question open for thirty minutes is released with one log line', async ($, on) => {
+  const { runs, logs, clock, engine } = harness(on)
   await startSession($)
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_long' })
+  openQuestion($, engine, 'toolu_long')
   await clock.advance(29 * 60 * 1000)
   expect(logs.length).toBe(0)
-  expect(call(runs[runs.length - 1]).kind).toBe('permission')
+  expect(call(runs[runs.length - 1]).kind).toBe('question')
 
   await clock.advance(2 * 60 * 1000)
   expect(logs.length).toBe(1)
@@ -168,16 +159,16 @@ test('a dialog open for thirty minutes is released with one log line', async ($,
 })
 
 test('outside a herdr pane the mod starts nothing', async ($, on) => {
-  const { runs, clock } = harness(on, {})
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_x' })
+  const { runs, clock, engine } = harness(on, {})
+  openQuestion($, engine, 'toolu_x')
   await clock.settle()
   expect(runs.length).toBe(0)
 })
 
 test('a failing report is logged once a minute, not every time', async ($, on) => {
-  const { runs, logs, clock } = harness(on, HERDR_ENV, 1)
+  const { runs, logs, clock, engine } = harness(on, HERDR_ENV, 1)
   await startSession($)
-  await $.tool.check({ tool: 'Bash', input: {}, tool_use_id: 'toolu_f' })
+  openQuestion($, engine, 'toolu_f')
   await clock.advance(5000)
   await clock.advance(5000)
   expect(runs.length).toBe(3)

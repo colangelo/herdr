@@ -208,6 +208,20 @@ is therefore wrong for at most about 0.5 s after an allow, never longer than
 15 s without a heartbeat, and exact in the cases the mod can see. The
 raise-only fallback is not needed.
 
+**Decision after the proof run: the mod does not report permission prompts.**
+The 6.2 numbers (issue 157): with a real Claude, the screen alone gave the same
+reason and was as fast in every scenario (question answer 0.39 s, Esc 0.38 s;
+permission allow 0.38 s, deny 0.81 s, Esc 0.64 s to leave `blocked`), so a
+permission hint has no proven gain, and it has a measured cost: after an allow
+the pane stayed blocked about 1.12 s instead of 0.38 s, every time (1.83 s with
+the first 1.5 s grace), because a mod cannot see the answer to a permission
+prompt. So the mod has no `tool.check` hook. The herdr side is unchanged:
+`kind: permission` stays a valid hint, with the 0.5 s screen-clear rule, ready
+for a mod or another source to use. **Re-enable with one hook if a missed or
+late permission prompt is ever seen live:** `tool.check`, `await next(e)`, and
+on `decision: 'ask'` `openDialog($, e.tool_use_id, 'permission')`; the close on
+settle or abort in `tool.call` already covers it.
+
 ### (e) The install path
 
 `herdr integration install claude` installs the mod, next to the settings hooks

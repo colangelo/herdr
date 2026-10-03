@@ -104,10 +104,10 @@ as long as Claude runs.
 ### Requirement: The mod reports only what is open
 
 The Claude Code mod SHALL report a `question` when `AskUserQuestion` opens for
-the main agent, and a `permission` when `tool.check` resolves to `ask` for any
-agent. It SHALL clear when the call settles or aborts, on `turn.complete`, and
-on `session.end`, and SHALL spawn no process for a clear when nothing is open.
-It SHALL log only a failed report.
+the main agent. It SHALL clear when the call settles or aborts, on
+`turn.complete`, and on `session.end`, and SHALL spawn no process for a clear
+when nothing is open. It SHALL log only a failed report. It SHALL NOT report
+permission prompts (the herdr API still accepts them).
 
 #### Scenario: A turn ends with nothing open
 
@@ -116,8 +116,8 @@ It SHALL log only a failed report.
 
 #### Scenario: A subagent
 
-- **WHEN** a subagent's tool call needs permission
-- **THEN** the pane reads `blocked` with reason `permission`
+- **WHEN** a subagent calls `AskUserQuestion`
+- **THEN** the mod reports nothing
 
 ### Requirement: One install path, gated on the Claude Code version
 

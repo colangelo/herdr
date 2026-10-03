@@ -9,9 +9,15 @@
 //
 // - question: `AskUserQuestion` opens (main agent only; a subagent cannot ask
 //   in this build). Closed when the call settles or aborts (Esc only aborts).
-// - permission: `tool.check` resolved to `ask`, so a prompt is about to show
-//   for any agent. Closed when the call settles or aborts (deny, Esc). Allow
-//   gives a mod no signal until the tool ends, so herdr's screen clears it.
+// - permission prompts are NOT reported (decision on issue 157, from the
+//   proof run): the screen already gives the same reason as fast, and a mod
+//   cannot see a permission prompt being answered, so a hint cost about 0.7 s
+//   of blocked state after every allow. Herdr still accepts `kind: permission`.
+//   To bring it back, add a `tool.check` hook that does
+//   `const decided = await next(e)`, and when `decided.decision === 'ask'` calls
+//   `await openDialog($, e.tool_use_id, 'permission')`, then returns `decided`;
+//   the close on settle/abort in `onToolCall` already covers it. Do that if a
+//   missed or late permission prompt is ever seen live.
 // - turn.complete (also an interrupted turn) and session.end close everything.
 // - open dialogs are re-reported every 5 s so a long dialog stays blocked and
 //   a dead mod ages out in herdr within the 15 s TTL.
@@ -127,13 +133,6 @@ async function onSessionStart($, e, next) {
   return next(e)
 }
 
-async function onToolCheck($, e, next) {
-  const decided = await next(e)
-  // `ask` means the permission prompt shows next, for this call.
-  if (decided && decided.decision === 'ask') await openDialog($, e.tool_use_id, 'permission')
-  return decided
-}
-
 async function onToolCall($, e, next) {
   const id = e.tool_use_id
   // A subagent's question must not mark the parent pane.
@@ -163,7 +162,6 @@ async function onSessionEnd($, e, next) {
 
 export function register(on) {
   on('session.start', onSessionStart)
-  on('tool.check', onToolCheck)
   on('tool.call', onToolCall)
   on('turn.complete', onTurnComplete)
   on('session.end', onSessionEnd)
