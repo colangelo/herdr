@@ -396,6 +396,17 @@ fn wait_for_output(socket_path: &Path, pane_id: &str, needle: &str) {
     );
 }
 
+/// The pid a test shell wrote with `echo READY $$ > marker`. The shell creates
+/// the file before `echo` writes into it, so the file existing is not enough:
+/// wait for the finished line (fork issue 156).
+fn wait_for_pid_marker(path: &Path) -> u32 {
+    let text = wait_for_file_contains(path, "\n", Duration::from_secs(10));
+    text.split_whitespace()
+        .last()
+        .and_then(|pid| pid.parse().ok())
+        .unwrap_or_else(|| panic!("{} held no pid: {text:?}", path.display()))
+}
+
 fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration) -> String {
     let deadline = Instant::now() + timeout;
     let mut last_text = String::new();
@@ -855,17 +866,8 @@ fn live_handoff_preserves_pane_process_io() {
             "params": {"pane_id": second_pane_id, "text": second_command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&marker);
-    support::wait_for_file(&second_marker);
-    let pid_text = fs::read_to_string(&marker).unwrap();
-    let child_pid: u32 = pid_text.split_whitespace().last().unwrap().parse().unwrap();
-    let second_pid_text = fs::read_to_string(&second_marker).unwrap();
-    let second_child_pid: u32 = second_pid_text
-        .split_whitespace()
-        .last()
-        .unwrap()
-        .parse()
-        .unwrap();
+    let child_pid = wait_for_pid_marker(&marker);
+    let second_child_pid = wait_for_pid_marker(&second_marker);
     assert_eq!(unsafe { libc::kill(child_pid as libc::pid_t, 0) }, 0);
     assert_eq!(unsafe { libc::kill(second_child_pid as libc::pid_t, 0) }, 0);
 
@@ -1773,9 +1775,7 @@ fn live_handoff_bad_expected_protocol_rolls_back_old_server() {
             "params": {"pane_id": pane_id, "text": command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&marker);
-    let pid_text = fs::read_to_string(&marker).unwrap();
-    let child_pid: u32 = pid_text.split_whitespace().last().unwrap().parse().unwrap();
+    let child_pid = wait_for_pid_marker(&marker);
 
     let failed = request(
         &api_socket,
@@ -1859,9 +1859,7 @@ fn live_handoff_import_failure_rolls_back_old_server_at(failure_point: &str) {
             "params": {"pane_id": pane_id, "text": command, "keys": ["Enter"]}
         }),
     ));
-    support::wait_for_file(&marker);
-    let pid_text = fs::read_to_string(&marker).unwrap();
-    let child_pid: u32 = pid_text.split_whitespace().last().unwrap().parse().unwrap();
+    let child_pid = wait_for_pid_marker(&marker);
 
     let failed = request(
         &api_socket,
