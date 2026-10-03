@@ -36,7 +36,7 @@ Herdr Max is built on [herdrdev/herdr](https://github.com/herdrdev/herdr) and ke
 - **Pin a space or an agent** to the top of its list. Pinned rows sit in the order you pinned them, under every sort, and never move for state changes; the rest sort below.
 - **Mouse first** — `Pin` / `Unpin` is the first item of the right-click menu on a space and on an agent row; a click on the `↑` unpins.
 - **Bubble motion** — a row you pin climbs into the pinned block one rung at a time, and slides back down when unpinned.
-- **Graded marker** — the `↑` is light green on the top pin and a touch darker on every pin below it.
+- **Graded marker** — the `↑` runs red, orange, yellow and yellow-green on the first four pins, then fades from light green to a darker green on every pin below.
 - Saved with the session, kept across restarts and live handoffs. `herdr workspace pin|unpin`, `herdr agent pin|unpin`, `toggle_pin_workspace` / `toggle_pin_agent` keys.
 
 ### agents: restore, detection, and the API

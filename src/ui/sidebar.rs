@@ -278,10 +278,9 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
 /// Drawn in the one-cell lead of a pinned row's name line. One cell, no emoji.
 pub(crate) const PIN_MARKER: &str = "↑";
 
-/// The marker of the top pinned row, and the darkest it ever gets (fork issue
-/// 151). Each rung below the top keeps 90% of every channel, so the arrows get
-/// darker down the block, and the floor keeps a long block readable on a dark
-/// background and clearly green.
+/// Where the green fade starts, and the darkest it ever gets (fork issues 151,
+/// 154). Each step keeps 90% of every channel, and the floor keeps a long
+/// block readable on a dark background and clearly green.
 const PIN_MARKER_TOP: (u8, u8, u8) = (0xb5, 0xf0, 0xb0);
 const PIN_MARKER_FLOOR: (u8, u8, u8) = (0x4f, 0x8a, 0x4a);
 const PIN_MARKER_STEP_PERCENT: u32 = 90;
@@ -304,18 +303,27 @@ fn agent_pin_rank(entries: &[AgentPanelEntry], entry: &AgentPanelEntry) -> usize
         .count()
 }
 
+/// The first four pins run red, orange, yellow, then yellow-green (fork issue
+/// 154), then the green fade starts.
+const PIN_MARKER_RAMP: [(u8, u8, u8); 4] = [
+    (0xf4, 0x7b, 0x7b),
+    (0xf4, 0xab, 0x7b),
+    (0xf4, 0xdc, 0x7b),
+    (0xdc, 0xf4, 0x7b),
+];
+
 /// The marker colour for the pinned row at `rank` (0 is the top pin of its own
 /// list: the spaces list and the agent panel each count from their own top).
 ///
-/// The top pin keeps the start colour; every pin below it fades twice as fast
-/// as one step per rung (fork issue 154): the second pin has the colour the
-/// fourth had at one step per rung, the third the sixth's, and so on.
+/// A rank always has the same colour, however many rows are pinned. Ranks 0 to
+/// 3 take [`PIN_MARKER_RAMP`]. From rank 4 the green fade begins at the start
+/// colour and drops two steps per rung after that, down to the floor.
 pub(crate) fn pin_marker_color(rank: usize) -> Color {
-    let steps = if rank == 0 {
-        0
-    } else {
-        rank.saturating_mul(2) + 1
-    };
+    if let Some(&(r, g, b)) = PIN_MARKER_RAMP.get(rank) {
+        return Color::Rgb(r, g, b);
+    }
+    let k = rank - PIN_MARKER_RAMP.len();
+    let steps = if k == 0 { 0 } else { k.saturating_mul(2) + 1 };
     marker_color_after(steps)
 }
 
@@ -3084,46 +3092,23 @@ mod tests {
         }
     }
 
+    /// Fork issue 154: red, orange, yellow, yellow-green, then the green fade
+    /// down to its floor; a rank's colour never depends on the pin count.
     #[test]
-    fn the_pin_marker_is_light_green_and_darker_at_every_rung_down_to_a_floor() {
-        let sum = |rank| {
+    fn the_pin_marker_runs_red_orange_yellow_then_a_green_fade_to_a_floor() {
+        let hex = |rank| {
             let (r, g, b) = channels(pin_marker_color(rank));
-            u32::from(r) + u32::from(g) + u32::from(b)
+            format!("#{r:02x}{g:02x}{b:02x}")
         };
-        assert_eq!(
-            channels(pin_marker_color(0)),
-            (0xb5, 0xf0, 0xb0),
-            "the top is the start"
-        );
-        assert!(
-            sum(0) > sum(1) && sum(1) > sum(2) && sum(2) > sum(3),
-            "strictly darker in turn"
-        );
-        for rank in [0, 1, 2, 5, 12, 40, 1000] {
-            let (r, g, b) = channels(pin_marker_color(rank));
-            assert!(g > r && g > b, "rank {rank} is clearly green: {r},{g},{b}");
-            assert!(
-                r >= 0x4f && g >= 0x8a && b >= 0x4a,
-                "rank {rank} holds the floor: {r},{g},{b}"
-            );
+        let expected = [
+            "#f47b7b", "#f4ab7b", "#f4dc7b", "#dcf47b", "#b5f0b0", "#82ae7f", "#698c66", "#548a51",
+            "#4f8a4a",
+        ];
+        for (rank, want) in expected.iter().enumerate() {
+            assert_eq!(&hex(rank), want, "rank {rank}");
         }
-        assert_eq!(
-            channels(pin_marker_color(1000)),
-            (0x4f, 0x8a, 0x4a),
-            "the floor is reached"
-        );
-        assert_eq!(pin_marker_color(40), pin_marker_color(1000), "and held");
-    }
-
-    /// Fork issue 154: the fade is doubled. The second pin is what the fourth
-    /// was at one step per rung, the third what the sixth was.
-    #[test]
-    fn the_pin_marker_fades_twice_as_fast_as_one_step_per_rung() {
-        assert_eq!(pin_marker_color(0), marker_color_after(0));
-        assert_eq!(pin_marker_color(1), marker_color_after(3), "2nd is old 4th");
-        assert_eq!(pin_marker_color(2), marker_color_after(5), "3rd is old 6th");
-        assert_eq!(pin_marker_color(3), marker_color_after(7), "4th is old 8th");
-        assert_ne!(pin_marker_color(0), pin_marker_color(1));
+        assert_eq!(hex(1000), "#4f8a4a", "the floor is held");
+        assert_eq!(pin_marker_color(40), pin_marker_color(1000));
     }
 
     #[test]
